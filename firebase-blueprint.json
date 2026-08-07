@@ -1,0 +1,442 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Represents the user authentication account mapping inside Firestore.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "roles": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "roles", "isActive", "createdAt"]
+    },
+    "ResidentProfile": {
+      "title": "ResidentProfile",
+      "description": "Represents a verified resident bounding a secure flat unit coordinate.",
+      "type": "object",
+      "properties": {
+        "gmkId": { "type": "string" },
+        "flatNo": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "salutation": { "type": "string" },
+        "unitType": { "type": "string" },
+        "status": { "type": "string" },
+        "gatedCommunity": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["gmkId", "flatNo", "phone", "email", "username", "fullName", "status", "gatedCommunity", "createdAt", "updatedAt"]
+    },
+    "CommunityEvent": {
+      "title": "CommunityEvent",
+      "description": "Represents a cultural/traditional gather scheduled inside Oman gated precincts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventCode": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "venue": { "type": "string" },
+        "organizerEmail": { "type": "string" },
+        "attendees": { "type": "array" },
+        "pricingRules": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "date", "venue", "organizerEmail", "createdAt"]
+    },
+    "PendingRegistration": {
+      "title": "PendingRegistration",
+      "description": "Represents resident flat registrations queued and awaiting administrator verification.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "fullName": { "type": "string" },
+        "salutation": { "type": "string" },
+        "unitType": { "type": "string" },
+        "flatNo": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "gatedCommunity": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "fullName", "flatNo", "phone", "email", "username", "gatedCommunity", "createdAt"]
+    },
+    "RoleAssignment": {
+      "title": "RoleAssignment",
+      "description": "Represents security role definitions assigned dynamically to verified residents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "gmkId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "assignedAt": { "type": "string" }
+      },
+      "required": ["id", "gmkId", "email", "role", "assignedBy", "assignedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System wide operational audit logs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "actorEmail": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "actorEmail", "targetId", "details", "timestamp"]
+    },
+    "FinanceBalance": {
+      "title": "FinanceBalance",
+      "description": "Represents the community bank opening balance configuration.",
+      "type": "object",
+      "properties": {
+        "balance": { "type": "number" }
+      },
+      "required": ["balance"]
+    },
+    "FinanceStatement": {
+      "title": "FinanceStatement",
+      "description": "Represents a single income or expense statement recorded for community operations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "submittedBy": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "notes": { "type": "string" },
+        "correctionNotes": { "type": "string" },
+        "reviewedBy": { "type": "string" },
+        "reviewedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "amount", "type", "status", "submittedBy", "submittedAt"]
+    },
+    "EmailQueueItem": {
+      "title": "EmailQueueItem",
+      "description": "Represents an email enqueued for delivery by the notification engine.",
+      "type": "object",
+      "properties": {
+        "to": { "type": "string" },
+        "from": { "type": "string" },
+        "template": { "type": "string" },
+        "notificationType": { "type": "string" },
+        "provider": { "type": "string" },
+        "priority": { "type": "string" },
+        "status": { "type": "string" },
+        "attempts": { "type": "integer" },
+        "createdAt": { "type": "string" },
+        "processedAt": { "type": "string" },
+        "sentAt": { "type": "string" },
+        "messageId": { "type": "string" },
+        "error": { "type": "string" },
+        "source": { "type": "string" },
+        "data": { "type": "object" },
+        "isTemplate": { "type": "boolean" }
+      },
+      "required": ["to", "template", "notificationType", "status", "attempts", "createdAt", "isTemplate"]
+    },
+    "EmailTemplate": {
+      "title": "EmailTemplate",
+      "description": "Represents an email template with placeholders.",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "text": { "type": "string" },
+        "html": { "type": "string" }
+      },
+      "required": ["subject", "enabled", "text", "html"]
+    },
+    "EventTemplate": {
+      "title": "EventTemplate",
+      "description": "Represents a reusable community event template.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "defaultCommittees": { "type": "array" },
+        "defaultPricing": { "type": "object" },
+        "defaultProgramCategories": { "type": "array" },
+        "defaultSettings": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "displayName", "description", "defaultCommittees", "defaultPricing", "defaultProgramCategories", "defaultSettings", "createdAt", "updatedAt"]
+    },
+    "EventSettings": {
+      "title": "EventSettings",
+      "description": "Configuration rules and feature flags for a specific community event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "guestRegistrationEnabled": { "type": "boolean" },
+        "qrAttendanceEnabled": { "type": "boolean" },
+        "certificateEnabled": { "type": "boolean" },
+        "attendanceRequired": { "type": "boolean" },
+        "mealCouponEnabled": { "type": "boolean" },
+        "volunteerCertificatesEnabled": { "type": "boolean" },
+        "programCertificatesEnabled": { "type": "boolean" },
+        "maxGuests": { "type": "integer" },
+        "registrationLimits": { "type": "integer" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "guestRegistrationEnabled", "qrAttendanceEnabled", "certificateEnabled", "attendanceRequired", "mealCouponEnabled", "volunteerCertificatesEnabled", "programCertificatesEnabled", "maxGuests", "registrationLimits", "createdAt", "updatedAt"]
+    },
+    "EventCommittee": {
+      "title": "EventCommittee",
+      "description": "Formed committee members and leads governing a specific event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "name": { "type": "string" },
+        "members": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "name", "members", "createdAt", "updatedAt"]
+    },
+    "EventProgram": {
+      "title": "EventProgram",
+      "description": "Specific performance, presentation, or sub-activity planned for an event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "coordinators": { "type": "array" },
+        "participants": { "type": "array" },
+        "volunteers": { "type": "array" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "title", "category", "status", "createdAt", "updatedAt"]
+    },
+    "EventAttendance": {
+      "title": "EventAttendance",
+      "description": "Check-in log tracking physical attendance for an event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "gmkId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "status": { "type": "string" },
+        "checkedInBy": { "type": "string" },
+        "checkedInAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "gmkId", "fullName", "status", "createdAt", "updatedAt"]
+    },
+    "EventFood": {
+      "title": "EventFood",
+      "description": "Represents meal issue records for the food committee.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "gmkId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "mealCouponStatus": { "type": "string" },
+        "mealCount": { "type": "object" },
+        "claimedBy": { "type": "string" },
+        "claimedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "gmkId", "fullName", "mealCouponStatus", "mealCount", "createdAt", "updatedAt"]
+    },
+    "EventCertificate": {
+      "title": "EventCertificate",
+      "description": "Issued digital/verifiable certificates for community service or participation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "gmkId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "certificateNumber": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "issuedDate": { "type": "string" },
+        "qrVerificationUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "gmkId", "fullName", "certificateNumber", "type", "status", "createdAt", "updatedAt"]
+    },
+    "EventFinance": {
+      "title": "EventFinance",
+      "description": "Budget and overall ledger snapshot for a community event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "openingBalanceApproved": { "type": "boolean" },
+        "closingStatementsApproved": { "type": "boolean" },
+        "budgetAllocations": { "type": "object" },
+        "totalRevenue": { "type": "number" },
+        "totalExpenses": { "type": "number" },
+        "netBalance": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "openingBalanceApproved", "closingStatementsApproved", "budgetAllocations", "totalRevenue", "totalExpenses", "netBalance", "status", "createdAt", "updatedAt"]
+    },
+    "EventReport": {
+      "title": "EventReport",
+      "description": "Dynamic reporting aggregates continuously updated throughout event lifecycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "registrationsCount": { "type": "integer" },
+        "attendanceCount": { "type": "integer" },
+        "mealsIssuedCount": { "type": "integer" },
+        "totalRevenue": { "type": "number" },
+        "totalExpenses": { "type": "number" },
+        "programsCount": { "type": "integer" },
+        "volunteersCount": { "type": "integer" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["id", "eventId", "registrationsCount", "attendanceCount", "mealsIssuedCount", "totalRevenue", "totalExpenses", "programsCount", "volunteersCount", "lastUpdated"]
+    },
+    "EventCommunication": {
+      "title": "EventCommunication",
+      "description": "Assigned message templates linked with existing notification queues.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "templates": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "templates", "createdAt", "updatedAt"]
+    },
+    "EventPermission": {
+      "title": "EventPermission",
+      "description": "Represents dynamic and temporary permissions granted to a resident for a specific event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "gmkId": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "permissions": { "type": "array" },
+        "grantedBy": { "type": "string" },
+        "grantedAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "gmkId", "email", "fullName", "permissions", "grantedBy", "grantedAt"]
+    },
+    "EventTimelineEntry": {
+      "title": "EventTimelineEntry",
+      "description": "Represents an append-only timeline entry recording key highlights and actions during an event's lifecycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "actor": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "eventId", "action", "details", "actor", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "entity": "UserProfile"
+    },
+    "/residents/{gmkId}": {
+      "entity": "ResidentProfile"
+    },
+    "/events/{id}": {
+      "entity": "CommunityEvent"
+    },
+    "/eventTemplates/{id}": {
+      "entity": "EventTemplate"
+    },
+    "/eventSettings/{id}": {
+      "entity": "EventSettings"
+    },
+    "/eventCommittees/{id}": {
+      "entity": "EventCommittee"
+    },
+    "/eventPrograms/{id}": {
+      "entity": "EventProgram"
+    },
+    "/eventAttendance/{id}": {
+      "entity": "EventAttendance"
+    },
+    "/eventFood/{id}": {
+      "entity": "EventFood"
+    },
+    "/eventCertificates/{id}": {
+      "entity": "EventCertificate"
+    },
+    "/eventFinance/{id}": {
+      "entity": "EventFinance"
+    },
+    "/eventReports/{id}": {
+      "entity": "EventReport"
+    },
+    "/eventCommunications/{id}": {
+      "entity": "EventCommunication"
+    },
+    "/eventPermissions/{id}": {
+      "entity": "EventPermission"
+    },
+    "/eventTimeline/{id}": {
+      "entity": "EventTimelineEntry"
+    },
+    "/pending_registrations/{uid}": {
+      "entity": "PendingRegistration"
+    },
+    "/roleAssignments/{id}": {
+      "entity": "RoleAssignment"
+    },
+    "/auditLogs/{id}": {
+      "entity": "AuditLog"
+    },
+    "/finances/{id}": {
+      "entity": "FinanceBalance"
+    },
+    "/financeStatements/{id}": {
+      "entity": "FinanceStatement"
+    },
+    "/emailQueue/{id}": {
+      "entity": "EmailQueueItem"
+    },
+    "/emailTemplates/{id}": {
+      "entity": "EmailTemplate"
+    }
+  }
+}

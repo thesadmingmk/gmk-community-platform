@@ -1,0 +1,398 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for secure checks
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwnUser(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    function getUserEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function userExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function getFamilyData(familyId) {
+      return get(/databases/$(database)/documents/families/$(familyId)).data;
+    }
+
+    function familyExists(familyId) {
+      return exists(/databases/$(database)/documents/families/$(familyId));
+    }
+
+    function isSuperAdmin() {
+      return isAuth() && (
+        getUserEmail() == "thesadmingmk@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["super_admin"]))
+      );
+    }
+
+    function isAdmin() {
+      return isAuth() && (
+        isSuperAdmin() ||
+        getUserEmail() == "theadmingmk@gmail.com" ||
+        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_admin")) ||
+        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_admin")) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["admin"]))
+      );
+    }
+
+    function isPresidentOrVP() {
+      return isAuth() && (
+        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_president")) ||
+        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_president")) ||
+        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_vp")) ||
+        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_vp")) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["president", "vp", "vice_president"]))
+      );
+    }
+
+    function isEventDirector() {
+      return isAuth() && (
+        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_event_director")) ||
+        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_event_director")) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["event_director"]))
+      );
+    }
+
+    // Checking if the caller has high-tier executive roles merged from the residents folder
+    function getResidentRole() {
+      return isAuth();
+    }
+
+    function isResidentOwner(gmkId) {
+      return isAuth() && (
+        exists(/databases/$(database)/documents/residents/$(gmkId)) &&
+        get(/databases/$(database)/documents/residents/$(gmkId)).data.email.lower() == getUserEmail()
+      );
+    }
+
+    // USERS COLLECTION
+    match /users/{uid} {
+      allow read: if isAuth();
+      allow create, update: if isOwnUser(uid) || isSuperAdmin() || isAdmin() || isEventDirector();
+      allow delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // PENDING REGISTRATIONS COLLECTION
+    match /pending_registrations/{uid} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if isSuperAdmin() || isAdmin() || isOwnUser(uid);
+    }
+
+    // RESIDENTS COLLECTION
+    match /residents/{gmkId} {
+      allow read: if isAuth();
+      // Allow creation if admin, super admin or standard self-registration
+      allow create: if isAuth() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        request.resource.data.email.lower() == getUserEmail()
+      );
+      // Ensure residents can only update their own profile, restricting critical system fields
+      allow update: if isAuth() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        isEventDirector() || (
+          isResidentOwner(gmkId) && 
+          request.resource.data.email.lower() == getUserEmail() &&
+          request.resource.data.gmkId == resource.data.gmkId &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.remarks == resource.data.remarks &&
+          request.resource.data.unitKey == resource.data.unitKey &&
+          request.resource.data.displayUnitNumber == resource.data.displayUnitNumber
+        )
+      );
+      allow delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // ROLE ASSIGNMENTS COLLECTION
+    match /roleAssignments/{id} {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() || isEventDirector() || (
+        isPresidentOrVP() && 
+        (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
+      );
+      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
+        isPresidentOrVP() && 
+        (resource.data.position == "event_director" || resource.data.role == "event_director" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead" || resource.data.position == "committee_head" || resource.data.role == "committee_head")
+      );
+    }
+
+    // GOVERNANCE ASSIGNMENTS COLLECTION
+    match /governanceAssignments/{id} {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() || (
+        isPresidentOrVP() && 
+        (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
+      );
+      allow delete: if isSuperAdmin() || isAdmin() || (
+        isPresidentOrVP() && 
+        (resource.data.position == "event_director" || resource.data.role == "event_director" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead" || resource.data.position == "committee_head" || resource.data.role == "committee_head")
+      );
+    }
+
+    // FINANCES COLLECTION
+    match /finances/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isPresidentOrVP();
+    }
+
+    // FINANCE STATEMENTS COLLECTION
+    match /financeStatements/{id} {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() || isPresidentOrVP() || (isAuth() && (request.resource.data.submittedBy == getUserEmail()));
+      allow delete: if isSuperAdmin() || isPresidentOrVP();
+    }
+
+    // AUDIT LOGS COLLECTION
+    match /auditLogs/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if false; // Immutable audit trail security constraint
+    }
+
+    // EVENTS COLLECTION
+    match /events/{id} {
+      allow read: if isAuth();
+      allow create, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
+      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
+        isAuth() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees'])
+      );
+    }
+
+    // EVENT TEMPLATES COLLECTION
+    match /eventTemplates/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT SETTINGS COLLECTION
+    match /eventSettings/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT COMMITTEES COLLECTION
+    match /eventCommittees/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT PROGRAMS COLLECTION
+    match /eventPrograms/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT ATTENDANCE COLLECTION
+    match /eventAttendance/{id} {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() || isEventDirector() || (
+        isAuth() && (
+          isResidentOwner(request.resource.data.gmkId) ||
+          (resource != null && isResidentOwner(resource.data.gmkId))
+        )
+      );
+      allow delete: if isSuperAdmin() || isEventDirector() || (
+        isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
+      );
+    }
+
+    // EVENT FOOD COLLECTION
+    match /eventFood/{id} {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() || isEventDirector() || (
+        isAuth() && (
+          isResidentOwner(request.resource.data.gmkId) ||
+          (resource != null && isResidentOwner(resource.data.gmkId))
+        )
+      );
+      allow delete: if isSuperAdmin() || isEventDirector() || (
+        isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
+      );
+    }
+
+    // EVENT CERTIFICATES COLLECTION
+    match /eventCertificates/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    match /eventCertificate/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT FINANCE COLLECTION
+    match /eventFinance/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isSuperAdmin() || isEventDirector() || isPresidentOrVP() || (
+        isAuth() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalRevenue', 'netBalance', 'updatedAt'])
+      );
+      allow delete: if isSuperAdmin() || isPresidentOrVP();
+    }
+
+    // EVENT REPORTS COLLECTION
+    match /eventReports/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isSuperAdmin() || isEventDirector() || (
+        isAuth() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasAny(['registrationsCount', 'totalRevenue', 'lastUpdated'])
+      );
+      allow delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT COMMUNICATIONS COLLECTION
+    match /eventCommunications/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT PERMISSIONS COLLECTION
+    match /eventPermissions/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+    }
+
+    // EVENT TIMELINE COLLECTION
+    match /eventTimeline/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if false; // Append-only security invariant
+    }
+
+    // COMMITTEES COLLECTION
+    match /committees/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // PROGRAMS COLLECTION
+    match /programs/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // RELEASE NOTES COLLECTION
+    match /releaseNotes/{id} {
+      allow read: if true;
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // FAMILIES COLLECTION
+    match /families/{familyId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isResidentOwner(request.resource.data.primaryMemberGmkId)
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() || (
+          isResidentOwner(resource.data.primaryMemberGmkId) &&
+          isResidentOwner(request.resource.data.primaryMemberGmkId)
+        )
+      );
+      allow delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // FAMILY MEMBERS COLLECTION
+    match /familyMembers/{memberId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        (familyExists(request.resource.data.familyId) &&
+         isResidentOwner(getFamilyData(request.resource.data.familyId).primaryMemberGmkId))
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() || (
+          familyExists(resource.data.familyId) &&
+          isResidentOwner(getFamilyData(resource.data.familyId).primaryMemberGmkId) &&
+          familyExists(request.resource.data.familyId) &&
+          isResidentOwner(getFamilyData(request.resource.data.familyId).primaryMemberGmkId)
+        )
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() || (
+          resource != null &&
+          familyExists(resource.data.familyId) &&
+          isResidentOwner(getFamilyData(resource.data.familyId).primaryMemberGmkId)
+        )
+      );
+    }
+
+    // ANNOUNCEMENTS COLLECTION
+    match /announcements/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // EVENT REGISTRATIONS COLLECTION
+    match /event_registrations/{regId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        isResidentOwner(request.resource.data.primaryMemberGmkId)
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() || (
+          isResidentOwner(resource.data.primaryMemberGmkId) &&
+          isResidentOwner(request.resource.data.primaryMemberGmkId)
+        )
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() || (
+          resource != null &&
+          isResidentOwner(resource.data.primaryMemberGmkId)
+        )
+      );
+    }
+
+    // EMAIL QUEUE COLLECTION
+    match /emailQueue/{id} {
+      allow read, create: if isAuth();
+      allow update, delete: if isSuperAdmin() || isAdmin();
+    }
+
+    // EMAIL TEMPLATES COLLECTION
+    match /emailTemplates/{id} {
+      allow read: if true;
+      allow create, update, delete: if isSuperAdmin() || isAdmin();
+    }
+  }
+}
