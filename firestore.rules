@@ -12,7 +12,7 @@ service cloud.firestore {
     }
 
     function getUserEmail() {
-      return request.auth.token.email.lower();
+      return ("email" in request.auth.token && request.auth.token.email != null) ? request.auth.token.email.lower() : "";
     }
 
     function getUserData(uid) {
@@ -33,7 +33,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuth() && (
-        getUserEmail() == "thesadmingmk@gmail.com" ||
+        (getUserEmail() != "" && getUserEmail() == "thesadmingmk@gmail.com") ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["super_admin"]))
@@ -43,9 +43,15 @@ service cloud.firestore {
     function isAdmin() {
       return isAuth() && (
         isSuperAdmin() ||
-        getUserEmail() == "theadmingmk@gmail.com" ||
-        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_admin")) ||
-        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_admin")) ||
+        (getUserEmail() != "" && getUserEmail() == "theadmingmk@gmail.com") ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_admin"))) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_admin"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/roleAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_admin"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/governanceAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_admin"))) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["admin"]))
@@ -54,10 +60,22 @@ service cloud.firestore {
 
     function isPresidentOrVP() {
       return isAuth() && (
-        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_president")) ||
-        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_president")) ||
-        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_vp")) ||
-        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_vp")) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_president"))) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_president"))) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_vp"))) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_vp"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/roleAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_president"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/governanceAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_president"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/roleAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_vp"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/governanceAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_vp"))) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["president", "vp", "vice_president"]))
@@ -66,11 +84,35 @@ service cloud.firestore {
 
     function isEventDirector() {
       return isAuth() && (
-        exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_event_director")) ||
-        exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_event_director")) ||
+        isSuperAdmin() ||
+        isAdmin() ||
+        isPresidentOrVP() ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_event_director"))) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_event_director"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/roleAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_event_director"))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         exists(/databases/$(database)/documents/governanceAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_event_director"))) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["event_director"]))
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["event_director", "president", "vp", "vice_president", "admin", "super_admin"]))
+      );
+    }
+
+    function isProgramLead() {
+      return isAuth() && (
+        (getUserEmail() != "" && (
+          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_program")) ||
+          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_program_committee")) ||
+          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_programs")) ||
+          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_program_lead")) ||
+          exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_committee_lead_program"))
+        )) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["program_lead", "committee_lead_program"]))
       );
     }
 
@@ -197,25 +239,29 @@ service cloud.firestore {
     // EVENT COMMITTEES COLLECTION
     match /eventCommittees/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow create, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
+      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || isProgramLead() || isAuth();
     }
 
     // EVENT PROGRAMS COLLECTION
     match /eventPrograms/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || isProgramLead() || (
+        isAuth() && request.resource.data.status == "pending"
+      );
+      allow delete: if (isSuperAdmin() || isEventDirector() || isProgramLead()) && resource.data.status == "rejected";
     }
 
     // EVENT ATTENDANCE COLLECTION
     match /eventAttendance/{id} {
       allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isEventDirector() || (
+      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isAuth() && (
           isResidentOwner(request.resource.data.gmkId) ||
           (resource != null && isResidentOwner(resource.data.gmkId))
         )
       );
-      allow delete: if isSuperAdmin() || isEventDirector() || (
+      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
       );
     }
@@ -223,13 +269,13 @@ service cloud.firestore {
     // EVENT FOOD COLLECTION
     match /eventFood/{id} {
       allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isEventDirector() || (
+      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isAuth() && (
           isResidentOwner(request.resource.data.gmkId) ||
           (resource != null && isResidentOwner(resource.data.gmkId))
         )
       );
-      allow delete: if isSuperAdmin() || isEventDirector() || (
+      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
       );
     }
@@ -237,19 +283,19 @@ service cloud.firestore {
     // EVENT CERTIFICATES COLLECTION
     match /eventCertificates/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow create, update, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
     }
 
     match /eventCertificate/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow create, update, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
     }
 
     // EVENT FINANCE COLLECTION
     match /eventFinance/{id} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update: if isSuperAdmin() || isEventDirector() || isPresidentOrVP() || (
+      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || isPresidentOrVP() || (
         isAuth() &&
         request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalRevenue', 'netBalance', 'updatedAt'])
       );
@@ -260,11 +306,11 @@ service cloud.firestore {
     match /eventReports/{id} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update: if isSuperAdmin() || isEventDirector() || (
+      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isAuth() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasAny(['registrationsCount', 'totalRevenue', 'lastUpdated'])
+        request.resource.data.diff(resource.data).affectedKeys().hasAny(['registrationsCount', 'totalRevenue', 'attendanceCount', 'mealsIssuedCount', 'lastUpdated'])
       );
-      allow delete: if isSuperAdmin() || isEventDirector();
+      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector();
     }
 
     // EVENT COMMUNICATIONS COLLECTION

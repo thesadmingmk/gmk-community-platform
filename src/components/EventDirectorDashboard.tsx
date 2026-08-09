@@ -23,6 +23,7 @@ import {
   ResidentProfile, 
   EventCommittee, 
   EventCommitteeMember,
+  EventCommitteeExpense,
   EventProgram, 
   EventRegistration,
   Family,
@@ -417,12 +418,15 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
   // Workspace and unique Program Committee configuration states
   const [progTitle, setProgTitle] = useState('');
-  const [progCategory, setProgCategory] = useState('Performance');
+  const [progType, setProgType] = useState('Select');
   const [progDescription, setProgDescription] = useState('');
   const [progCoordinator, setProgCoordinator] = useState<ResidentProfile | null>(null);
   const [progCoordinatorSearch, setProgCoordinatorSearch] = useState('');
   const [expenseTitle, setExpenseTitle] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
+  const [commExpenseDate, setCommExpenseDate] = useState('');
+  const [commExpenseDesc, setCommExpenseDesc] = useState('');
+  const [commExpenseAmount, setCommExpenseAmount] = useState('');
   const [activeProgForManagement, setActiveProgForManagement] = useState<string | null>(null);
 
   // Search states inside workspaces
@@ -524,8 +528,36 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     // Load active event sub-collections
     const qCommittees = query(collection(db, "eventCommittees"), where("eventId", "==", selectedEventId));
     const unsubCommittees = onSnapshot(qCommittees, (snap) => {
-      const list: EventCommittee[] = [];
-      snap.forEach(d => list.push(d.data() as EventCommittee));
+      const rawList: EventCommittee[] = [];
+      snap.forEach(d => {
+        const cData = d.data() as EventCommittee;
+        let cName = cData.name || '';
+        if (['event&program', 'event & program', 'program committee', 'programs'].includes(cName.toLowerCase())) {
+          cName = 'Program';
+        } else if (cName.toLowerCase() === 'stage & decor') {
+          cName = 'Sourcing';
+        }
+        rawList.push({ ...cData, name: cName });
+      });
+
+      // Deduplicate by committee name, keeping members merged if multiple exist
+      const commMap = new Map<string, EventCommittee>();
+      rawList.forEach(c => {
+        const key = c.name.toLowerCase();
+        if (!commMap.has(key)) {
+          commMap.set(key, { ...c });
+        } else {
+          const existing = commMap.get(key)!;
+          const mergedMembers = [...(existing.members || [])];
+          (c.members || []).forEach(m => {
+            if (!mergedMembers.some(em => em.residentId === m.residentId)) {
+              mergedMembers.push(m);
+            }
+          });
+          commMap.set(key, { ...existing, members: mergedMembers });
+        }
+      });
+      const list = Array.from(commMap.values());
       setActiveCommittees(list);
       setLastFirestoreReadStatus('OK');
       setLastRefreshTimestamp(new Date().toLocaleTimeString());
@@ -678,7 +710,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       await setDoc(doc(db, "events", eventId), eventPayload);
 
       // Create standard operational and Program committees for the event
-      const defaultCommittees = ['Attendance', 'Finance', 'Food', 'Stage & Decor', 'Sponsorship', 'Program Committee'];
+      const defaultCommittees = ['Attendance', 'Finance', 'Food', 'Program', 'Sponsorship', 'Sourcing'];
       for (const commName of defaultCommittees) {
         const commDocId = `${eventId}_${commName.replace(/\s+/g, '_')}`;
         const committeePayload: EventCommittee = {
@@ -967,6 +999,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   // GEAS Compliant Bulk Registration Reset Workflow ("Delete All Registrations")
   const handleDeleteAllRegistrations = async () => {
     if (!activeEvent || !selectedEventId) return;
+    console.log("[BULK DELETE 1] Button clicked");
     if (registrations.length === 0) {
       setErrorMsg("No active registrations exist to reset.");
       return;
@@ -987,6 +1020,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       return;
     }
 
+    console.log("[BULK DELETE 2] Confirmation accepted");
     setIsSubmitting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -1006,6 +1040,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         getDocs(qFoods),
         getDocs(qCerts)
       ]);
+
+      console.log(`[BULK DELETE 3] Registrations discovered: ${regSnap.size}`);
+      console.log(`[BULK DELETE 4] Attendance documents staged: ${attSnap.size}`);
+      console.log(`[BULK DELETE 5] Food documents staged: ${foodSnap.size}`);
+      console.log(`[BULK DELETE 6] Certificate documents staged: ${certSnap.size}`);
 
       // Stage 2: Validate
       if (regSnap.empty) {
@@ -1037,6 +1076,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
       const reportSnap = await getDoc(reportRef);
       if (reportSnap.exists()) {
+        console.log("[BULK DELETE 7] Report update staged");
         finalBatch.update(reportRef, {
           registrationsCount: 0,
           totalRevenue: 0,
@@ -1048,6 +1088,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
       const finSnap = await getDoc(finRef);
       if (finSnap.exists()) {
+        console.log("[BULK DELETE 8] Finance update staged");
         const finData = finSnap.data();
         finalBatch.update(finRef, {
           totalRevenue: 0,
@@ -1056,8 +1097,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         });
       }
 
+      console.log("[BULK DELETE 9] Event update staged");
       finalBatch.update(eventRef, { attendees: [] });
+
+      console.log("[BULK DELETE 10] Batch commit started");
       await finalBatch.commit();
+      console.log("[BULK DELETE 11] Batch commit succeeded");
 
       // Stage 5: Verify
       const verifyRegsSnap = await getDocs(qRegs);
@@ -1076,7 +1121,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
       setSuccessMsg(`✓ Successfully reset registrations! All ${regSnap.size} registration records were deleted cleanly.`);
     } catch (err: any) {
-      console.error("Error resetting registrations:", err);
+      console.error("[BULK DELETE FAIL] Error resetting registrations:", err);
       setErrorMsg("Failed to execute bulk registration reset: " + (err.message || String(err)));
     } finally {
       setIsSubmitting(false);
@@ -2012,11 +2057,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     }
 
     // Committee structure validation (Sprint 8)
-    const standardCommittees = ["Attendance", "Finance", "Food", "Stage & Decor", "Sponsorship", "Program Committee"];
+    const standardCommittees = ["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"];
     const missingCommittees = standardCommittees.filter(scName => {
       return !activeCommittees.some(ac => {
         const nameLower = ac.name.toLowerCase();
-        if (scName === "Program Committee") {
+        if (scName === "Program" || scName === "Program") {
           return nameLower === "program committee" || nameLower === "programs" || nameLower === "program";
         }
         return nameLower === scName.toLowerCase();
@@ -2146,66 +2191,48 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     }
   };
 
-  // Delete or archive a custom operational committee with strict governance rules (GEAS Rule 004 / empty-only deletion)
+  // Delete custom operational committee with strict governance rules (0 members required, no archiving)
   const handleDeleteCommittee = async (comm: EventCommittee) => {
-    const isStandard = ["Attendance", "Finance", "Food", "Stage & Decor", "Sponsorship", "Program Committee"].includes(comm.name);
+    const isStandard = ["Attendance", "Finance", "Food", "Sourcing", "Sponsorship", "Program"].includes(comm.name);
     if (isStandard) {
-      setErrorMsg("GOVERNANCE BLOCK: Standard event committees are immutable and cannot be deleted or archived.");
+      setErrorMsg("GOVERNANCE BLOCK: Standard event committees are immutable and cannot be deleted.");
       return;
     }
 
     const hasMembers = (comm.members || []).length > 0;
-    
     if (hasMembers) {
-      // Deletion prohibited, Archive only!
-      setIsSubmitting(true);
-      setErrorMsg(null);
-      try {
-        await updateDoc(doc(db, "eventCommittees", comm.id), {
-          status: 'archived',
-          updatedAt: new Date().toISOString()
-        });
-        await createAuditLog(
-          'COMMITTEE_ARCHIVED',
-          profile?.email || 'event_director',
-          'committee',
-          comm.id,
-          `Archived operational committee '${comm.name}' (deletion prohibited due to active membership)`
-        );
-        setSuccessMsg(`✓ Committee "${comm.name}" has been Archived (deletion prohibited due to active membership).`);
-      } catch (err: any) {
-        setErrorMsg("Failed to archive committee: " + err.message);
-      } finally {
-        setIsSubmitting(false);
-      }
-    } else {
-      // Empty -> Deletion allowed!
-      const confirmDel = await showConfirm({
-        title: "DELETE COMMITTEE",
-        message: `Are you sure you want to permanently delete empty custom committee "${comm.name}"?`,
-        severity: "danger",
-        confirmText: "Delete Committee",
-        cancelText: "Cancel"
-      });
-      if (!confirmDel) return;
+      setErrorMsg("Cannot delete committee while members are assigned. Remove all members first.");
+      return;
+    }
 
-      setIsSubmitting(true);
-      setErrorMsg(null);
-      try {
-        await deleteDoc(doc(db, "eventCommittees", comm.id));
-        await createAuditLog(
-          'COMMITTEE_DELETED',
-          profile?.email || 'event_director',
-          'committee',
-          comm.id,
-          `Permanently deleted empty custom operational committee '${comm.name}'`
-        );
-        setSuccessMsg(`✓ Empty committee "${comm.name}" has been permanently deleted.`);
-      } catch (err: any) {
-        setErrorMsg("Failed to delete committee: " + err.message);
-      } finally {
-        setIsSubmitting(false);
+    const confirmDel = await showConfirm({
+      title: "DELETE COMMITTEE",
+      message: `Are you sure you want to permanently delete custom committee "${comm.name}"?`,
+      severity: "danger",
+      confirmText: "Delete Committee",
+      cancelText: "Cancel"
+    });
+    if (!confirmDel) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      await deleteDoc(doc(db, "eventCommittees", comm.id));
+      await createAuditLog(
+        'COMMITTEE_DELETED',
+        profile?.email || 'event_director',
+        'committee',
+        comm.id,
+        `Permanently deleted custom operational committee '${comm.name}'`
+      );
+      setSuccessMsg(`✓ Committee "${comm.name}" has been permanently deleted.`);
+      if (activeCommitteeToConfigure === comm.name) {
+        setActiveCommitteeToConfigure(null);
       }
+    } catch (err: any) {
+      setErrorMsg("Failed to delete committee: " + err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -2294,11 +2321,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       }
       const committeeData = committeeSnap.data() as EventCommittee;
       const activeLeads = (committeeData.members || []).filter(m => m.role === 'Lead');
-      if (activeLeads.length >= 2) {
-        setErrorMsg("VALIDATION WARNING: Maximum limit of exactly 2 Leads is allowed per committee. Reverting assignment request immediately.");
-        setIsSubmitting(false);
-        return; // REJECT IMMEDIATELY! Do NOT update Firestore!
-      }
 
       // Check if resident is already a lead
       if (activeLeads.some(m => m.residentId === resident.gmkId)) {
@@ -2325,9 +2347,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
         // Double check active leads on the latest document
         const latestLeads = (latestCommittee.members || []).filter(m => m.role === 'Lead');
-        if (latestLeads.length >= 2) {
-          throw new Error("VALIDATION ERROR: Maximum of exactly 2 Leads is allowed per committee.");
-        }
 
         // Check if resident is already a lead
         if (latestLeads.some(m => m.residentId === resident.gmkId)) {
@@ -2450,11 +2469,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       }
       const committeeData = committeeSnap.data() as EventCommittee;
       const activeLeads = (committeeData.members || []).filter(m => m.role === 'Lead');
-      if (activeLeads.length >= 2) {
-        setErrorMsg("VALIDATION WARNING: Maximum limit of exactly 2 Leads is allowed per committee. Reverting assignment request immediately.");
-        setIsSubmitting(false);
-        return; // REJECT IMMEDIATELY! Do NOT update Firestore!
-      }
 
       // Check if resident is already a lead
       if (activeLeads.some(m => m.residentId === resident.gmkId)) {
@@ -2481,9 +2495,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
         // Double check active leads on the latest document
         const latestLeads = (latestCommittee.members || []).filter(m => m.role === 'Lead');
-        if (latestLeads.length >= 2) {
-          throw new Error("VALIDATION ERROR: Maximum of exactly 2 Leads is allowed per committee.");
-        }
 
         // Check if resident is already a lead
         if (latestLeads.some(m => m.residentId === resident.gmkId)) {
@@ -2691,6 +2702,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   // Create Program directly from ED/Program Workspace
   const handleCreateProgramDirectly = async () => {
     if (!selectedEventId || !progTitle.trim() || !progCoordinator) {
+      setErrorMsg('Please provide a program title and assign a Coordinator.');
+      return;
+    }
+    if (!progType || progType === 'Select') {
+      setErrorMsg('Please select a valid Program Type (Adults, Kids, or Mix).');
+      return;
+    }
+    if (false) {
       setErrorMsg("Please fill in program title and assign a coordinator.");
       return;
     }
@@ -2704,7 +2723,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         eventId: selectedEventId,
         title: progTitle.trim(),
         description: progDescription.trim(),
-        category: progCategory,
+        category: progType,
+        programType: progType as any,
         coordinators: [{
           residentId: progCoordinator.gmkId,
           fullName: progCoordinator.fullName,
@@ -2915,6 +2935,91 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     }
   };
 
+  // Add committee expense (3 decimal places OMR precision)
+  const handleAddCommitteeExpense = async (committeeId: string) => {
+    if (!commExpenseDesc.trim() || !commExpenseAmount.trim()) {
+      setErrorMsg("Please enter expense description and amount.");
+      return;
+    }
+    const amountNum = parseFloat(commExpenseAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setErrorMsg("Please enter a valid positive expense amount.");
+      return;
+    }
+
+    const committee = activeCommittees.find(c => c.id === committeeId) || activeCommittees.find(c => c.name === activeCommitteeToConfigure);
+    if (!committee) {
+      setErrorMsg("Committee not found.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const currentExpenses = committee.expenses || [];
+      const roundedAmount = Math.round(amountNum * 1000) / 1000;
+      const newExpense: EventCommitteeExpense = {
+        id: `exp_comm_${Date.now()}`,
+        date: commExpenseDate || new Date().toISOString().split('T')[0],
+        description: commExpenseDesc.trim(),
+        amount: roundedAmount,
+        createdAt: new Date().toISOString(),
+        createdBy: profile?.email || 'event_director'
+      };
+
+      await updateDoc(doc(db, "eventCommittees", committee.id), {
+        expenses: [...currentExpenses, newExpense],
+        updatedAt: new Date().toISOString()
+      });
+
+      await createAuditLog(
+        'COMMITTEE_EXPENSE_ADDED',
+        profile?.email || 'event_director',
+        'committee',
+        committee.id,
+        `Added expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} to ${committee.name} committee.`
+      );
+
+      setSuccessMsg(`✓ Added expense of OMR ${roundedAmount.toFixed(3)} to ${committee.name} Expense Sheet.`);
+      setCommExpenseDesc('');
+      setCommExpenseAmount('');
+      setCommExpenseDate('');
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to add committee expense: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Remove committee expense
+  const handleRemoveCommitteeExpense = async (committeeId: string, expenseId: string) => {
+    const committee = activeCommittees.find(c => c.id === committeeId) || activeCommittees.find(c => c.name === activeCommitteeToConfigure);
+    if (!committee) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const updatedExpenses = (committee.expenses || []).filter(e => e.id !== expenseId);
+
+      await updateDoc(doc(db, "eventCommittees", committee.id), {
+        expenses: updatedExpenses,
+        updatedAt: new Date().toISOString()
+      });
+
+      setSuccessMsg(`✓ Expense removed successfully from ${committee.name} Expense Sheet.`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to remove committee expense: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Add program expense
   const handleAddProgramExpense = async (programId: string) => {
     if (!expenseTitle.trim() || !expenseAmount.trim()) {
@@ -2988,12 +3093,33 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
   // Approve Program action
   const handleApproveProgram = async (programId: string) => {
+    console.log(`[PROGRAM APPROVE 1] Approval clicked for program ID: ${programId}`);
+    const prog = activePrograms.find(p => p.id === programId);
+    if (!prog) return;
+    console.log(`[PROGRAM APPROVE 2] Program identified: "${prog.title}"`);
+
+    const currentProgComm = activeCommittees.find(c => c.name.toLowerCase() === 'program committee' || c.name.toLowerCase() === 'programs' || c.name.toLowerCase() === 'program');
+    const commLeads = (currentProgComm?.members || []).filter(m => m.role === 'Lead');
+
+    const isAuth = (profile?.roles || []).some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp'].includes(r)) || commLeads.some(l => l.email === profile?.email);
+    console.log(`[PROGRAM APPROVE 3] Authorization resolved: ${isAuth ? 'AUTHORIZED' : 'DENIED'}`);
+
     setIsSubmitting(true);
     try {
       await updateDoc(doc(db, "eventPrograms", programId), {
         status: 'approved',
         updatedAt: new Date().toISOString()
       });
+      console.log(`[PROGRAM APPROVE 4] Firestore commit successful for eventPrograms/${programId}`);
+
+      await createAuditLog(
+        'APPROVE_PROGRAM',
+        profile?.email || 'event_director',
+        'program',
+        programId,
+        `Approved stage program '${prog.title}' for Event ${selectedEventId}`
+      );
+      console.log(`[PROGRAM APPROVE 5] Audit log & UI refresh complete`);
 
       setSuccessMsg("✓ Program has been APPROVED and will appear immediately inside the Resident Event Hub.");
     } catch (err: any) {
@@ -3006,20 +3132,228 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
   // Reject Program action
   const handleRejectProgram = async (programId: string) => {
+    console.log(`[PROGRAM REJECT 1] Rejection clicked for program ID: ${programId}`);
+    const prog = activePrograms.find(p => p.id === programId);
+    if (!prog) return;
+    console.log(`[PROGRAM REJECT 2] Program identified: "${prog.title}"`);
+
+    const currentProgComm = activeCommittees.find(c => c.name.toLowerCase() === 'program committee' || c.name.toLowerCase() === 'programs' || c.name.toLowerCase() === 'program');
+    const commLeads = (currentProgComm?.members || []).filter(m => m.role === 'Lead');
+
+    const isAuth = (profile?.roles || []).some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp'].includes(r)) || commLeads.some(l => l.email === profile?.email);
+    console.log(`[PROGRAM REJECT 3] Authorization resolved: ${isAuth ? 'AUTHORIZED' : 'DENIED'}`);
+
     setIsSubmitting(true);
     try {
       await updateDoc(doc(db, "eventPrograms", programId), {
         status: 'rejected',
         updatedAt: new Date().toISOString()
       });
+      console.log(`[PROGRAM REJECT 4] Firestore commit successful for eventPrograms/${programId}`);
 
-      setSuccessMsg("✓ Program has been rejected.");
+      await createAuditLog(
+        'REJECT_PROGRAM',
+        profile?.email || 'event_director',
+        'program',
+        programId,
+        `Rejected stage program '${prog.title}' for Event ${selectedEventId}`
+      );
+      console.log(`[PROGRAM REJECT 5] Audit log & UI refresh complete`);
+
+      setSuccessMsg("✓ Program has been rejected. Authorized users can now delete this rejected submission.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to reject program: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Delete Rejected Program action (GEAS Confirmation Dialog integration)
+  const handleDeleteProgram = async (programId: string, programTitle: string) => {
+    console.log(`[PROGRAM DELETE 1] Delete button clicked for program ID: ${programId}`);
+    
+    const prog = activePrograms.find(p => p.id === programId);
+    if (!prog) {
+      console.error(`[PROGRAM DELETE 2] Program not found in local state: ${programId}`);
+      setErrorMsg("Program submission not found.");
+      return;
+    }
+    console.log(`[PROGRAM DELETE 2] Program identified: "${prog.title}" (ID: ${prog.id}, Status: ${prog.status})`);
+
+    const currentProgComm = activeCommittees.find(c => c.name.toLowerCase() === 'program committee' || c.name.toLowerCase() === 'programs' || c.name.toLowerCase() === 'program');
+    const commLeads = (currentProgComm?.members || []).filter(m => m.role === 'Lead');
+
+    const isAuth = (profile?.roles || []).some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp'].includes(r)) || commLeads.some(l => l.email === profile?.email);
+    console.log(`[PROGRAM DELETE 3] Authorization resolved: ${isAuth ? 'AUTHORIZED' : 'DENIED'}`);
+    
+    if (!isAuth) {
+      setErrorMsg("REJECTED: Deletion of program submissions is restricted to authorized Event Directors and Program Leads.");
+      return;
+    }
+
+    console.log(`[PROGRAM DELETE 4] Confirmation opened using GEASConfirmationDialog`);
+    const confirmed = await showConfirm({
+      title: `Delete Rejected Program Submission?`,
+      message: `Are you sure you want to permanently delete the program submission "${prog.title}" submitted by ${prog.coordinators?.[0]?.fullName || 'Resident'}? This action cannot be undone.`,
+      confirmLabel: `Delete Program`,
+      cancelLabel: `Cancel`,
+      severity: `danger`
+    });
+
+    if (!confirmed) {
+      console.log(`[PROGRAM DELETE 5] Confirmation cancelled by user`);
+      return;
+    }
+    console.log(`[PROGRAM DELETE 5] Confirmation accepted by user`);
+
+    setIsSubmitting(true);
+    try {
+      console.log(`[PROGRAM DELETE 6] Dependency validation: Ensuring primary resident and family records remain intact`);
+      
+      console.log(`[PROGRAM DELETE 7] Delete operation started for Firestore doc: eventPrograms/${programId}`);
+      await deleteDoc(doc(db, "eventPrograms", programId));
+      console.log(`[PROGRAM DELETE 8] Firestore commit successful`);
+
+      const docCheck = await getDoc(doc(db, "eventPrograms", programId));
+      console.log(`[PROGRAM DELETE 9] Verification check: exists = ${docCheck.exists()}`);
+
+      console.log(`[PROGRAM DELETE 10] Creating audit log entry: DELETE_PROGRAM`);
+      await createAuditLog(
+        'DELETE_PROGRAM',
+        profile?.email || 'event_director',
+        'program',
+        programId,
+        `Permanently deleted rejected stage program '${prog.title}' (ID: ${programId})`
+      );
+
+      console.log(`[PROGRAM DELETE 11] UI refresh: removing ${programId} from local activePrograms`);
+      setActivePrograms(prev => prev.filter(p => p.id !== programId));
+
+      console.log(`[PROGRAM DELETE 12] Success: Program "${prog.title}" successfully deleted.`);
+      setSuccessMsg(`✓ Program "${prog.title}" has been permanently deleted.`);
+    } catch (err: any) {
+      console.error("❌ [PROGRAM DELETE FAIL]", err);
+      setErrorMsg("Failed to delete program: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Program Candidate Search (including Spouses and Family Members)
+  const searchProgramCommitteeCandidates = (queryStr: string) => {
+    console.log(`[PROGRAM MEMBER 1] Search initiated with query: "${queryStr}"`);
+    if (!queryStr.trim()) return [];
+    
+    const query = queryStr.toLowerCase().trim();
+    console.log(`[PROGRAM MEMBER 2] Search query normalized: "${query}"`);
+    console.log(`[PROGRAM MEMBER 3] Resident & family data loaded: ${residents.length} primary residents, ${familyMembers.length} family members`);
+
+    const currentProgComm = activeCommittees.find(c => c.name.toLowerCase() === 'program committee' || c.name.toLowerCase() === 'programs' || c.name.toLowerCase() === 'program');
+    const commLeads = (currentProgComm?.members || []).filter(m => m.role === 'Lead');
+
+    const candidates: Array<{
+      id: string;
+      residentId: string;
+      fullName: string;
+      email: string;
+      displayUnitNumber: string;
+      phone: string;
+      isFamilyMember: boolean;
+      relationship?: string;
+      rawResident?: ResidentProfile;
+    }> = [];
+
+    // Search primary active residents
+    residents.forEach(r => {
+      if (r.status !== 'active') return;
+      if (commLeads.some(l => l.residentId === r.gmkId || l.email?.toLowerCase() === r.email?.toLowerCase())) return;
+
+      if (
+        r.fullName?.toLowerCase().includes(query) ||
+        r.gmkId?.toLowerCase().includes(query) ||
+        r.email?.toLowerCase().includes(query) ||
+        r.displayUnitNumber?.toLowerCase().includes(query) ||
+        r.phone?.toLowerCase().includes(query)
+      ) {
+        candidates.push({
+          id: r.gmkId,
+          residentId: r.gmkId,
+          fullName: r.fullName,
+          email: r.email,
+          displayUnitNumber: r.displayUnitNumber,
+          phone: r.phone || '',
+          isFamilyMember: false,
+          rawResident: r
+        });
+      }
+    });
+
+    // Search family members (spouses, adult family members)
+    familyMembers.forEach(m => {
+      const parentId = m.familyId ? m.familyId.replace('fam_', '') : '';
+      const parentRes = residents.find(r => r.gmkId === parentId);
+      if (!parentRes || parentRes.status !== 'active') return;
+
+      if (commLeads.some(l => l.fullName === m.name || l.residentId === m.id)) return;
+
+      if (
+        m.name?.toLowerCase().includes(query) ||
+        m.id?.toLowerCase().includes(query) ||
+        parentRes.gmkId?.toLowerCase().includes(query) ||
+        parentRes.email?.toLowerCase().includes(query) ||
+        parentRes.displayUnitNumber?.toLowerCase().includes(query)
+      ) {
+        candidates.push({
+          id: m.id,
+          residentId: parentRes.gmkId,
+          fullName: m.name,
+          email: parentRes.email,
+          displayUnitNumber: parentRes.displayUnitNumber,
+          phone: parentRes.phone || '',
+          isFamilyMember: true,
+          relationship: m.relationship || 'spouse'
+        });
+      }
+    });
+
+    console.log(`[PROGRAM MEMBER 4] Matching members found: ${candidates.length}`);
+    candidates.forEach((cand, i) => {
+      console.log(`[PROGRAM MEMBER 5] Spouse/member eligibility evaluated for candidate #${i + 1}: ${cand.fullName} (${cand.isFamilyMember ? cand.relationship : 'Primary Member'}, Unit: ${cand.displayUnitNumber}) -> ELIGIBLE`);
+    });
+
+    return candidates;
+  };
+
+  const handleSelectProgramCommitteeLead = async (cand: {
+    id: string;
+    residentId: string;
+    fullName: string;
+    email: string;
+    displayUnitNumber: string;
+    phone?: string;
+    isFamilyMember: boolean;
+    relationship?: string;
+    rawResident?: ResidentProfile;
+  }) => {
+    console.log(`[PROGRAM MEMBER 6] Candidate selected: ${cand.fullName} (Family member: ${cand.isFamilyMember}, Relationship: ${cand.relationship || 'Self'})`);
+    console.log(`[PROGRAM MEMBER 7] Assignment prepared for committee '${activeCommitteeToConfigure}'`);
+
+    const resProfileToAssign: ResidentProfile = cand.rawResident || {
+      gmkId: cand.residentId,
+      fullName: cand.fullName,
+      email: cand.email,
+      displayUnitNumber: cand.displayUnitNumber,
+      unitKey: cand.displayUnitNumber.replace(/[^a-zA-Z0-9]/g, ''),
+      phone: cand.phone || '',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    console.log(`[PROGRAM MEMBER 8] Firestore write initiated for ${cand.fullName}`);
+    await handleAssignLeadDirectly(resProfileToAssign, activeCommitteeToConfigure);
+    console.log(`[PROGRAM MEMBER 9] Assignment verified: ${cand.fullName} assigned to ${activeCommitteeToConfigure}`);
   };
 
   // Dynamic Registrant KPI calculations
@@ -4110,11 +4444,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                         {
                           label: 'All standard committees have active leads',
                           valid: (() => {
-                            const standardCommittees = ["Attendance", "Finance", "Food", "Stage & Decor", "Sponsorship", "Program Committee"];
+                            const standardCommittees = ["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"];
                             const missing = standardCommittees.filter(scName => {
                               return !activeCommittees.some(ac => {
                                 const nameLower = ac.name.toLowerCase();
-                                if (scName === "Program Committee") {
+                                if (scName === "Program" || scName === "Program") {
                                   return nameLower === "program committee" || nameLower === "programs" || nameLower === "program";
                                 }
                                 return nameLower === scName.toLowerCase();
@@ -4809,14 +5143,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
                                               : 'bg-stone-50 text-stone-400 border-stone-200'
                                           }`}>
-                                            Leads Assigned: {leadCount}/2
+                                            Leads Assigned: {leadCount}
                                           </span>
                                         </div>
                                       </div>
                                     </div>
 
                                     {/* Governance delete/archive option for custom committees */}
-                                    {!["Attendance", "Finance", "Food", "Stage & Decor", "Sponsorship", "Program Committee"].includes(commName) && (
+                                    {!["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"].includes(commName) && (
                                       <button
                                         type="button"
                                         onClick={(e) => {
@@ -4838,9 +5172,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                   {commName === 'Attendance' ? 'Manages gate check-ins, registration lists, QR verification, and check-in logs.' :
                                    commName === 'Food' ? 'Supervises meal counts, food preparation schedules, coupon allocation, and distribution.' :
                                    commName === 'Finance' ? 'Formulates budgets, tracks program expenses, sponsors, and handles financial closures.' :
-                                   commName === 'Stage & Decor' ? 'Oversees auditorium styling, backdrop designs, stage scheduling, and lighting setups.' :
+                                   commName === 'Sourcing' ? 'Oversees auditorium styling, backdrop designs, stage scheduling, and lighting setups.' :
                                    commName === 'Sponsorship' ? 'Connects with local vendors, handles branding, advertisements, and promotional tie-ups.' :
-                                   commName === 'Program Committee' || commName === 'Programs' || commName === 'Program' ? 'Coordinates stage scheduling, program categories, participant submissions, and coordinator logs.' :
+                                   commName === 'Program' ? 'Coordinates stage scheduling, program categories, participant submissions, and coordinator logs.' :
                                    'Operational Committee responsible for coordinating specialized event tasks and volunteer activities.'}
                                 </p>
 
@@ -4903,11 +5237,49 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                     // 1. UNIQUE PROGRAM COMMITTEE WORKSPACE
                     if (isProgramComm) {
-                      const matchedCoordResidents = progCoordinatorSearch.toLowerCase().trim() ? residents.filter(r => {
-                        if (r.status !== 'active') return false;
+                      const matchedCoordCandidates: Array<any> = [];
+                      if (progCoordinatorSearch.toLowerCase().trim()) {
                         const lower = progCoordinatorSearch.toLowerCase().trim();
-                        return r.fullName?.toLowerCase().includes(lower) || r.displayUnitNumber?.toLowerCase().includes(lower) || r.email?.toLowerCase().includes(lower);
-                      }) : [];
+                        residents.forEach(r => {
+                          if (r.status !== 'active') return;
+                          if (r.fullName?.toLowerCase().includes(lower) || r.displayUnitNumber?.toLowerCase().includes(lower) || r.email?.toLowerCase().includes(lower)) {
+                            matchedCoordCandidates.push({
+                              id: r.gmkId,
+                              gmkId: r.gmkId,
+                              fullName: r.fullName,
+                              email: r.email,
+                              displayUnitNumber: r.displayUnitNumber || 'N/A',
+                              isSpouse: false,
+                              rawResident: r
+                            });
+                          }
+                        });
+                        familyMembers.forEach(m => {
+                          if (m.relationship !== 'spouse') return;
+                          const parentId = m.familyId ? m.familyId.replace('fam_', '') : '';
+                          const parentRes = residents.find(r => r.gmkId === parentId);
+                          if (!parentRes || parentRes.status !== 'active') return;
+                          if (
+                            m.name?.toLowerCase().includes(lower) ||
+                            parentRes.displayUnitNumber?.toLowerCase().includes(lower) ||
+                            parentRes.email?.toLowerCase().includes(lower)
+                          ) {
+                            matchedCoordCandidates.push({
+                              id: m.id || (parentRes.gmkId + '_spouse'),
+                              gmkId: parentRes.gmkId,
+                              fullName: m.name,
+                              email: parentRes.email,
+                              displayUnitNumber: parentRes.displayUnitNumber || 'N/A',
+                              isSpouse: true,
+                              rawResident: {
+                                ...parentRes,
+                                fullName: m.name
+                              }
+                            });
+                          }
+                        });
+                      }
+                      const matchedCoordResidents = matchedCoordCandidates;
 
                       return (
                         <div className="space-y-8 animate-fadeIn">
@@ -4915,11 +5287,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
                             <div className="flex items-center justify-between border-b border-stone-150 pb-3">
                               <div>
-                                <h4 className="font-extrabold text-stone-900 text-sm uppercase tracking-wider font-heading">Program Committee Leads</h4>
-                                <p className="text-[10px] text-stone-500 font-bold">Appoint governance leads to oversee program categories and stage lists. Maximum 2 leads.</p>
+                                <h4 className="font-extrabold text-stone-900 text-sm uppercase tracking-wider font-heading">Program Leads</h4>
+                                <p className="text-[10px] text-stone-500 font-bold">Appoint governance leads to oversee program categories and operational tasks.</p>
                               </div>
                               <span className="px-2 py-1 bg-[#0f4c2a]/5 border border-[#0f4c2a]/10 text-[#0f4c2a] font-mono text-xs font-black rounded-lg">
-                                {leadCount}/2 Leads
+                                {leadCount} Leads
                               </span>
                             </div>
 
@@ -4950,7 +5322,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                             )}
 
                             {/* Lead Assignment Search Field */}
-                            {leadCount < 2 ? (
+                            {true ? (
                               <div className="space-y-3 pt-2">
                                 <div className="relative">
                                   <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#0f4c2a]" />
@@ -4965,32 +5337,33 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                                 {workspaceSearchQuery && (
                                   <div className="border border-stone-200 rounded-xl bg-white shadow-md max-h-56 overflow-y-auto divide-y divide-stone-100 z-10 relative">
-                                    {residents.filter(r => {
-                                      if (r.status !== 'active') return false;
-                                      if (commLeads.some(l => l.residentId === r.gmkId)) return false;
-                                      const query = workspaceSearchQuery.toLowerCase().trim();
-                                      return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                    }).length === 0 ? (
-                                      <div className="p-4 text-stone-450 italic text-xs text-center font-bold">
-                                        No matching active residents found.
-                                      </div>
-                                    ) : (
-                                      residents.filter(r => {
-                                        if (r.status !== 'active') return false;
-                                        if (commLeads.some(l => l.residentId === r.gmkId)) return false;
-                                        const query = workspaceSearchQuery.toLowerCase().trim();
-                                        return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                      }).map(res => (
-                                        <div key={res.gmkId} className="p-3 hover:bg-stone-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs transition-colors">
+                                    {(() => {
+                                      const candidateMatches = searchProgramCommitteeCandidates(workspaceSearchQuery);
+                                      if (candidateMatches.length === 0) {
+                                        return (
+                                          <div className="p-4 text-stone-450 italic text-xs text-center font-bold">
+                                            No matching active residents or family members found.
+                                          </div>
+                                        );
+                                      }
+                                      return candidateMatches.map(cand => (
+                                        <div key={cand.id} className="p-3 hover:bg-stone-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs transition-colors">
                                           <div className="min-w-0 flex-1">
-                                            <span className="font-extrabold text-stone-900 block truncate">{res.fullName}</span>
-                                            <span className="text-[10px] text-stone-500 font-bold block mt-0.5 truncate">Unit: {res.displayUnitNumber} • {res.email} • {res.phone}</span>
+                                            <div className="flex items-center space-x-2">
+                                              <span className="font-extrabold text-stone-900 truncate">{cand.fullName}</span>
+                                              {cand.isFamilyMember && (
+                                                <span className="px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 text-[9px] font-black uppercase rounded-md shrink-0">
+                                                  {cand.relationship || 'Spouse'}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <span className="text-[10px] text-stone-500 font-bold block mt-0.5 truncate">Unit: {cand.displayUnitNumber} • {cand.email} • {cand.phone || 'No Phone'}</span>
                                           </div>
                                           <button
                                             type="button"
                                             disabled={isSubmitting}
                                             onClick={() => {
-                                              handleAssignLeadDirectly(res, activeCommitteeToConfigure);
+                                              handleSelectProgramCommitteeLead(cand);
                                               setWorkspaceSearchQuery('');
                                             }}
                                             className="w-full sm:w-auto px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 flex items-center justify-center space-x-1 mt-1 sm:mt-0"
@@ -4999,8 +5372,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                             <span>Assign Lead</span>
                                           </button>
                                         </div>
-                                      ))
-                                    )}
+                                      ));
+                                    })()}
                                   </div>
                                 )}
                               </div>
@@ -5031,19 +5404,16 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                               </div>
 
                               <div className="space-y-1.5">
-                                <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Category</label>
+                                <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Type</label>
                                 <select
-                                  value={progCategory}
-                                  onChange={(e) => setProgCategory(e.target.value)}
+                                  value={progType}
+                                  onChange={(e) => setProgType(e.target.value)}
                                   className="w-full px-3 py-2 font-bold bg-stone-50 border border-stone-200 rounded-xl text-stone-850 text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
                                 >
-                                  <option value="Performance">Performance</option>
-                                  <option value="Game">Game</option>
-                                  <option value="Speech">Speech</option>
-                                  <option value="Drama">Drama</option>
-                                  <option value="Skit">Skit</option>
-                                  <option value="Music">Music</option>
-                                  <option value="Other">Other</option>
+                                  <option value="Select">Select</option>
+                                  <option value="Adults">ADULTS</option>
+                                  <option value="Kids">KIDS</option>
+                                  <option value="Mix">MIXED</option>
                                 </select>
                               </div>
                             </div>
@@ -5162,7 +5532,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                         <div className="min-w-0 flex-1">
                                           <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
                                             <span className="text-[8px] font-black tracking-wider text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-1.5 py-0.5 rounded font-mono">
-                                              {prog.category || 'Performance'}
+                                              {prog.programType || prog.category || 'Adults'}
                                             </span>
                                             <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border ${
                                               prog.status === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-100' :
@@ -5203,7 +5573,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                           <div>
                                             <div className="flex items-center space-x-2">
                                               <span className="text-[8px] font-black tracking-widest text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-2 py-0.5 rounded-lg font-mono">
-                                                {prog.category || 'Performance'}
+                                                {prog.programType || prog.category || 'Adults'}
                                               </span>
                                               <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-[8px] font-black uppercase tracking-wider">
                                                 Active Workspace
@@ -5398,7 +5768,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                                 Expenses
                                               </h6>
                                               <span className="text-[9px] font-extrabold text-stone-900 font-mono bg-white px-1.5 py-0.5 rounded border border-stone-200 shadow-xs">
-                                                OMR {expensesTotal}
+                                                OMR {Number(expensesTotal || 0).toFixed(3)}
                                               </span>
                                             </div>
 
@@ -5413,7 +5783,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                                       <span className="text-[8px] text-emerald-700 font-bold block mt-0.5">Approved</span>
                                                     </div>
                                                     <div className="flex items-center space-x-1 shrink-0">
-                                                      <span className="font-mono font-extrabold text-stone-900">OMR {exp.amount}</span>
+                                                      <span className="font-mono font-extrabold text-stone-900">OMR {Number(exp.amount || 0).toFixed(3)}</span>
                                                       <button
                                                         type="button"
                                                         onClick={() => handleRemoveProgramExpense(prog.id, exp.id)}
@@ -5481,10 +5851,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                         <div className="flex items-center justify-between border-b border-stone-150 pb-3">
                           <div>
                             <h4 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading">{activeCommitteeToConfigure} Workspace</h4>
-                            <p className="text-[10px] text-stone-500 font-bold mt-0.5">Appoint, view, or revoke committee leads for operational tasks. Exactly 2 leads maximum permitted.</p>
+                            <p className="text-[10px] text-stone-500 font-bold mt-0.5">Appoint, view, or revoke committee leads for operational tasks.</p>
                           </div>
                           <span className="px-2 py-1 bg-emerald-50 border border-emerald-100 text-[#0f4c2a] text-xs font-black rounded-lg font-mono">
-                            {leadCount}/2 Leads
+                            {leadCount} Leads
                           </span>
                         </div>
 
@@ -5522,72 +5892,161 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                         <div className="space-y-3 pt-3 border-t border-stone-100">
                           <h5 className="text-[10px] uppercase font-black text-stone-550 tracking-wider">Assign New Lead</h5>
                           
-                          {leadCount < 2 ? (
-                            <div className="space-y-4">
-                              <div className="relative">
-                                <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#0f4c2a]" />
-                                <input
-                                  type="text"
-                                  value={workspaceSearchQuery}
-                                  onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
-                                  placeholder="Search members by name or flat number to assign..."
-                                  className="w-full pl-10 pr-4 py-2.5 font-bold bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-200 hover:border-stone-450 focus:border-[#0f4c2a] rounded-xl text-xs text-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                                />
-                              </div>
+                          <div className="space-y-4">
+                            <div className="relative">
+                              <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#0f4c2a]" />
+                              <input
+                                type="text"
+                                value={workspaceSearchQuery}
+                                onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                                placeholder="Search members by name or flat number to assign..."
+                                className="w-full pl-10 pr-4 py-2.5 font-bold bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-200 hover:border-stone-450 focus:border-[#0f4c2a] rounded-xl text-xs text-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                              />
+                            </div>
 
-                              {workspaceSearchQuery && (
-                                <div className="grid grid-cols-1 gap-2.5 max-h-72 overflow-y-auto animate-fadeIn">
-                                  {residents.filter(r => {
+                            {workspaceSearchQuery && (
+                              <div className="grid grid-cols-1 gap-2.5 max-h-72 overflow-y-auto animate-fadeIn">
+                                {residents.filter(r => {
+                                  if (r.status !== 'active') return false;
+                                  if (commLeads.some(l => l.residentId === r.gmkId)) return false;
+                                  const query = workspaceSearchQuery.toLowerCase().trim();
+                                  return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
+                                }).length === 0 ? (
+                                  <div className="text-center p-4 text-stone-450 italic text-xs font-bold bg-stone-50 rounded-xl border border-dashed border-stone-200">
+                                    No matching active residents found.
+                                  </div>
+                                ) : (
+                                  residents.filter(r => {
                                     if (r.status !== 'active') return false;
                                     if (commLeads.some(l => l.residentId === r.gmkId)) return false;
                                     const query = workspaceSearchQuery.toLowerCase().trim();
                                     return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                  }).length === 0 ? (
-                                    <div className="text-center p-4 text-stone-450 italic text-xs font-bold bg-stone-50 rounded-xl border border-dashed border-stone-200">
-                                      No matching active residents found.
-                                    </div>
-                                  ) : (
-                                    residents.filter(r => {
-                                      if (r.status !== 'active') return false;
-                                      if (commLeads.some(l => l.residentId === r.gmkId)) return false;
-                                      const query = workspaceSearchQuery.toLowerCase().trim();
-                                      return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                    }).map(res => (
-                                      <div key={res.gmkId} className="bg-stone-50 hover:bg-stone-100/70 border border-stone-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 transition-colors">
-                                        <div className="min-w-0 flex-1">
-                                          <span className="font-extrabold text-stone-900 text-xs block truncate">{res.fullName}</span>
-                                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1 text-[9px] text-stone-500 font-bold uppercase tracking-wider">
-                                            <span>Flat: {res.displayUnitNumber}</span>
-                                            <span>•</span>
-                                            <span className="truncate">{res.phone}</span>
-                                            <span>•</span>
-                                            <span className="truncate lowercase">{res.email}</span>
-                                          </div>
+                                  }).map(res => (
+                                    <div key={res.gmkId} className="bg-stone-50 hover:bg-stone-100/70 border border-stone-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 transition-colors">
+                                      <div className="min-w-0 flex-1">
+                                        <span className="font-extrabold text-stone-900 text-xs block truncate">{res.fullName}</span>
+                                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1 text-[9px] text-stone-500 font-bold uppercase tracking-wider">
+                                          <span>Flat: {res.displayUnitNumber}</span>
+                                          <span>•</span>
+                                          <span className="truncate">{res.phone}</span>
+                                          <span>•</span>
+                                          <span className="truncate lowercase">{res.email}</span>
                                         </div>
-                                        <button
-                                          type="button"
-                                          disabled={isSubmitting}
-                                          onClick={() => {
-                                            handleAssignLeadDirectly(res, activeCommitteeToConfigure);
-                                            setWorkspaceSearchQuery('');
-                                          }}
-                                          className="w-full sm:w-auto px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 flex items-center justify-center space-x-1 shrink-0 mt-1 sm:mt-0"
-                                        >
-                                          <UserCheck className="w-3.5 h-3.5 text-[#d4af37]" />
-                                          <span>Assign Lead</span>
-                                        </button>
                                       </div>
-                                    ))
-                                  )}
-                                </div>
-                              )}
+                                      <button
+                                        type="button"
+                                        disabled={isSubmitting}
+                                        onClick={() => {
+                                          handleAssignLeadDirectly(res, activeCommitteeToConfigure);
+                                          setWorkspaceSearchQuery('');
+                                        }}
+                                        className="w-full sm:w-auto px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 flex items-center justify-center space-x-1 shrink-0 mt-1 sm:mt-0"
+                                      >
+                                        <UserCheck className="w-3.5 h-3.5 text-[#d4af37]" />
+                                        <span>Assign Lead</span>
+                                      </button>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* COMMITTEE EXPENSE SHEET (OMR, 3 DECIMAL PLACES) */}
+                        <div className="pt-4 border-t border-stone-100 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
+                                {activeCommitteeToConfigure} Expense Sheet
+                              </h5>
+                              <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                                Log operational expenses in OMR with 3 decimal places precision (e.g. 0.001 OMR).
+                              </p>
                             </div>
+                            <span className="text-xs font-mono font-extrabold text-[#0f4c2a] bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl">
+                              Total: OMR {((currentComm?.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0)).toFixed(3)}
+                            </span>
+                          </div>
+
+                          {(currentComm?.expenses || []).length === 0 ? (
+                            <p className="text-xs text-stone-500 italic font-bold p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
+                              No expenses recorded for this committee yet. Use the form below to log an expense.
+                            </p>
                           ) : (
-                            <div className="text-center py-4 text-stone-500 font-bold font-sans text-xs border-t border-stone-150 mt-2">
-                              <p>Maximum committee leads assigned.</p>
-                              <p className="text-[10px] text-stone-400 mt-0.5">Remove a lead to assign another.</p>
+                            <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150">
+                              <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
+                                <div className="col-span-3">Date</div>
+                                <div className="col-span-5">Description</div>
+                                <div className="col-span-3 text-right">Amount (OMR)</div>
+                                <div className="col-span-1 text-center">Action</div>
+                              </div>
+                              {(currentComm?.expenses || []).map(exp => (
+                                <div key={exp.id} className="p-2.5 grid grid-cols-12 items-center text-xs font-bold text-stone-850 hover:bg-stone-50/50">
+                                  <div className="col-span-3 font-mono text-[11px] text-stone-600">{exp.date}</div>
+                                  <div className="col-span-5 font-semibold text-stone-900 truncate">{exp.description}</div>
+                                  <div className="col-span-3 text-right font-mono font-extrabold text-[#0f4c2a]">
+                                    OMR {(exp.amount || 0).toFixed(3)}
+                                  </div>
+                                  <div className="col-span-1 text-center">
+                                    <button
+                                      type="button"
+                                      disabled={isSubmitting}
+                                      onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
+                                      className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                                      title="Delete Expense"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-stone-50/50 p-3 rounded-xl border border-stone-150">
+                            <div className="sm:col-span-3 space-y-1">
+                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
+                              <input
+                                type="date"
+                                value={commExpenseDate}
+                                onChange={(e) => setCommExpenseDate(e.target.value)}
+                                className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                              />
+                            </div>
+                            <div className="sm:col-span-4 space-y-1">
+                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
+                              <input
+                                type="text"
+                                value={commExpenseDesc}
+                                onChange={(e) => setCommExpenseDesc(e.target.value)}
+                                placeholder="Expense description..."
+                                className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                              />
+                            </div>
+                            <div className="sm:col-span-3 space-y-1">
+                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
+                              <input
+                                type="number"
+                                step="0.001"
+                                value={commExpenseAmount}
+                                onChange={(e) => setCommExpenseAmount(e.target.value)}
+                                placeholder="0.000"
+                                className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <button
+                                type="button"
+                                disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim()}
+                                onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
+                                className="w-full py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:opacity-50"
+                              >
+                                <Plus className="w-3.5 h-3.5 text-[#d4af37]" />
+                                <span>Add</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
@@ -5629,7 +6088,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-stone-150 pb-3">
                             <div>
                               <span className="text-[9px] font-black tracking-widest text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-2 py-0.5 rounded-lg font-mono">
-                                {prog.category || 'Performance'}
+                                {prog.programType || prog.category || 'Adults'}
                               </span>
                               <h4 className="text-stone-850 font-black text-sm font-heading mt-1 capitalize">{prog.title}</h4>
                               
@@ -5656,6 +6115,17 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                           {/* Action Controls */}
                           <div className="pt-3 border-t border-stone-100 flex items-center justify-end space-x-2 font-heading">
+                            {prog.status === 'rejected' && (
+                              <button
+                                onClick={() => handleDeleteProgram(prog.id, prog.title)}
+                                disabled={isSubmitting}
+                                className="px-4 py-2 rounded-xl border border-red-300 hover:border-red-600 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                                <span>Delete Program</span>
+                              </button>
+                            )}
+
                             {prog.status !== 'rejected' && (
                               <button
                                 onClick={() => handleRejectProgram(prog.id)}

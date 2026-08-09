@@ -76,9 +76,9 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
     },
     {
       id: 'event_director',
-      label: 'Event Director',
+      label: 'Event Operations',
       icon: Award,
-      roles: ['event_director', 'president', 'vp', 'vice_president', 'admin', 'super_admin'],
+      roles: ['event_director', 'president', 'vp', 'vice_president', 'admin', 'super_admin', 'program_lead', 'committee_lead'],
       accentColor: 'text-[#d4af37]',
     },
   ];

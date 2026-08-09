@@ -48,7 +48,7 @@ interface GovernancePanelProps {
 
 const COMMITTEES = [
   "Finance Committee",
-  "Program Committee",
+  "Program",
   "Food Committee",
   "Sports Committee",
   "Decoration Committee",

@@ -282,11 +282,25 @@ export interface EventCommitteeMember {
   role: 'Lead' | 'Volunteer' | 'Coordinator';
 }
 
+export interface EventCommitteeExpense {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  createdAt: string;
+  createdBy?: string;
+}
+
 export interface EventCommittee {
   id: string; // ${eventId}_${committeeName}
   eventId: string;
-  name: string; // e.g., 'Program' | 'Finance' | 'Food' | 'Attendance' | 'Stage & Decor' | 'Sponsorship'
+  name: string; // e.g., 'Program' | 'Finance' | 'Food' | 'Attendance' | 'Sponsorship' | 'Sourcing'
   members: EventCommitteeMember[];
+  isStandard?: boolean;
+  requiresCoordinators?: boolean;
+  requiresVolunteers?: boolean;
+  requiresParticipants?: boolean;
+  expenses?: EventCommitteeExpense[];
   createdAt: string;
   updatedAt: string;
 }
@@ -297,13 +311,14 @@ export interface EventProgram {
   title: string;
   description: string;
   category: string;
-  coordinators: Array<{ residentId: string; fullName: string; email: string }>;
-  participants: Array<{ residentId: string; fullName: string; email: string; role?: string }>;
-  volunteers: Array<{ residentId: string; fullName: string; email: string }>;
+  programType?: 'ADULTS' | 'KIDS' | 'MIXED';
+  coordinators: Array<{ residentId: string; fullName: string; email: string; phone?: string; relation?: string; unitDisplay?: string }>;
+  participants: Array<{ residentId: string; fullName: string; email: string; role?: string; phone?: string; unitDisplay?: string; accommodationType?: string; parentPhone?: string; isChild?: boolean; age?: number; gender?: string }>;
+  volunteers: Array<{ residentId: string; fullName: string; email: string; phone?: string; unitDisplay?: string }>;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   updatedAt: string;
-  expenses?: Array<{ id: string; title: string; amount: number; status: 'pending' | 'approved' | 'rejected'; createdAt: string }>;
+  expenses?: EventCommitteeExpense[];
 }
 
 export interface EventAttendance {
