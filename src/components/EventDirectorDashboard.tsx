@@ -27,7 +27,8 @@ import {
   EventProgram, 
   EventRegistration,
   Family,
-  FamilyMember
+  FamilyMember,
+  PaymentAccount
 } from '../types';
 import { 
   Calendar, 
@@ -375,6 +376,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [isPricingEditing, setIsPricingEditing] = useState<boolean>(false);
+  const [isTimelinesEditing, setIsTimelinesEditing] = useState<boolean>(false);
+  const [configPaymentAccounts, setConfigPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [showPricingPolicyModal, setShowPricingPolicyModal] = useState<boolean>(false);
   const [auditResults, setAuditResults] = useState<Record<string, {
     name: string;
@@ -653,6 +656,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
       setConfigStatus((activeEvent.status as any) || 'draft');
       setConfigHighlights(activeEvent.highlights || []);
+      const existingAccounts = (activeEvent.paymentTransferAccounts || []).map(acc => ({
+        ...acc,
+        isSaved: acc.isSaved !== undefined ? acc.isSaved : true
+      }));
+      setConfigPaymentAccounts(existingAccounts);
+      setIsTimelinesEditing(false);
       setExplicitCompletion(false);
     }
   }, [activeEvent]);
@@ -1709,7 +1718,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       isFinanceSubmittedAuto !== origChkFinSub ||
       isFinanceApprovedAuto !== origChkFinApp ||
       isPresApprovedAuto !== origChkPres ||
-      chkCertificatesGenerated !== origChkCert
+      chkCertificatesGenerated !== origChkCert ||
+      JSON.stringify(configPaymentAccounts) !== JSON.stringify(activeEvent?.paymentTransferAccounts || [])
     );
   };
 
@@ -1787,7 +1797,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           certificatesGenerated: chkCertificatesGenerated
         },
         configurationStatus: 'completed',
-        highlights: configHighlights
+        highlights: configHighlights,
+        paymentTransferAccounts: configPaymentAccounts
       };
 
       const eventDocRef = doc(db, "events", selectedEventId);
@@ -2096,6 +2107,16 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     return list;
   };
 
+  const formatCertificateEventDate = (dateStr?: string) => {
+    if (!dateStr) return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = d.toLocaleString('en-GB', { month: 'short' }).toUpperCase();
+    const year = d.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
   // Single Certificate PDF Generator
   const generateSingleCertificatePDF = (recipient: CertRecipient) => {
     if (!activeEvent) return;
@@ -2106,6 +2127,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     });
 
     const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Event';
+    const formattedEventDate = formatCertificateEventDate(activeEvent.date);
 
     // Outer Border
     doc.setDrawColor(15, 76, 42);
@@ -2130,14 +2152,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
     // Header Title
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
+    doc.setFontSize(18);
     doc.setTextColor(15, 76, 42);
-    doc.text("AL HAIL GREENS (GMK)", 148.5, 32, { align: "center" });
-
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(120, 120, 120);
-    doc.text("AL HAIL EXECUTIVE RESIDENTS ASSOCIATION", 148.5, 38, { align: "center" });
+    doc.text("AL HAIL GREENS (GMK)", 148.5, 35, { align: "center" });
 
     // Certificate Heading
     doc.setFont("helvetica", "bold");
@@ -2173,7 +2190,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
     if (recipient.type === 'Participant') {
       doc.text(`for active participation in "${recipient.roleOrProgram}"`, 148.5, 108, { align: "center" });
-      doc.text(`during the community event "${eventTitle}".`, 148.5, 116, { align: "center" });
+      doc.text(`during the community event "${eventTitle}" conducted on ${formattedEventDate}.`, 148.5, 116, { align: "center" });
     } else {
       doc.text(`in grateful recognition of outstanding service and dedication as`, 148.5, 108, { align: "center" });
       doc.setFont("helvetica", "bold");
@@ -2181,24 +2198,25 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       doc.text(`${recipient.type} (${recipient.roleOrProgram})`, 148.5, 116, { align: "center" });
       doc.setFont("helvetica", "normal");
       doc.setTextColor(60, 60, 60);
-      doc.text(`for the event "${eventTitle}".`, 148.5, 124, { align: "center" });
+      doc.text(`for the event "${eventTitle}" conducted on ${formattedEventDate}.`, 148.5, 124, { align: "center" });
     }
 
     // Footer / Signatures
-    doc.setFont("helvetica", "normal");
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.setTextColor(100, 100, 100);
+    doc.setTextColor(50, 50, 50);
 
-    const issueDate = activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : new Date().toLocaleDateString();
-    doc.text(`Date of Event: ${issueDate}`, 50, 160);
-    doc.line(40, 168, 90, 168);
-    doc.text("Date", 60, 173);
+    // President
+    doc.line(50, 168, 110, 168);
+    doc.text("President", 80, 173, { align: "center" });
 
-    doc.line(207, 168, 257, 168);
-    doc.text("Event Director / Committee Lead", 207, 173);
+    // Vice President
+    doc.line(187, 168, 247, 168);
+    doc.text("Vice President", 217, 173, { align: "center" });
 
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
+    doc.setTextColor(120, 120, 120);
     doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
 
     doc.save(`${recipient.name.replace(/\s+/g, '_')}_Certificate.pdf`);
@@ -2214,6 +2232,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     });
 
     const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Event';
+    const formattedEventDate = formatCertificateEventDate(activeEvent.date);
 
     recipientsList.forEach((recipient, index) => {
       if (index > 0) {
@@ -2239,14 +2258,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       doc.line(280, 193, 280, 180);
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
+      doc.setFontSize(18);
       doc.setTextColor(15, 76, 42);
-      doc.text("AL HAIL GREENS (GMK)", 148.5, 32, { align: "center" });
-
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(120, 120, 120);
-      doc.text("AL HAIL EXECUTIVE RESIDENTS ASSOCIATION", 148.5, 38, { align: "center" });
+      doc.text("AL HAIL GREENS (GMK)", 148.5, 35, { align: "center" });
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(22);
@@ -2278,7 +2292,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
       if (recipient.type === 'Participant') {
         doc.text(`for active participation in "${recipient.roleOrProgram}"`, 148.5, 108, { align: "center" });
-        doc.text(`during the community event "${eventTitle}".`, 148.5, 116, { align: "center" });
+        doc.text(`during the community event "${eventTitle}" conducted on ${formattedEventDate}.`, 148.5, 116, { align: "center" });
       } else {
         doc.text(`in grateful recognition of outstanding service and dedication as`, 148.5, 108, { align: "center" });
         doc.setFont("helvetica", "bold");
@@ -2286,23 +2300,24 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         doc.text(`${recipient.type} (${recipient.roleOrProgram})`, 148.5, 116, { align: "center" });
         doc.setFont("helvetica", "normal");
         doc.setTextColor(60, 60, 60);
-        doc.text(`for the event "${eventTitle}".`, 148.5, 124, { align: "center" });
+        doc.text(`for the event "${eventTitle}" conducted on ${formattedEventDate}.`, 148.5, 124, { align: "center" });
       }
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
+      doc.setTextColor(50, 50, 50);
 
-      const issueDate = activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : new Date().toLocaleDateString();
-      doc.text(`Date of Event: ${issueDate}`, 50, 160);
-      doc.line(40, 168, 90, 168);
-      doc.text("Date", 60, 173);
+      // President
+      doc.line(50, 168, 110, 168);
+      doc.text("President", 80, 173, { align: "center" });
 
-      doc.line(207, 168, 257, 168);
-      doc.text("Event Director / Committee Lead", 207, 173);
+      // Vice President
+      doc.line(187, 168, 247, 168);
+      doc.text("Vice President", 217, 173, { align: "center" });
 
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
+      doc.setTextColor(120, 120, 120);
       doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
     });
 
@@ -3909,16 +3924,68 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
   const stats = calculateStats();
 
-  // Export excel custom-made CSV download trigger
+  // Comprehensive CSV Report Export Trigger
   const handleExportCSV = () => {
     if (!activeEvent) return;
-    const headers = ["Registration ID", "Primary Resident", "Email", "Unit", "Participants", "Total Count"];
+    const headers = [
+      "Registration ID",
+      "GMK ID",
+      "Name of Registrant",
+      "Email Address",
+      "Unit Number",
+      "Adults Count",
+      "Children Count",
+      "Total Participants",
+      "Amount to Pay (OMR)",
+      "Payment Status",
+      "Registered Participants List"
+    ];
+
     const rows = registrations.map(reg => {
       const fam = families.find(f => f.id === reg.familyId);
-      const primaryName = fam ? fam.fullName : 'Unknown';
+      const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
       const unit = fam ? fam.displayUnitNumber : 'Unknown';
-      const participantsStr = `"${(reg.participants || []).join(', ')}"`;
-      return [reg.id, primaryName, reg.primaryMemberEmail, unit, participantsStr, reg.totalParticipants || 0];
+      const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+      const participants = reg.participants || [];
+
+      let adults = 0;
+      let children = 0;
+
+      if (reg.paymentSummary && typeof reg.paymentSummary.childrenCount === 'number') {
+        children = reg.paymentSummary.childrenCount;
+        adults = Math.max(0, participants.length - children);
+      } else {
+        participants.forEach(name => {
+          if (name === primaryName) {
+            adults++;
+          } else {
+            const match = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
+            if (match && match.relationship === 'child') {
+              children++;
+            } else {
+              adults++;
+            }
+          }
+        });
+      }
+
+      const amountToPay = reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+      const pStatus = reg.paymentStatus || (amountToPay === 0 ? 'waived' : 'pending');
+      const participantsStr = `"${participants.join(', ')}"`;
+
+      return [
+        reg.id,
+        reg.primaryMemberGmkId || 'N/A',
+        `"${primaryName}"`,
+        reg.primaryMemberEmail,
+        unit,
+        adults,
+        children,
+        reg.totalParticipants || (adults + children),
+        amountToPay.toFixed(3),
+        pStatus.toUpperCase(),
+        participantsStr
+      ];
     });
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -3927,7 +3994,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `${activeEvent.eventName || activeEvent.title}_registrants.csv`);
+    link.setAttribute("download", `${activeEvent.eventName || activeEvent.title}_comprehensive_registration_report.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -4468,7 +4535,22 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                       {/* SPRINT 4: Date & Time Redesign */}
                       <div className="border-t border-stone-100 pt-4 space-y-4">
-                        <h5 className="text-xs md:text-[13px] font-semibold text-stone-850 font-heading">Operational Timelines & Deadlines</h5>
+                        <div className="flex items-center justify-between border-b border-stone-150 pb-2">
+                          <h5 className="text-xs md:text-[13px] font-semibold text-stone-850 font-heading">Operational Timelines & Deadlines</h5>
+                          {configStatus !== 'completed' && (
+                            <button
+                              type="button"
+                              onClick={() => setIsTimelinesEditing(!isTimelinesEditing)}
+                              className={`px-3 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                                isTimelinesEditing
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-[#0f4c2a] hover:bg-[#0c3e22] text-white shadow-xs'
+                              }`}
+                            >
+                              {isTimelinesEditing ? 'Done Editing' : 'Modify'}
+                            </button>
+                          )}
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {/* Col 1: Registration Window */}
                           <div className="bg-stone-50/50 border border-stone-250/50 p-4 rounded-2xl space-y-4">
@@ -4479,14 +4561,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                 value={configRegStart}
                                 type="date"
                                 onChange={setConfigRegStart}
-                                disabled={configStatus === 'completed'}
+                                disabled={!isTimelinesEditing || configStatus === 'completed'}
                               />
                               <CompactEditableInput 
                                 label="Opens Time"
                                 value={configRegStart}
                                 type="time"
                                 onChange={setConfigRegStart}
-                                disabled={configStatus === 'completed'}
+                                disabled={!isTimelinesEditing || configStatus === 'completed'}
                               />
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4495,14 +4577,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                 value={configRegEnd}
                                 type="date"
                                 onChange={setConfigRegEnd}
-                                disabled={configStatus === 'completed'}
+                                disabled={!isTimelinesEditing || configStatus === 'completed'}
                               />
                               <CompactEditableInput 
                                 label="Closes Time"
                                 value={configRegEnd}
                                 type="time"
                                 onChange={setConfigRegEnd}
-                                disabled={configStatus === 'completed'}
+                                disabled={!isTimelinesEditing || configStatus === 'completed'}
                               />
                             </div>
                           </div>
@@ -4516,7 +4598,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                 value={configEventStart}
                                 type="date"
                                 onChange={handleEventDateChange}
-                                disabled={configStatus === 'completed'}
+                                disabled={!isTimelinesEditing || configStatus === 'completed'}
                               />
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <CompactEditableInput 
@@ -4524,14 +4606,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                   value={configEventStart}
                                   type="time"
                                   onChange={setConfigEventStart}
-                                  disabled={configStatus === 'completed'}
+                                  disabled={!isTimelinesEditing || configStatus === 'completed'}
                                 />
                                 <CompactEditableInput 
                                   label="Ends Time"
                                   value={configEventEnd}
                                   type="time"
                                   onChange={setConfigEventEnd}
-                                  disabled={configStatus === 'completed'}
+                                  disabled={!isTimelinesEditing || configStatus === 'completed'}
                                 />
                               </div>
                             </div>
@@ -4750,6 +4832,192 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                         </button>
                       </div>
                     </div>
+                  </GMKCard>
+
+                  {/* SECTION 4: Payment Transfer Information */}
+                  <GMKCard className="p-6 bg-white border border-stone-200 space-y-5">
+                    <div className="border-b border-stone-150 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div>
+                        <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Section 4: Payment Transfer Information</h4>
+                        <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                          Specify bank transfer and mobile payment accounts displayed to registrants in the Events Hub.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfigPaymentAccounts(prev => [
+                            ...prev,
+                            { id: `acc_${Date.now()}`, name: '', bank: '', accountNumber: '', iban: '', mobilePhone: '', isSaved: false }
+                          ]);
+                        }}
+                        disabled={configStatus === 'completed'}
+                        className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1 self-start sm:self-auto disabled:opacity-50"
+                      >
+                        <span>+ Add Payment Option</span>
+                      </button>
+                    </div>
+
+                    {configPaymentAccounts.length === 0 ? (
+                      <div className="p-4 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl">
+                        No payment transfer accounts configured yet. Click "+ Add Payment Option" to start entering bank / mobile transfer details.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {configPaymentAccounts.map((acc, index) => {
+                          const hasInfo = Boolean(
+                            (acc.name || '').trim() ||
+                            (acc.bank || '').trim() ||
+                            (acc.accountNumber || '').trim() ||
+                            (acc.iban || '').trim() ||
+                            (acc.mobilePhone || '').trim()
+                          );
+                          const isOptionSaved = acc.isSaved === true;
+                          const isOptionLocked = isOptionSaved || configStatus === 'completed';
+
+                          return (
+                            <div key={acc.id || index} className="p-4 bg-stone-50/70 border border-stone-200 rounded-2xl space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-200/80 pb-2 gap-2">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-[10px] uppercase font-black text-[#0f4c2a] font-heading">
+                                    Payment Option #{index + 1}
+                                  </span>
+                                  {isOptionSaved && (
+                                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[8px] font-black uppercase rounded-md">
+                                      Saved
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center space-x-2">
+                                  {/* Save button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, isSaved: true } : item));
+                                    }}
+                                    disabled={!hasInfo || isOptionSaved || configStatus === 'completed'}
+                                    className={`px-3 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                                      !hasInfo || isOptionSaved || configStatus === 'completed'
+                                        ? 'bg-stone-200 text-stone-400 cursor-not-allowed opacity-60'
+                                        : 'bg-[#0f4c2a] hover:bg-[#0c3e22] text-white shadow-xs'
+                                    }`}
+                                  >
+                                    Save
+                                  </button>
+
+                                  {/* Modify button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, isSaved: false } : item));
+                                    }}
+                                    disabled={!hasInfo || !isOptionSaved || configStatus === 'completed'}
+                                    className={`px-3 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                                      !hasInfo || !isOptionSaved || configStatus === 'completed'
+                                        ? 'bg-stone-200 text-stone-400 cursor-not-allowed opacity-60'
+                                        : 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
+                                    }`}
+                                  >
+                                    Modify
+                                  </button>
+
+                                  {/* Remove Account */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfigPaymentAccounts(prev => prev.filter((_, i) => i !== index));
+                                    }}
+                                    disabled={configStatus === 'completed'}
+                                    className="text-red-600 hover:text-red-800 text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer ml-1"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">Name (Beneficiary)</label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. Beneficiary Name"
+                                    value={acc.name || ''}
+                                    disabled={isOptionLocked}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, name: val } : item));
+                                    }}
+                                    className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">Bank</label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. Bank Muscat"
+                                    value={acc.bank || ''}
+                                    disabled={isOptionLocked}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, bank: val } : item));
+                                    }}
+                                    className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">Account Number</label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. 1234567890"
+                                    value={acc.accountNumber || ''}
+                                    disabled={isOptionLocked}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, accountNumber: val } : item));
+                                    }}
+                                    className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-mono font-bold text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">IBAN</label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. OM89 0000 1234 5678 9000 12"
+                                    value={acc.iban || ''}
+                                    disabled={isOptionLocked}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, iban: val } : item));
+                                    }}
+                                    className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-mono font-bold text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                  />
+                                </div>
+
+                                <div className="md:col-span-2 sm:w-1/2">
+                                  <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">Mobile Transfer Phone Number (Oman - 8 digits max)</label>
+                                  <input
+                                    type="text"
+                                    placeholder="xxxxxxxx"
+                                    value={acc.mobilePhone || ''}
+                                    disabled={isOptionLocked}
+                                    maxLength={8}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                                      setConfigPaymentAccounts(prev => prev.map((item, i) => i === index ? { ...item, mobilePhone: val } : item));
+                                    }}
+                                    className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-mono font-bold text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </GMKCard>
 
                   {/* SPRINT 2: Event Completion Checklist */}
@@ -6696,6 +6964,123 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                             </div>
                           </div>
                         </div>
+
+                        {/* FINANCE & ATTENDANCE COMMITTEE REGISTRATION REPORTS WORKSPACE */}
+                        {(activeCommitteeToConfigure.toLowerCase().includes('finance') || activeCommitteeToConfigure.toLowerCase().includes('attendance')) && (
+                          <div className="pt-4 border-t border-stone-100 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div>
+                                <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
+                                  <span>📋</span>
+                                  <span>Event Registration Data ({activeCommitteeToConfigure} Committee)</span>
+                                </h5>
+                                <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                                  Comprehensive registration records showing registrant names, adult/child counts, payable amount, and payment status.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleExportCSV}
+                                className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all shadow-xs flex items-center space-x-1 cursor-pointer self-start sm:self-auto"
+                              >
+                                <Download className="w-3.5 h-3.5 text-[#d4af37]" />
+                                <span>Export Report</span>
+                              </button>
+                            </div>
+
+                            {registrations.length === 0 ? (
+                              <div className="p-4 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-xl">
+                                No event registrations found yet.
+                              </div>
+                            ) : (
+                              <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white">
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
+                                      <th className="p-3">GMK / Reg ID</th>
+                                      <th className="p-3">Name of Registrant</th>
+                                      <th className="p-3">Unit Number</th>
+                                      <th className="p-3 text-center">Adults</th>
+                                      <th className="p-3 text-center">Children</th>
+                                      <th className="p-3 text-center">Total</th>
+                                      <th className="p-3 text-right">Amount to Pay</th>
+                                      <th className="p-3 text-center">Payment Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-stone-150 text-stone-750 font-bold font-sans text-xs">
+                                    {registrations.map(reg => {
+                                      const fam = families.find(f => f.id === reg.familyId);
+                                      const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
+                                      const unit = fam ? fam.displayUnitNumber : 'Unknown';
+                                      const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+                                      const participants = reg.participants || [];
+
+                                      let adults = 0;
+                                      let children = 0;
+
+                                      if (reg.paymentSummary && typeof reg.paymentSummary.childrenCount === 'number') {
+                                        children = reg.paymentSummary.childrenCount;
+                                        adults = Math.max(0, participants.length - children);
+                                      } else {
+                                        participants.forEach(name => {
+                                          if (name === primaryName) {
+                                            adults++;
+                                          } else {
+                                            const match = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
+                                            if (match && match.relationship === 'child') {
+                                              children++;
+                                            } else {
+                                              adults++;
+                                            }
+                                          }
+                                        });
+                                      }
+
+                                      const amountToPay = reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+                                      const pStatus = reg.paymentStatus || (amountToPay === 0 ? 'waived' : 'pending');
+
+                                      return (
+                                        <tr key={reg.id} className="hover:bg-stone-50/50">
+                                          <td className="p-3 font-mono text-[10px] text-stone-600 uppercase">
+                                            {reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A'}
+                                          </td>
+                                          <td className="p-3">
+                                            <span className="text-stone-900 font-black block">{primaryName}</span>
+                                            <span className="text-[10px] text-stone-500 font-medium font-mono">{reg.primaryMemberEmail}</span>
+                                          </td>
+                                          <td className="p-3 font-mono text-[11px] text-emerald-800 font-bold">{unit}</td>
+                                          <td className="p-3 text-center">
+                                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-bold text-[10px]">
+                                              {adults}
+                                            </span>
+                                          </td>
+                                          <td className="p-3 text-center">
+                                            <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold text-[10px]">
+                                              {children}
+                                            </span>
+                                          </td>
+                                          <td className="p-3 text-center font-black text-stone-900">{reg.totalParticipants || (adults + children)}</td>
+                                          <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">
+                                            OMR {amountToPay.toFixed(3)}
+                                          </td>
+                                          <td className="p-3 text-center">
+                                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                                              pStatus === 'paid' || pStatus === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                              pStatus === 'waived' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                              'bg-amber-50 text-amber-800 border-amber-200'
+                                            }`}>
+                                              {pStatus}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -6996,42 +7381,87 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           <table className="w-full text-left border-collapse">
                             <thead>
                               <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
-                                <th className="p-4">Resident ID</th>
-                                <th className="p-4">Primary Member Name</th>
-                                <th className="p-4">Email Address</th>
-                                <th className="p-4">Unit Number</th>
-                                <th className="p-4">Registered Participants</th>
-                                <th className="p-4 text-center">Total Count</th>
-                                <th className="p-4 text-center">Actions</th>
+                                <th className="p-3">GMK / Reg ID</th>
+                                <th className="p-3">Name of Person Registered</th>
+                                <th className="p-3">Unit Number</th>
+                                <th className="p-3 text-center">Adults</th>
+                                <th className="p-3 text-center">Children</th>
+                                <th className="p-3 text-center">Total Participants</th>
+                                <th className="p-3 text-right">Amount to Pay</th>
+                                <th className="p-3 text-center">Payment Status</th>
+                                <th className="p-3 text-center">Actions</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-stone-150 text-stone-750 font-bold font-sans text-xs">
                               {registrations.map(reg => {
                                 const fam = families.find(f => f.id === reg.familyId);
-                                const primaryName = fam ? fam.fullName : 'Unknown';
+                                const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
                                 const unit = fam ? fam.displayUnitNumber : 'Unknown';
+                                const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+                                const participants = reg.participants || [];
+
+                                let adults = 0;
+                                let children = 0;
+
+                                if (reg.paymentSummary && typeof reg.paymentSummary.childrenCount === 'number') {
+                                  children = reg.paymentSummary.childrenCount;
+                                  adults = Math.max(0, participants.length - children);
+                                } else {
+                                  participants.forEach(name => {
+                                    if (name === primaryName) {
+                                      adults++;
+                                    } else {
+                                      const match = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
+                                      if (match && match.relationship === 'child') {
+                                        children++;
+                                      } else {
+                                        adults++;
+                                      }
+                                    }
+                                  });
+                                }
+
+                                const amountToPay = reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+                                const pStatus = reg.paymentStatus || (amountToPay === 0 ? 'waived' : 'pending');
                                 
                                 return (
                                   <tr key={reg.id} className="hover:bg-stone-50/50">
-                                    <td className="p-4 font-mono text-[10px] text-stone-600 uppercase">{reg.id.split('_')?.[1] || reg.primaryMemberGmkId || 'N/A'}</td>
-                                    <td className="p-4 text-stone-900 font-black">{primaryName}</td>
-                                    <td className="p-4 font-medium text-stone-600">{reg.primaryMemberEmail}</td>
-                                    <td className="p-4 font-mono text-[11px] text-emerald-800">{unit}</td>
-                                    <td className="p-4">
-                                      <div className="flex flex-wrap gap-1">
-                                        {(reg.participants || []).map((name, idx) => (
-                                          <span key={idx} className="bg-stone-100 border border-stone-200 text-stone-850 px-2 py-0.5 rounded-lg text-[9px] font-bold">
-                                            {name}
-                                          </span>
-                                        ))}
-                                      </div>
+                                    <td className="p-3 font-mono text-[10px] text-stone-600 uppercase">
+                                      {reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A'}
                                     </td>
-                                    <td className="p-4 text-center text-stone-900 font-black">{reg.totalParticipants || 0}</td>
-                                    <td className="p-4 text-center">
+                                    <td className="p-3">
+                                      <span className="text-stone-900 font-black block">{primaryName}</span>
+                                      <span className="text-[10px] text-stone-500 font-medium font-mono">{reg.primaryMemberEmail}</span>
+                                    </td>
+                                    <td className="p-3 font-mono text-[11px] text-emerald-800 font-bold">{unit}</td>
+                                    <td className="p-3 text-center">
+                                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-bold text-[10px]">
+                                        {adults}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold text-[10px]">
+                                        {children}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center font-black text-stone-900">{reg.totalParticipants || (adults + children)}</td>
+                                    <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">
+                                      OMR {amountToPay.toFixed(3)}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                                        pStatus === 'paid' || pStatus === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                        pStatus === 'waived' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                        'bg-amber-50 text-amber-800 border-amber-200'
+                                      }`}>
+                                        {pStatus}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center">
                                       <button
                                         onClick={() => handleDeleteRegistration(reg)}
                                         disabled={isSubmitting}
-                                        className="px-2.5 py-1.5 rounded-lg border border-red-200 hover:border-red-600 hover:bg-red-50 text-red-600 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                        className="px-2.5 py-1 rounded-lg border border-red-200 hover:border-red-600 hover:bg-red-50 text-red-600 transition-all cursor-pointer inline-flex items-center space-x-1"
                                         title="Delete Registration"
                                       >
                                         <Trash2 className="w-3.5 h-3.5" />
@@ -7322,79 +7752,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           </div>
                         );
                       })()}
-                    </GMKCard>
-                  </div>
-
-                  {/* GMK-STAB-002 Resident Registration Diagnostic Report Section */}
-                  <div className="md:col-span-2 pt-4 animate-fadeIn">
-                    <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
-                      <div className="border-b border-stone-150 pb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div>
-                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                            <span>🛡️</span>
-                            <span>GMK-STAB-002 Resident Registration Diagnostic Report</span>
-                          </h4>
-                          <p className="text-[9px] text-stone-500 font-bold mt-0.5">Real-time audit checklist verifying onboarding, family links, and active profiles.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={runIntegrityAudit}
-                          className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all shadow-xs cursor-pointer"
-                        >
-                          Run Integrity Audit
-                        </button>
-                      </div>
-
-                      {Object.keys(auditResults).length === 0 ? (
-                        <p className="text-stone-550 text-[10px] italic font-semibold text-center py-6 bg-stone-50 rounded-xl border border-stone-150 border-dashed">
-                          Click "Run Integrity Audit" to perform direct query checks against target test residents.
-                        </p>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          {Object.entries(auditResults).map(([key, item]) => {
-                            const val = item as any;
-                            return (
-                              <div key={key} className="border border-stone-150 rounded-xl p-4 bg-stone-50/50 space-y-3">
-                                <div className="border-b border-stone-150 pb-1.5">
-                                  <span className="font-extrabold text-stone-900 text-xs block truncate">{val.name}</span>
-                                  <span className="text-[9px] text-stone-500 font-mono block truncate">{val.identifier}</span>
-                                </div>
-                                <div className="space-y-1 text-[10px]">
-                                  <div className="flex justify-between font-semibold">
-                                    <span className="text-stone-500">Onboarding Status:</span>
-                                    <span className={`font-bold ${val.onboardingStatus === 'completed' ? 'text-emerald-700' : 'text-amber-600'}`}>
-                                      {val.onboardingStatus}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between font-semibold">
-                                    <span className="text-stone-500">Family Document:</span>
-                                    <span className={`font-bold ${val.familyExists ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                      {val.familyExists ? 'Exists' : 'Missing'}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between font-semibold">
-                                    <span className="text-stone-500">Profile Status:</span>
-                                    <span className={`font-bold ${val.profileStatus === 'active' ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                      {val.profileStatus}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between font-semibold">
-                                    <span className="text-stone-500">Firestore Query Check:</span>
-                                    <span className={`font-bold uppercase ${val.firestoreRead === 'Success' ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                      {val.firestoreRead}
-                                    </span>
-                                  </div>
-                                </div>
-                                {val.details && (
-                                  <div className="text-[9px] bg-stone-100 p-2 rounded border border-stone-150 font-mono text-stone-600 break-words">
-                                    {val.details}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
                     </GMKCard>
                   </div>
                 </div>

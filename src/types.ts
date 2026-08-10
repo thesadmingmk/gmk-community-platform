@@ -105,6 +105,17 @@ export interface CommunityEvent {
   Venue?: string;
   registrationSettings?: any;
   configurationStatus?: string;
+  paymentTransferAccounts?: PaymentAccount[];
+}
+
+export interface PaymentAccount {
+  id: string;
+  name: string;
+  bank: string;
+  accountNumber?: string;
+  iban: string;
+  mobilePhone: string;
+  isSaved?: boolean;
 }
 
 export interface EventPermission {

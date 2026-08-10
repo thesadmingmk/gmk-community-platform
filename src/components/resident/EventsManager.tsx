@@ -26,6 +26,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   // Active dialogue controls
   const [activeEventForReg, setActiveEventForReg] = useState<CommunityEvent | null>(null);
   const [viewingRegDetails, setViewingRegDetails] = useState<EventRegistration | null>(null);
+  const [showingPaymentModalEvent, setShowingPaymentModalEvent] = useState<{ evt: CommunityEvent; reg?: EventRegistration } | null>(null);
   
   // Registration form selections
   const [checkedFamilyMembers, setCheckedFamilyMembers] = useState<Record<string, boolean>>({});
@@ -897,68 +898,38 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                           )}
                         </div>
                       )}
-
-                      {/* Registration Fees Grid */}
-                      {evt.pricing && (
-                        <div className="border border-stone-150 rounded-xl overflow-hidden divide-y divide-stone-150 text-[10px] font-bold">
-                          <div className="p-2 bg-stone-50 text-stone-550 flex justify-between font-extrabold uppercase text-[8px] tracking-wider">
-                            <span>Registration Plan</span>
-                            <span>Fee Rate</span>
-                          </div>
-                          <div className="p-2 flex justify-between">
-                            <span className="text-stone-600">Individual Unit</span>
-                            <span className="font-mono text-stone-900">OMR {evt.pricing.singleRate?.toFixed(3)}</span>
-                          </div>
-                          <div className="p-2 flex justify-between">
-                            <span className="text-stone-600">Couple Unit</span>
-                            <span className="font-mono text-stone-900">OMR {evt.pricing.coupleRate?.toFixed(3)}</span>
-                          </div>
-                          <div className="p-2 flex justify-between">
-                            <span className="text-stone-600">Family Unit Cap</span>
-                            <span className="font-mono text-stone-900">OMR {evt.pricing.familyRate?.toFixed(3)}</span>
-                          </div>
-                          {evt.pricing.allowExternal && (
-                            <div className="p-2 bg-emerald-50/30 flex justify-between">
-                              <span className="text-emerald-900 font-extrabold">Registered Guest Fee</span>
-                              <span className="font-mono text-emerald-800 font-black">OMR {evt.pricing.externalRate?.toFixed(3)}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
 
                     <div className="pt-2 border-t border-stone-150 flex flex-col space-y-2 font-heading">
-                      {onViewEventDetails && (
-                        <button
-                          type="button"
-                          onClick={() => onViewEventDetails(evt)}
-                          className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
-                        >
-                          View Details
-                        </button>
-                      )}
+                      {/* View Registration button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (reg) {
+                            setViewingRegDetails(reg);
+                          } else if (onViewEventDetails) {
+                            onViewEventDetails(evt);
+                          }
+                        }}
+                        className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                      >
+                        View Registration
+                      </button>
 
                       {reg ? (
+                        /* When registration completed: No Register Now button, show active Payment Options */
                         <div className="flex w-full space-x-2">
                           <button
                             type="button"
-                            onClick={() => setViewingRegDetails(reg)}
-                            className="flex-1 py-2 text-center bg-[#0f4c2a]/10 text-[#0f4c2a] hover:bg-[#0f4c2a]/15 border border-[#0f4c2a]/20 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                            onClick={() => setShowingPaymentModalEvent({ evt, reg })}
+                            className="w-full py-2 text-center bg-[#0f4c2a] text-white hover:bg-[#125831] uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center space-x-1"
                           >
-                            View Registration
+                            <span>Payment options</span>
                           </button>
-                          {(regStatus === 'open' || regStatus === 'closing_soon') && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenRegistration(evt)}
-                              className="flex-1 py-2 text-center bg-[#0f4c2a] text-white hover:bg-[#125831] uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
-                            >
-                              Modify
-                            </button>
-                          )}
                         </div>
                       ) : (
-                        <>
+                        /* When registration not completed */
+                        <div className="flex flex-col space-y-2">
                           {(regStatus === 'open' || regStatus === 'closing_soon') ? (
                             <button
                               type="button"
@@ -972,7 +943,17 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                               {regStatus === 'completed' ? "Event Completed" : regStatus === 'not_started' ? "Registration Not Started" : "Registration Closed"}
                             </div>
                           )}
-                        </>
+
+                          {/* Inactive Payment Options when registration is not completed */}
+                          <button
+                            type="button"
+                            disabled
+                            className="w-full py-2 text-center bg-stone-100 border border-stone-200 text-stone-400 uppercase tracking-wider text-[10px] font-bold rounded-xl cursor-not-allowed opacity-60"
+                            title="Complete registration first to enable payment options"
+                          >
+                            Payment options
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1189,10 +1170,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
             </button>
 
             <div className="font-sans text-left">
-              <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Gathering Registrant Setup</span>
+              <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Select Attendees</span>
               <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEventForReg.title}</h3>
               <p className="text-stone-805 text-[11px] leading-relaxed mt-1 font-semibold">
-                Configure which members of your registered household are participating in this gathering. Count limits sync in real-time.
+                Select Attendees from your household for this gathering. Count limits sync in real-time.
               </p>
             </div>
 
@@ -1287,7 +1268,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
               {livePricing && (
                 <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl p-4 text-left space-y-3 animate-fadeIn text-stone-800">
                   <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-widest block font-heading">
-                    Live RSVP Pricing Breakdown
+                    Pricing Breakdown
                   </span>
                   
                   <div className="space-y-1.5 text-xs">
@@ -1382,10 +1363,100 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                   {loading ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-white mr-1.5" />
                   ) : null}
-                  <span>Confirm RSVP Registration</span>
+                  <span>Confirm Registration</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT OPTIONS MODAL */}
+      {showingPaymentModalEvent && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white border border-stone-220 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 text-left animate-scaleUp">
+            <button
+              type="button"
+              onClick={() => setShowingPaymentModalEvent(null)}
+              className="absolute right-4 top-4 text-stone-500 hover:text-stone-900 transition-colors cursor-pointer font-black"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Payment Options & Transfer Details</span>
+              <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
+                {showingPaymentModalEvent.evt.title}
+              </h3>
+              {showingPaymentModalEvent.reg && (
+                <div className="mt-2 p-3 bg-emerald-50 border border-emerald-100 rounded-2xl flex justify-between items-center text-xs">
+                  <span className="font-bold text-emerald-900">Total Payable Amount:</span>
+                  <span className="font-mono font-black text-sm text-[#0f4c2a]">OMR {showingPaymentModalEvent.reg.paymentAmount}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-stone-800">
+                Please transfer the registration amount to
+              </p>
+
+              {showingPaymentModalEvent.evt.paymentTransferAccounts && showingPaymentModalEvent.evt.paymentTransferAccounts.length > 0 ? (
+                showingPaymentModalEvent.evt.paymentTransferAccounts.map((acc, index) => (
+                  <div key={acc.id || index} className="p-4 bg-stone-50 border border-stone-200 rounded-2xl space-y-2 text-xs font-semibold text-stone-850">
+                    <div className="flex items-center justify-between border-b border-stone-200 pb-1.5 text-[10px] font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
+                      <span>Payment Option #{index + 1}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 text-[11px]">
+                      {acc.name && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500 font-bold">Name:</span>
+                          <span className="font-bold text-stone-900">{acc.name}</span>
+                        </div>
+                      )}
+                      {acc.bank && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500 font-bold">Bank:</span>
+                          <span className="font-bold text-stone-900">{acc.bank}</span>
+                        </div>
+                      )}
+                      {acc.accountNumber && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500 font-bold">Account Number:</span>
+                          <span className="font-mono font-bold text-stone-900">{acc.accountNumber}</span>
+                        </div>
+                      )}
+                      {acc.iban && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500 font-bold">IBAN:</span>
+                          <span className="font-mono font-bold text-stone-900">{acc.iban}</span>
+                        </div>
+                      )}
+                      {acc.mobilePhone && (
+                        <div className="flex justify-between">
+                          <span className="text-stone-500 font-bold">Mobile transfer Phone number:</span>
+                          <span className="font-mono font-bold text-stone-900">{acc.mobilePhone.startsWith('+968') ? acc.mobilePhone : `+968 ${acc.mobilePhone}`}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs text-stone-500 italic font-medium text-center">
+                  No payment transfer information configured yet for this event.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowingPaymentModalEvent(null)}
+                className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

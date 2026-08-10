@@ -62,6 +62,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [responsibilities, setResponsibilities] = useState<any[]>([]);
   const [viewingEventDetails, setViewingEventDetails] = useState<CommunityEvent | null>(null);
+  const [attendanceLead, setAttendanceLead] = useState<{ name: string; phone: string } | null>(null);
 
   // Page level state
   const [loading, setLoading] = useState(true);
@@ -353,10 +354,27 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
       return [...otherSources, ...assembled];
     });
 
+    // 5. Subscribe to Attendance Committee Lead
+    const unsubAttLead = onSnapshot(collection(db, "roleAssignments"), (snapshot) => {
+      let leadInfo: { name: string; phone: string } | null = null;
+      snapshot.forEach(d => {
+        const data = d.data();
+        const cName = (data.committee || data.committeeName || '').toLowerCase();
+        if (cName.includes('attendance')) {
+          leadInfo = {
+            name: data.fullName || data.name || data.email?.split('@')[0] || 'Attendance Committee Lead',
+            phone: data.phone || data.mobilePhone || data.whatsAppNumber || '+968 9000 0000'
+          };
+        }
+      });
+      if (leadInfo) setAttendanceLead(leadInfo);
+    });
+
     return () => {
       unsubComm();
       unsubProg();
       unsubRoles();
+      unsubAttLead();
     };
   }, [residentProfile, profile?.roles]);
 
@@ -796,7 +814,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                 {/* Event Logistics */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-stone-50 p-4 border border-stone-155 rounded-2xl text-[10px] font-bold text-stone-850">
                   <div className="space-y-3">
-                    <span className="text-[8px] uppercase tracking-wider text-stone-500 block font-heading font-black">Gathering Logistics</span>
+                    <span className="text-[8px] uppercase tracking-wider text-stone-500 block font-heading font-black">Event details</span>
                     
                     {viewingEventDetails.date && (
                       <div className="flex items-center space-x-2">
@@ -821,8 +839,10 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                       </div>
                     )}
                     <div className="flex items-center space-x-2">
-                      <span className="font-black text-[9px] uppercase tracking-wider text-[#0f4c2a]">Contact Officer:</span>
-                      <span className="text-stone-700">GMK Executive Council (operations@gmk.org)</span>
+                      <span className="font-black text-[9px] uppercase tracking-wider text-[#0f4c2a]">Contact:</span>
+                      <span className="text-stone-700 font-bold">
+                        {attendanceLead ? `${attendanceLead.name} (${attendanceLead.phone})` : 'Attendance Committee Lead (+968 9000 0000)'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -837,37 +857,6 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                           <span>⭐ {hl}</span>
                         </div>
                       ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Pricing Plans */}
-                {pricing && (
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] uppercase font-black text-stone-500 tracking-wider font-heading">Official Registration Plan Tariff</h4>
-                    <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-[11px] font-bold">
-                      <div className="p-3 bg-stone-50 text-stone-550 flex justify-between font-extrabold uppercase text-[8px] tracking-wider">
-                        <span>Registration Plan Composition</span>
-                        <span>Fee Rate</span>
-                      </div>
-                      <div className="p-3 flex justify-between">
-                        <span className="text-stone-600 font-medium">Individual Resident Unit</span>
-                        <span className="font-mono text-stone-900">OMR {pricing.singleRate?.toFixed(3)}</span>
-                      </div>
-                      <div className="p-3 flex justify-between">
-                        <span className="text-stone-600 font-medium">Couple Resident Unit</span>
-                        <span className="font-mono text-stone-900">OMR {pricing.coupleRate?.toFixed(3)}</span>
-                      </div>
-                      <div className="p-3 flex justify-between">
-                        <span className="text-stone-600 font-medium">Full Family Unit Cap</span>
-                        <span className="font-mono text-stone-900">OMR {pricing.familyRate?.toFixed(3)}</span>
-                      </div>
-                      {pricing.allowExternal && (
-                        <div className="p-3 bg-emerald-50/20 flex justify-between">
-                          <span className="text-emerald-900 font-extrabold">Registered Non-Resident Guest flat fee</span>
-                          <span className="font-mono text-emerald-800 font-black">OMR {pricing.externalRate?.toFixed(3)} per guest</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
