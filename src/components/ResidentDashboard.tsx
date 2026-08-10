@@ -385,7 +385,8 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
     profile?.roles.includes('vp') ||
     profile?.roles.includes('vice_president') ||
     profile?.roles.includes('admin') ||
-    profile?.roles.includes('super_admin');
+    profile?.roles.includes('super_admin') ||
+    responsibilities.length > 0;
 
   useEffect(() => {
     if (isEventDirectorRole) {

@@ -55,7 +55,9 @@ import {
   CheckCircle2,
   XCircle,
   MinusCircle,
-  Archive
+  Archive,
+  RotateCcw,
+  Edit3
 } from 'lucide-react';
 import { GMKCard, GMKBadge } from './gmk/DesignSystem';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
@@ -286,6 +288,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   // Local navigation & sub-state
   const [showNewEventForm, setShowNewEventForm] = useState(false);
   const [activeCommitteeToConfigure, setActiveCommitteeToConfigure] = useState<string | null>(null);
+  const [committeeTab, setCommitteeTab] = useState<'active' | 'archived'>('active');
   const [showRegistrantsTable, setShowRegistrantsTable] = useState(true);
   const [showReadinessDetails, setShowReadinessDetails] = useState(false);
 
@@ -365,6 +368,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   const [justSaved, setJustSaved] = useState<boolean>(false);
   const [explicitCompletion, setExplicitCompletion] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
+  const [showCommitteeDataModal, setShowCommitteeDataModal] = useState<boolean>(false);
+  const [certTab, setCertTab] = useState<'all' | 'leads' | 'coordinators' | 'volunteers' | 'participants'>('all');
+  const [certSearch, setCertSearch] = useState<string>('');
   const [showAssetManager, setShowAssetManager] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -428,6 +434,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   const [commExpenseDesc, setCommExpenseDesc] = useState('');
   const [commExpenseAmount, setCommExpenseAmount] = useState('');
   const [activeProgForManagement, setActiveProgForManagement] = useState<string | null>(null);
+  const [editingProgramId, setEditingProgramId] = useState<string | null>(null);
+  const [editProgTitle, setEditProgTitle] = useState('');
+  const [editProgCategory, setEditProgCategory] = useState<string>('ADULTS');
+  const [editProgDescription, setEditProgDescription] = useState('');
 
   // Search states inside workspaces
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState('');
@@ -1933,6 +1943,372 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     doc.save(`${activeEvent.eventName || activeEvent.title}_pricing_policy.pdf`);
   };
 
+  // Committee Data PDF Export
+  const handleExportCommitteeDataPDF = () => {
+    if (!activeEvent) return;
+    const doc = new jsPDF();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(15, 76, 42); // Forest Green
+    doc.text("AL HAIL GREENS (GMK)", 15, 18);
+
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.text(`COMMITTEE DATA & ROSTER - ${activeEvent.eventName || activeEvent.title}`, 15, 25);
+
+    doc.setDrawColor(15, 76, 42);
+    doc.setLineWidth(0.8);
+    doc.line(15, 29, 195, 29);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 15, 35);
+
+    let y = 43;
+    const filteredCommittees = activeCommittees.filter(c => c.status !== 'archived');
+
+    if (filteredCommittees.length === 0) {
+      doc.text("No active committees configured for this event.", 15, y);
+    } else {
+      filteredCommittees.forEach((comm, idx) => {
+        if (y > 260) {
+          doc.addPage();
+          y = 20;
+        }
+
+        const leads = (comm.members || []).filter(m => m.role === 'Lead').map(m => m.fullName);
+        const volunteers = (comm.members || []).filter(m => m.role !== 'Lead').map(m => m.fullName);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(15, 76, 42);
+        doc.text(`${idx + 1}. ${comm.name}`, 15, y);
+        y += 6;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(50, 50, 50);
+        doc.text("Leads:", 20, y);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(80, 80, 80);
+        const leadsText = leads.length > 0 ? leads.join(", ") : "None assigned";
+        const splitLeads = doc.splitTextToSize(leadsText, 150);
+        doc.text(splitLeads, 45, y);
+        y += (splitLeads.length * 5) + 2;
+
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(50, 50, 50);
+        doc.text("Volunteers:", 20, y);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(80, 80, 80);
+        const volsText = volunteers.length > 0 ? volunteers.join(", ") : "None assigned";
+        const splitVols = doc.splitTextToSize(volsText, 150);
+        doc.text(splitVols, 45, y);
+        y += (splitVols.length * 5) + 8;
+
+        doc.setDrawColor(230, 230, 230);
+        doc.setLineWidth(0.3);
+        doc.line(15, y - 4, 195, y - 4);
+      });
+    }
+
+    doc.save(`${activeEvent.eventName || activeEvent.title}_Committee_Data.pdf`);
+  };
+
+  // Certificate Recipient Interface
+  interface CertRecipient {
+    id: string;
+    name: string;
+    type: 'Committee Lead' | 'Coordinator' | 'Volunteer' | 'Participant';
+    roleOrProgram: string;
+    context: string;
+  }
+
+  // Get all eligible certificate recipients
+  const getCertificateRecipients = (): CertRecipient[] => {
+    const list: CertRecipient[] = [];
+
+    // 1. Committee Leads & Committee Volunteers
+    activeCommittees.filter(c => c.status !== 'archived').forEach(comm => {
+      (comm.members || []).forEach(mem => {
+        if (!mem.fullName) return;
+        if (mem.role === 'Lead') {
+          list.push({
+            id: `comm_lead_${comm.id}_${mem.residentId}`,
+            name: mem.fullName,
+            type: 'Committee Lead',
+            roleOrProgram: comm.name,
+            context: `Committee: ${comm.name}`
+          });
+        } else {
+          list.push({
+            id: `comm_vol_${comm.id}_${mem.residentId}`,
+            name: mem.fullName,
+            type: 'Volunteer',
+            roleOrProgram: comm.name,
+            context: `Committee: ${comm.name}`
+          });
+        }
+      });
+    });
+
+    // 2. Program Coordinators, Volunteers, Participants
+    const eventProgs = activePrograms.filter(p => p.eventId === selectedEventId);
+    eventProgs.forEach(prog => {
+      (prog.coordinators || []).forEach(coord => {
+        if (!coord.fullName) return;
+        list.push({
+          id: `prog_coord_${prog.id}_${coord.residentId}`,
+          name: coord.fullName,
+          type: 'Coordinator',
+          roleOrProgram: prog.title,
+          context: `Program: ${prog.title}`
+        });
+      });
+
+      (prog.volunteers || []).forEach(vol => {
+        if (!vol.fullName) return;
+        list.push({
+          id: `prog_vol_${prog.id}_${vol.residentId}`,
+          name: vol.fullName,
+          type: 'Volunteer',
+          roleOrProgram: prog.title,
+          context: `Program: ${prog.title}`
+        });
+      });
+
+      (prog.participants || []).forEach(part => {
+        if (!part.fullName) return;
+        list.push({
+          id: `prog_part_${prog.id}_${part.residentId}`,
+          name: part.fullName,
+          type: 'Participant',
+          roleOrProgram: prog.title,
+          context: `Program: ${prog.title}`
+        });
+      });
+    });
+
+    return list;
+  };
+
+  // Single Certificate PDF Generator
+  const generateSingleCertificatePDF = (recipient: CertRecipient) => {
+    if (!activeEvent) return;
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Event';
+
+    // Outer Border
+    doc.setDrawColor(15, 76, 42);
+    doc.setLineWidth(2.5);
+    doc.rect(10, 10, 277, 190);
+
+    // Inner Border
+    doc.setDrawColor(212, 175, 55);
+    doc.setLineWidth(0.8);
+    doc.rect(14, 14, 269, 182);
+
+    // Corner Accents
+    doc.setLineWidth(0.4);
+    doc.line(17, 17, 30, 17);
+    doc.line(17, 17, 17, 30);
+    doc.line(280, 17, 267, 17);
+    doc.line(280, 17, 280, 30);
+    doc.line(17, 193, 30, 193);
+    doc.line(17, 193, 17, 180);
+    doc.line(280, 193, 267, 193);
+    doc.line(280, 193, 280, 180);
+
+    // Header Title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(15, 76, 42);
+    doc.text("AL HAIL GREENS (GMK)", 148.5, 32, { align: "center" });
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(120, 120, 120);
+    doc.text("AL HAIL EXECUTIVE RESIDENTS ASSOCIATION", 148.5, 38, { align: "center" });
+
+    // Certificate Heading
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(212, 175, 55);
+    const certHeader = recipient.type === 'Participant' ? "CERTIFICATE OF PARTICIPATION" : "CERTIFICATE OF APPRECIATION";
+    doc.text(certHeader, 148.5, 54, { align: "center" });
+
+    doc.setDrawColor(212, 175, 55);
+    doc.setLineWidth(0.5);
+    doc.line(90, 58, 207, 58);
+
+    // Presentation line
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text("This certificate is proudly presented to", 148.5, 72, { align: "center" });
+
+    // Recipient Name
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.setTextColor(15, 76, 42);
+    doc.text(recipient.name.toUpperCase(), 148.5, 88, { align: "center" });
+
+    doc.setDrawColor(15, 76, 42);
+    doc.setLineWidth(0.4);
+    doc.line(70, 93, 227, 93);
+
+    // Description
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(60, 60, 60);
+
+    if (recipient.type === 'Participant') {
+      doc.text(`for active participation in "${recipient.roleOrProgram}"`, 148.5, 108, { align: "center" });
+      doc.text(`during the community event "${eventTitle}".`, 148.5, 116, { align: "center" });
+    } else {
+      doc.text(`in grateful recognition of outstanding service and dedication as`, 148.5, 108, { align: "center" });
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(15, 76, 42);
+      doc.text(`${recipient.type} (${recipient.roleOrProgram})`, 148.5, 116, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(`for the event "${eventTitle}".`, 148.5, 124, { align: "center" });
+    }
+
+    // Footer / Signatures
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+
+    const issueDate = activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : new Date().toLocaleDateString();
+    doc.text(`Date of Event: ${issueDate}`, 50, 160);
+    doc.line(40, 168, 90, 168);
+    doc.text("Date", 60, 173);
+
+    doc.line(207, 168, 257, 168);
+    doc.text("Event Director / Committee Lead", 207, 173);
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
+
+    doc.save(`${recipient.name.replace(/\s+/g, '_')}_Certificate.pdf`);
+  };
+
+  // Bulk Certificates PDF Generator
+  const generateBulkCertificatesPDF = (recipientsList: CertRecipient[]) => {
+    if (!activeEvent || recipientsList.length === 0) return;
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Event';
+
+    recipientsList.forEach((recipient, index) => {
+      if (index > 0) {
+        doc.addPage();
+      }
+
+      doc.setDrawColor(15, 76, 42);
+      doc.setLineWidth(2.5);
+      doc.rect(10, 10, 277, 190);
+
+      doc.setDrawColor(212, 175, 55);
+      doc.setLineWidth(0.8);
+      doc.rect(14, 14, 269, 182);
+
+      doc.setLineWidth(0.4);
+      doc.line(17, 17, 30, 17);
+      doc.line(17, 17, 17, 30);
+      doc.line(280, 17, 267, 17);
+      doc.line(280, 17, 280, 30);
+      doc.line(17, 193, 30, 193);
+      doc.line(17, 193, 17, 180);
+      doc.line(280, 193, 267, 193);
+      doc.line(280, 193, 280, 180);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(15, 76, 42);
+      doc.text("AL HAIL GREENS (GMK)", 148.5, 32, { align: "center" });
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(120, 120, 120);
+      doc.text("AL HAIL EXECUTIVE RESIDENTS ASSOCIATION", 148.5, 38, { align: "center" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(212, 175, 55);
+      const certHeader = recipient.type === 'Participant' ? "CERTIFICATE OF PARTICIPATION" : "CERTIFICATE OF APPRECIATION";
+      doc.text(certHeader, 148.5, 54, { align: "center" });
+
+      doc.setDrawColor(212, 175, 55);
+      doc.setLineWidth(0.5);
+      doc.line(90, 58, 207, 58);
+
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(11);
+      doc.setTextColor(80, 80, 80);
+      doc.text("This certificate is proudly presented to", 148.5, 72, { align: "center" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(24);
+      doc.setTextColor(15, 76, 42);
+      doc.text(recipient.name.toUpperCase(), 148.5, 88, { align: "center" });
+
+      doc.setDrawColor(15, 76, 42);
+      doc.setLineWidth(0.4);
+      doc.line(70, 93, 227, 93);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(60, 60, 60);
+
+      if (recipient.type === 'Participant') {
+        doc.text(`for active participation in "${recipient.roleOrProgram}"`, 148.5, 108, { align: "center" });
+        doc.text(`during the community event "${eventTitle}".`, 148.5, 116, { align: "center" });
+      } else {
+        doc.text(`in grateful recognition of outstanding service and dedication as`, 148.5, 108, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 76, 42);
+        doc.text(`${recipient.type} (${recipient.roleOrProgram})`, 148.5, 116, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(60, 60, 60);
+        doc.text(`for the event "${eventTitle}".`, 148.5, 124, { align: "center" });
+      }
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+
+      const issueDate = activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : new Date().toLocaleDateString();
+      doc.text(`Date of Event: ${issueDate}`, 50, 160);
+      doc.line(40, 168, 90, 168);
+      doc.text("Date", 60, 173);
+
+      doc.line(207, 168, 257, 168);
+      doc.text("Event Director / Committee Lead", 207, 173);
+
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "italic");
+      doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
+    });
+
+    doc.save(`${activeEvent.eventName || activeEvent.title}_All_Certificates.pdf`);
+  };
+
   const runIntegrityAudit = async () => {
     const targets = [
       { key: 'test02', name: 'Resident Test 02', email: 'residenttest02@yahoo.com' },
@@ -2231,6 +2607,66 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       }
     } catch (err: any) {
       setErrorMsg("Failed to delete committee: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Archive committee
+  const handleArchiveCommittee = async (comm: EventCommittee) => {
+    const confirmArchive = await showConfirm({
+      title: "ARCHIVE COMMITTEE",
+      message: `Are you sure you want to archive committee "${comm.name}"? It will be moved to the Archived tab.`,
+      severity: "warning",
+      confirmText: "Archive Committee",
+      cancelText: "Cancel"
+    });
+    if (!confirmArchive) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      await updateDoc(doc(db, "eventCommittees", comm.id), {
+        status: 'archived',
+        updatedAt: new Date().toISOString()
+      });
+      await createAuditLog(
+        'COMMITTEE_ARCHIVED',
+        profile?.email || 'event_director',
+        'committee',
+        comm.id,
+        `Archived committee '${comm.name}'`
+      );
+      setSuccessMsg(`✓ Committee "${comm.name}" has been moved to Archived.`);
+      if (activeCommitteeToConfigure === comm.name) {
+        setActiveCommitteeToConfigure(null);
+      }
+    } catch (err: any) {
+      setErrorMsg("Failed to archive committee: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Restore committee from archived status
+  const handleRestoreCommittee = async (comm: EventCommittee) => {
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      await updateDoc(doc(db, "eventCommittees", comm.id), {
+        status: 'active',
+        updatedAt: new Date().toISOString()
+      });
+      await createAuditLog(
+        'COMMITTEE_RESTORED',
+        profile?.email || 'event_director',
+        'committee',
+        comm.id,
+        `Restored committee '${comm.name}' to Active status`
+      );
+      setSuccessMsg(`✓ Committee "${comm.name}" has been restored to Active.`);
+    } catch (err: any) {
+      setErrorMsg("Failed to restore committee: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -3169,72 +3605,154 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     }
   };
 
-  // Delete Rejected Program action (GEAS Confirmation Dialog integration)
-  const handleDeleteProgram = async (programId: string, programTitle: string) => {
-    console.log(`[PROGRAM DELETE 1] Delete button clicked for program ID: ${programId}`);
+  // Delete Program action with GEAS Confirmation & Safety Verification
+  const handleDeleteProgram = async (programId: string, programTitle?: string) => {
+    console.log(`[PROGRAM DELETE 1] Delete action initiated for program ID: ${programId}`);
     
     const prog = activePrograms.find(p => p.id === programId);
     if (!prog) {
-      console.error(`[PROGRAM DELETE 2] Program not found in local state: ${programId}`);
-      setErrorMsg("Program submission not found.");
+      console.error(`[PROGRAM DELETE 2] Program not found: ${programId}`);
+      setErrorMsg("Program/Event not found.");
       return;
     }
-    console.log(`[PROGRAM DELETE 2] Program identified: "${prog.title}" (ID: ${prog.id}, Status: ${prog.status})`);
 
-    const currentProgComm = activeCommittees.find(c => c.name.toLowerCase() === 'program committee' || c.name.toLowerCase() === 'programs' || c.name.toLowerCase() === 'program');
+    const userEmailLower = profile?.email?.toLowerCase().trim() || '';
+    const userGmkIdUpper = profile?.gmkId?.toUpperCase().trim() || '';
+    const userRoles = profile?.roles || [];
+
+    // 1. Check Event Director / Executive / Admin role
+    const isED = userRoles.some((r: string) => 
+      ['event_director', 'admin', 'super_admin', 'president', 'vp', 'vice_president'].includes(r)
+    );
+
+    // 2. Check Program Lead responsibility (Lead in Program Committee)
+    const currentProgComm = activeCommittees.find(c => 
+      ['program committee', 'programs', 'program'].includes(c.name.toLowerCase())
+    );
     const commLeads = (currentProgComm?.members || []).filter(m => m.role === 'Lead');
+    const isProgramLead = commLeads.some(l => 
+      (l.email && l.email.toLowerCase().trim() === userEmailLower) ||
+      (l.residentId && l.residentId.toUpperCase().trim() === userGmkIdUpper)
+    );
 
-    const isAuth = (profile?.roles || []).some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp'].includes(r)) || commLeads.some(l => l.email === profile?.email);
-    console.log(`[PROGRAM DELETE 3] Authorization resolved: ${isAuth ? 'AUTHORIZED' : 'DENIED'}`);
-    
+    // 3. Check Program Coordinator responsibility (assigned coordinator for THIS specific program)
+    const isProgramCoordinator = (prog.coordinators || []).some(c => 
+      (c.email && c.email.toLowerCase().trim() === userEmailLower) ||
+      (c.residentId && c.residentId.toUpperCase().trim() === userGmkIdUpper)
+    );
+
+    const isAuth = isED || isProgramLead || isProgramCoordinator;
+    console.log(`[PROGRAM DELETE 3] Authorization check: isED=${isED}, isProgramLead=${isProgramLead}, isProgramCoordinator=${isProgramCoordinator} => ${isAuth ? 'AUTHORIZED' : 'DENIED'}`);
+
     if (!isAuth) {
-      setErrorMsg("REJECTED: Deletion of program submissions is restricted to authorized Event Directors and Program Leads.");
+      setErrorMsg("AUTHORIZATION BLOCK: Deletion of Program/Event is restricted to the Event Director, Program Lead, or assigned Program Coordinator for this program.");
       return;
     }
 
-    console.log(`[PROGRAM DELETE 4] Confirmation opened using GEASConfirmationDialog`);
+    // 4. PROGRAM/EVENT DELETE SAFETY: Inspect protected operational records
+    const protectedDetails: string[] = [];
+
+    const participantsCount = (prog.participants || []).length;
+    if (participantsCount > 0) {
+      protectedDetails.push(`${participantsCount} registered participant(s)`);
+    }
+
+    const expensesCount = (prog.expenses || []).length;
+    if (expensesCount > 0) {
+      protectedDetails.push(`${expensesCount} logged expense record(s)`);
+    }
+
+    // Check registrations referencing this program
+    const linkedRegs = registrations.filter(r => 
+      r.programId === prog.id || 
+      r.selectedProgramId === prog.id ||
+      (r.programTitle && r.programTitle.toLowerCase() === prog.title.toLowerCase())
+    );
+    if (linkedRegs.length > 0) {
+      protectedDetails.push(`${linkedRegs.length} registration record(s)`);
+    }
+
+    if (protectedDetails.length > 0) {
+      setErrorMsg(`This Program/Event contains operational records and cannot be deleted. Remaining records: ${protectedDetails.join(', ')}.`);
+      return;
+    }
+
+    // 5. GEAS Confirmation Dialog
+    console.log(`[PROGRAM DELETE 5] Opening GEASConfirmationDialog for "${prog.title}"`);
     const confirmed = await showConfirm({
-      title: `Delete Rejected Program Submission?`,
-      message: `Are you sure you want to permanently delete the program submission "${prog.title}" submitted by ${prog.coordinators?.[0]?.fullName || 'Resident'}? This action cannot be undone.`,
-      confirmLabel: `Delete Program`,
-      cancelLabel: `Cancel`,
-      severity: `danger`
+      title: `Delete Program/Event?`,
+      message: `This will permanently remove the Program/Event "${prog.title}" (Identifier: ${prog.id}) and its associated operational records.`,
+      severity: `danger`,
+      confirmText: `Delete Program/Event`,
+      cancelText: `Cancel`
     });
 
     if (!confirmed) {
-      console.log(`[PROGRAM DELETE 5] Confirmation cancelled by user`);
+      console.log(`[PROGRAM DELETE 6] Deletion cancelled by user`);
       return;
     }
-    console.log(`[PROGRAM DELETE 5] Confirmation accepted by user`);
 
     setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
     try {
-      console.log(`[PROGRAM DELETE 6] Dependency validation: Ensuring primary resident and family records remain intact`);
-      
-      console.log(`[PROGRAM DELETE 7] Delete operation started for Firestore doc: eventPrograms/${programId}`);
+      console.log(`[PROGRAM DELETE 7] Deleting Firestore doc eventPrograms/${programId}`);
       await deleteDoc(doc(db, "eventPrograms", programId));
-      console.log(`[PROGRAM DELETE 8] Firestore commit successful`);
 
-      const docCheck = await getDoc(doc(db, "eventPrograms", programId));
-      console.log(`[PROGRAM DELETE 9] Verification check: exists = ${docCheck.exists()}`);
-
-      console.log(`[PROGRAM DELETE 10] Creating audit log entry: DELETE_PROGRAM`);
       await createAuditLog(
         'DELETE_PROGRAM',
         profile?.email || 'event_director',
         'program',
         programId,
-        `Permanently deleted rejected stage program '${prog.title}' (ID: ${programId})`
+        `Permanently deleted Program/Event '${prog.title}' (ID: ${programId})`
       );
 
-      console.log(`[PROGRAM DELETE 11] UI refresh: removing ${programId} from local activePrograms`);
       setActivePrograms(prev => prev.filter(p => p.id !== programId));
-
-      console.log(`[PROGRAM DELETE 12] Success: Program "${prog.title}" successfully deleted.`);
-      setSuccessMsg(`✓ Program "${prog.title}" has been permanently deleted.`);
+      if (activeProgForManagement === programId) {
+        setActiveProgForManagement(null);
+      }
+      setSuccessMsg(`✓ Program/Event "${prog.title}" has been permanently deleted.`);
     } catch (err: any) {
       console.error("❌ [PROGRAM DELETE FAIL]", err);
-      setErrorMsg("Failed to delete program: " + err.message);
+      setErrorMsg("Failed to delete Program/Event: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateProgramDetails = async (programId: string) => {
+    if (!editProgTitle.trim()) {
+      setErrorMsg("Program title is required.");
+      return;
+    }
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const progRef = doc(db, "eventPrograms", programId);
+      await updateDoc(progRef, {
+        title: editProgTitle.trim(),
+        programType: editProgCategory,
+        category: editProgCategory,
+        description: editProgDescription.trim(),
+        updatedAt: new Date().toISOString()
+      });
+
+      setActivePrograms(prev => prev.map(p => p.id === programId ? {
+        ...p,
+        title: editProgTitle.trim(),
+        programType: editProgCategory as any,
+        category: editProgCategory,
+        description: editProgDescription.trim(),
+        updatedAt: new Date().toISOString()
+      } : p));
+
+      setEditingProgramId(null);
+      setSuccessMsg(`✓ Program "${editProgTitle.trim()}" updated successfully.`);
+    } catch (err: any) {
+      console.error("Failed to update program details:", err);
+      setErrorMsg("Failed to update program details: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -4555,58 +5073,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                     )}
                   </GMKCard>
 
-                  {/* DOM Summary Modal */}
-                  {showSummaryModal && activeEvent && (() => {
-                    const stats = calculateStats();
-                    return (
-                      <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans">
-                          <button
-                            onClick={() => setShowSummaryModal(false)}
-                            className="absolute right-4 top-4 text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black"
-                          >
-                            <X className="w-5 h-5" />
-                          </button>
-
-                          <div>
-                            <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Gathering Report Summary</span>
-                            <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEvent.eventName || activeEvent.title}</h3>
-                          </div>
-
-                          <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
-                            <div className="p-3 bg-stone-50 flex justify-between">
-                              <span className="text-stone-500">Event Status:</span>
-                              <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Total Registered Units:</span>
-                              <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Total RSVP Attendees:</span>
-                              <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Adult Count:</span>
-                              <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Children Count:</span>
-                              <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => setShowSummaryModal(false)}
-                            className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
-                          >
-                            Close Summary View
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {/* Pricing Policy specification modal overlay */}
                   {showPricingPolicyModal && (
                     <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -5047,173 +5513,268 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                   {/* MAIN COMMITTEES GRID VIEW */}
                   {!activeCommitteeToConfigure && (
                     <div className="space-y-6">
-                      {/* Create Custom Committee Button Row */}
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 bg-white border border-stone-200 rounded-2xl shadow-xs">
-                        <div>
-                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Create Operational Committee</h4>
-                          <p className="text-[10px] text-stone-500 font-bold">Standard committees are initialized automatically. Create custom operational committees as needed.</p>
-                        </div>
-                        <div>
-                          {!showAddCommitteeInput ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowAddCommitteeInput(true);
-                                setNewCommitteeName('');
-                              }}
-                              className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0 shadow-sm"
-                            >
-                              <Plus className="w-4 h-4 text-[#d4af37]" />
-                              <span>Add Committee</span>
-                            </button>
-                          ) : (
-                            <div className="flex items-center gap-2 bg-stone-50 p-2.5 rounded-xl border border-stone-200 animate-fadeIn">
-                              <input 
-                                type="text"
-                                autoFocus
-                                value={newCommitteeName}
-                                onChange={(e) => setNewCommitteeName(e.target.value)}
-                                placeholder="e.g. Stage & Decor, Sponsorship"
-                                className="font-bold bg-white border border-stone-200 p-2 rounded-xl text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] text-xs"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleCreateCustomCommittee();
-                                  } else if (e.key === 'Escape') {
-                                    e.preventDefault();
+                      {/* Active / Archived Sub-Tabs */}
+                      <div className="flex items-center space-x-2 bg-stone-100/80 p-1 rounded-2xl border border-stone-200 w-fit">
+                        <button
+                          type="button"
+                          onClick={() => setCommitteeTab('active')}
+                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 ${
+                            committeeTab === 'active'
+                              ? 'bg-[#0f4c2a] text-white shadow-xs'
+                              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+                          }`}
+                        >
+                          <span>Active</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                            committeeTab === 'active' ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'
+                          }`}>
+                            {activeCommittees.filter(c => c.status !== 'archived').length}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCommitteeTab('archived')}
+                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 ${
+                            committeeTab === 'archived'
+                              ? 'bg-[#0f4c2a] text-white shadow-xs'
+                              : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+                          }`}
+                        >
+                          <span>Archived</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                            committeeTab === 'archived' ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'
+                          }`}>
+                            {activeCommittees.filter(c => c.status === 'archived').length}
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Create Custom Committee Button Row (Active Tab only) */}
+                      {committeeTab === 'active' && (
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 bg-white border border-stone-200 rounded-2xl shadow-xs">
+                          <div>
+                            <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Create Operational Committee</h4>
+                            <p className="text-[10px] text-stone-500 font-bold">Standard committees are initialized automatically. Create custom operational committees as needed.</p>
+                          </div>
+                          <div>
+                            {!showAddCommitteeInput ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowAddCommitteeInput(true);
+                                  setNewCommitteeName('');
+                                }}
+                                className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer shrink-0 shadow-sm"
+                              >
+                                <Plus className="w-4 h-4 text-[#d4af37]" />
+                                <span>Add Committee</span>
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-2 bg-stone-50 p-2.5 rounded-xl border border-stone-200 animate-fadeIn">
+                                <input 
+                                  type="text"
+                                  autoFocus
+                                  value={newCommitteeName}
+                                  onChange={(e) => setNewCommitteeName(e.target.value)}
+                                  placeholder="e.g. Stage & Decor, Sponsorship"
+                                  className="font-bold bg-white border border-stone-200 p-2 rounded-xl text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] text-xs"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleCreateCustomCommittee();
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      setNewCommitteeName('');
+                                      setShowAddCommitteeInput(false);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleCreateCustomCommittee}
+                                  disabled={isSubmitting || !newCommitteeName.trim()}
+                                  className="px-3 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0"
+                                >
+                                  Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
                                     setNewCommitteeName('');
                                     setShowAddCommitteeInput(false);
-                                  }
-                                }}
-                              />
-                              <button
-                                type="button"
-                                onClick={handleCreateCustomCommittee}
-                                disabled={isSubmitting || !newCommitteeName.trim()}
-                                className="px-3 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0"
-                              >
-                                Add
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setNewCommitteeName('');
-                                  setShowAddCommitteeInput(false);
-                                }}
-                                className="px-3 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Committees Bento Grid */}
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {activeCommittees.map((comm) => {
-                          const commName = comm.name;
-                          const commLeads = (comm.members || []).filter(m => m.role === 'Lead');
-                          const leadCount = commLeads.length;
-
-                          return (
-                            <div key={comm.id} className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between space-y-4 transition-all hover:shadow-md">
-                              <div className="space-y-4">
-                                {/* Header */}
-                                <div className="flex items-start justify-between">
-                                  <div className="flex items-center justify-between w-full">
-                                    <div className="flex items-center space-x-3">
-                                      <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[#0f4c2a]">
-                                        <Users className="w-5 h-5" />
-                                      </div>
-                                      <div>
-                                        <div className="flex items-center space-x-2">
-                                          <h4 className="text-stone-850 font-black text-sm font-heading">{commName}</h4>
-                                          {comm.status === 'archived' && (
-                                            <span className="px-1.5 py-0.5 bg-stone-100 text-stone-500 border border-stone-200 rounded-md text-[8px] font-black uppercase">
-                                              Archived
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center space-x-1.5 mt-0.5">
-                                          <span className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase font-mono border ${
-                                            leadCount === 2 
-                                              ? 'bg-amber-50 text-amber-800 border-amber-200' 
-                                              : leadCount === 1 
-                                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                                              : 'bg-stone-50 text-stone-400 border-stone-200'
-                                          }`}>
-                                            Leads Assigned: {leadCount}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Governance delete/archive option for custom committees */}
-                                    {!["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"].includes(commName) && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDeleteCommittee(comm);
-                                        }}
-                                        disabled={isSubmitting || comm.status === 'archived'}
-                                        className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg border border-red-100 transition-all cursor-pointer disabled:opacity-50"
-                                        title={(comm.members || []).length > 0 ? "Archive Committee (has members)" : "Delete Committee"}
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Description */}
-                                <p className="text-stone-650 text-[11px] font-bold leading-relaxed">
-                                  {commName === 'Attendance' ? 'Manages gate check-ins, registration lists, QR verification, and check-in logs.' :
-                                   commName === 'Food' ? 'Supervises meal counts, food preparation schedules, coupon allocation, and distribution.' :
-                                   commName === 'Finance' ? 'Formulates budgets, tracks program expenses, sponsors, and handles financial closures.' :
-                                   commName === 'Sourcing' ? 'Oversees auditorium styling, backdrop designs, stage scheduling, and lighting setups.' :
-                                   commName === 'Sponsorship' ? 'Connects with local vendors, handles branding, advertisements, and promotional tie-ups.' :
-                                   commName === 'Program' ? 'Coordinates stage scheduling, program categories, participant submissions, and coordinator logs.' :
-                                   'Operational Committee responsible for coordinating specialized event tasks and volunteer activities.'}
-                                </p>
-
-                                {/* Current Assigned Leads Section (Card) */}
-                                <div className="space-y-2 pt-3 border-t border-stone-100">
-                                  <h5 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider">Assigned Leads</h5>
-                                  {commLeads.length === 0 ? (
-                                    <p className="text-[10px] text-stone-400 italic font-bold">No leads assigned yet. Select Manage Committee to appoint.</p>
-                                  ) : (
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {commLeads.map(lead => (
-                                        <span key={lead.residentId} className="inline-flex items-center px-2 py-1 bg-emerald-50/60 border border-emerald-100 text-stone-800 rounded-lg text-[10px] font-bold">
-                                          {lead.fullName}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
+                                  }}
+                                  className="px-3 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
                               </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-                              {/* Action Footer */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveCommitteeToConfigure(commName);
-                                  setWorkspaceSearchQuery('');
-                                  setProgCoordSearchQuery('');
-                                  setProgVolSearchQuery('');
-                                  setActiveProgForManagement(null);
-                                }}
-                                className="w-full mt-2 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-xs font-black uppercase tracking-wider rounded-xl border border-[#0f4c2a] flex items-center justify-center space-x-1 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
-                              >
-                                <span>Manage Committee</span>
-                                <ChevronRight className="w-4 h-4" />
-                              </button>
+                      {/* Filtered Committees List */}
+                      {(() => {
+                        const filteredCommittees = activeCommittees.filter(c => 
+                          committeeTab === 'active' ? c.status !== 'archived' : c.status === 'archived'
+                        );
+
+                        if (filteredCommittees.length === 0) {
+                          return (
+                            <div className="text-center py-12 border border-dashed border-stone-250 rounded-2xl bg-white space-y-2">
+                              <Archive className="w-8 h-8 mx-auto text-stone-350" />
+                              <h4 className="text-stone-700 font-black text-xs uppercase tracking-wider">
+                                {committeeTab === 'active' ? 'No Active Committees' : 'No Archived Committees'}
+                              </h4>
+                              <p className="text-stone-500 text-[10px] max-w-xs mx-auto font-bold">
+                                {committeeTab === 'active' 
+                                  ? 'There are currently no active committees for this event.' 
+                                  : 'Committees that have been archived will appear here. You can restore them to active status anytime.'}
+                              </p>
                             </div>
                           );
-                        })}
-                      </div>
+                        }
+
+                        return (
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {filteredCommittees.map((comm) => {
+                              const commName = comm.name;
+                              const commLeads = (comm.members || []).filter(m => m.role === 'Lead');
+                              const leadCount = commLeads.length;
+
+                              return (
+                                <div key={comm.id} className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between space-y-4 transition-all hover:shadow-md">
+                                  <div className="space-y-4">
+                                    {/* Header */}
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center space-x-3">
+                                          <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[#0f4c2a]">
+                                            <Users className="w-5 h-5" />
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center space-x-2">
+                                              <h4 className="text-stone-850 font-black text-sm font-heading">{commName}</h4>
+                                              {comm.status === 'archived' && (
+                                                <span className="px-1.5 py-0.5 bg-stone-100 text-stone-500 border border-stone-200 rounded-md text-[8px] font-black uppercase">
+                                                  Archived
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center space-x-1.5 mt-0.5">
+                                              <span className={`px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase font-mono border ${
+                                                leadCount === 2 
+                                                  ? 'bg-amber-50 text-amber-800 border-amber-200' 
+                                                  : leadCount === 1 
+                                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                                                  : 'bg-stone-50 text-stone-400 border-stone-200'
+                                              }`}>
+                                                Leads Assigned: {leadCount}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Actions: Archive / Restore / Delete */}
+                                        <div className="flex items-center space-x-1">
+                                          {committeeTab === 'active' ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleArchiveCommittee(comm);
+                                              }}
+                                              disabled={isSubmitting}
+                                              className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg border border-amber-200 transition-all cursor-pointer disabled:opacity-50"
+                                              title="Archive Committee"
+                                            >
+                                              <Archive className="w-3.5 h-3.5" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRestoreCommittee(comm);
+                                              }}
+                                              disabled={isSubmitting}
+                                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1"
+                                              title="Restore to Active"
+                                            >
+                                              <RotateCcw className="w-3 h-3" />
+                                              <span>Restore</span>
+                                            </button>
+                                          )}
+
+                                          {/* Delete for custom committees */}
+                                          {!["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"].includes(commName) && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteCommittee(comm);
+                                              }}
+                                              disabled={isSubmitting}
+                                              className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg border border-red-100 transition-all cursor-pointer disabled:opacity-50"
+                                              title="Delete Custom Committee"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Description */}
+                                    <p className="text-stone-650 text-[11px] font-bold leading-relaxed">
+                                      {commName === 'Attendance' ? 'Manages gate check-ins, registration lists, QR verification, and check-in logs.' :
+                                       commName === 'Food' ? 'Supervises meal counts, food preparation schedules, coupon allocation, and distribution.' :
+                                       commName === 'Finance' ? 'Formulates budgets, tracks program expenses, sponsors, and handles financial closures.' :
+                                       commName === 'Sourcing' ? 'Oversees auditorium styling, backdrop designs, stage scheduling, and lighting setups.' :
+                                       commName === 'Sponsorship' ? 'Connects with local vendors, handles branding, advertisements, and promotional tie-ups.' :
+                                       commName === 'Program' ? 'Coordinates stage scheduling, program categories, participant submissions, and coordinator logs.' :
+                                       'Operational Committee responsible for coordinating specialized event tasks and volunteer activities.'}
+                                    </p>
+
+                                    {/* Current Assigned Leads Section (Card) */}
+                                    <div className="space-y-2 pt-3 border-t border-stone-100">
+                                      <h5 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider">Assigned Leads</h5>
+                                      {commLeads.length === 0 ? (
+                                        <p className="text-[10px] text-stone-400 italic font-bold">No leads assigned yet. Select Manage Committee to appoint.</p>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {commLeads.map(lead => (
+                                            <span key={lead.residentId} className="inline-flex items-center px-2 py-1 bg-emerald-50/60 border border-emerald-100 text-stone-800 rounded-lg text-[10px] font-bold">
+                                              {lead.fullName}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Action Footer */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveCommitteeToConfigure(commName);
+                                      setWorkspaceSearchQuery('');
+                                      setProgCoordSearchQuery('');
+                                      setProgVolSearchQuery('');
+                                      setActiveProgForManagement(null);
+                                    }}
+                                    className="w-full mt-2 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-xs font-black uppercase tracking-wider rounded-xl border border-[#0f4c2a] flex items-center justify-center space-x-1 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+                                  >
+                                    <span>Manage Committee</span>
+                                    <ChevronRight className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -5580,15 +6141,102 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                               </span>
                                             </div>
                                             <h5 className="text-stone-850 font-black text-sm font-heading mt-1 capitalize">{prog.title}</h5>
+                                            <p className="text-[9px] font-mono text-stone-400 mt-0.5">ID: {prog.id}</p>
                                           </div>
-                                          <button
-                                            type="button"
-                                            onClick={() => setActiveProgForManagement(null)}
-                                            className="text-[10px] text-stone-400 hover:text-stone-800 font-extrabold uppercase tracking-wider"
-                                          >
-                                            Close
-                                          </button>
+                                          <div className="flex items-center space-x-2 shrink-0">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (editingProgramId === prog.id) {
+                                                  setEditingProgramId(null);
+                                                } else {
+                                                  setEditingProgramId(prog.id);
+                                                  setEditProgTitle(prog.title);
+                                                  setEditProgCategory(prog.programType || prog.category || 'ADULTS');
+                                                  setEditProgDescription(prog.description || '');
+                                                }
+                                              }}
+                                              className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-700 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer"
+                                            >
+                                              <Edit3 className="w-3 h-3 text-stone-600" />
+                                              <span>{editingProgramId === prog.id ? 'Cancel' : 'Edit'}</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteProgram(prog.id, prog.title)}
+                                              disabled={isSubmitting}
+                                              className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-700 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3 h-3 text-rose-600" />
+                                              <span>Delete Program/Event</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => setActiveProgForManagement(null)}
+                                              className="text-[10px] text-stone-400 hover:text-stone-800 font-extrabold uppercase tracking-wider ml-1"
+                                            >
+                                              Close
+                                            </button>
+                                          </div>
                                         </div>
+
+                                        {/* Inline Edit Form */}
+                                        {editingProgramId === prog.id && (
+                                          <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3 space-y-2.5 animate-fadeIn">
+                                            <h6 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider">Edit Program Details</h6>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                              <div>
+                                                <label className="text-[9px] font-black text-stone-600 block uppercase">Title</label>
+                                                <input 
+                                                  type="text"
+                                                  value={editProgTitle}
+                                                  onChange={(e) => setEditProgTitle(e.target.value)}
+                                                  className="w-full px-2 py-1 bg-white border border-stone-250 rounded-lg text-[10px] font-bold text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                                />
+                                              </div>
+                                              <div>
+                                                <label className="text-[9px] font-black text-stone-600 block uppercase">Category / Audience</label>
+                                                <select
+                                                  value={editProgCategory}
+                                                  onChange={(e) => setEditProgCategory(e.target.value)}
+                                                  className="w-full px-2 py-1 bg-white border border-stone-250 rounded-lg text-[10px] font-bold text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                                >
+                                                  <option value="ADULTS">ADULTS</option>
+                                                  <option value="KIDS">KIDS</option>
+                                                  <option value="MIXED">MIXED</option>
+                                                </select>
+                                              </div>
+                                            </div>
+                                            <div>
+                                              <label className="text-[9px] font-black text-stone-600 block uppercase">Description</label>
+                                              <textarea
+                                                value={editProgDescription}
+                                                onChange={(e) => setEditProgDescription(e.target.value)}
+                                                rows={2}
+                                                className="w-full px-2 py-1 bg-white border border-stone-250 rounded-lg text-[10px] font-bold text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                              />
+                                            </div>
+                                            <div className="flex justify-end space-x-2 pt-1">
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingProgramId(null)}
+                                                className="px-3 py-1 bg-stone-200 hover:bg-stone-300 rounded-lg text-[9px] font-bold uppercase"
+                                              >
+                                                Cancel
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleUpdateProgramDetails(prog.id)}
+                                                disabled={isSubmitting}
+                                                className="px-3 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] font-black uppercase tracking-wider"
+                                              >
+                                                Save Changes
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
 
                                         {/* Audience Filter Bar */}
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#0f4c2a]/5 border border-[#0f4c2a]/10 p-2.5 rounded-2xl">
@@ -6061,94 +6709,198 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           )}
 
 
-          {/* 4. PROGRAMS TAB */}
+          {/* 4. PROGRAMS TAB: OPERATIONAL WORKSPACE */}
           {activeTab === 'programs' && (
             <div className="space-y-6 animate-fadeIn">
               <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
-                    Resident Program Approvals
+                    Programs / Event Workspace
                   </h3>
-                  <p className="text-stone-550 text-[10px] font-bold">Review and approve stage listings submitted by household residents.</p>
+                  <p className="text-stone-550 text-[10px] font-bold">
+                    Operational management of stage programs: create listings, assign coordinators & volunteers, log expenses, and manage individual program workspaces.
+                  </p>
                 </div>
               </div>
 
               {selectedEventId && activeEvent ? (
-                <div className="space-y-4">
+                <div className="space-y-6">
+                  {/* Create Program Desk */}
+                  <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+                    <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading block">
+                      Create Approved Program
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Program Title</label>
+                        <input
+                          type="text"
+                          value={progTitle}
+                          onChange={(e) => setProgTitle(e.target.value)}
+                          placeholder="e.g. Classical Dance Performance"
+                          className="w-full px-3 py-1.5 font-bold bg-white border border-stone-250 rounded-xl text-stone-850 text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Type / Audience</label>
+                        <select
+                          value={progType}
+                          onChange={(e) => setProgType(e.target.value)}
+                          className="w-full px-3 py-1.5 font-bold bg-white border border-stone-250 rounded-xl text-stone-850 text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                        >
+                          <option value="Select">Select Category</option>
+                          <option value="Adults">ADULTS</option>
+                          <option value="Kids">KIDS</option>
+                          <option value="Mix">MIXED</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Program Description</label>
+                      <textarea
+                        value={progDescription}
+                        onChange={(e) => setProgDescription(e.target.value)}
+                        placeholder="Details about duration, tracks, components etc."
+                        className="w-full px-3 py-1.5 font-bold bg-white border border-stone-250 rounded-xl text-stone-850 text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] h-14"
+                      />
+                    </div>
+
+                    {/* Coordinator Selection */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider block">Assign Program Coordinator</label>
+                      {progCoordinator ? (
+                        <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                          <div>
+                            <strong className="text-stone-900">{progCoordinator.fullName}</strong>
+                            <span className="text-stone-500 block text-[10px]">Unit {progCoordinator.displayUnitNumber} • {progCoordinator.email}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setProgCoordinator(null)}
+                            className="text-stone-400 hover:text-red-600 font-extrabold uppercase text-[9px] tracking-wider"
+                          >
+                            Change
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-stone-400" />
+                            <input
+                              type="text"
+                              value={progCoordinatorSearch}
+                              onChange={(e) => setProgCoordinatorSearch(e.target.value)}
+                              placeholder="Search members by name or unit number to assign coordinator..."
+                              className="w-full pl-8 pr-3 py-1.5 font-bold bg-white border border-stone-250 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                            />
+                          </div>
+
+                          {progCoordinatorSearch && (() => {
+                            const matchedCoordResidents = getFilteredSearchMatches(progCoordinatorSearch, 'Mixed');
+                            return (
+                              <div className="border border-stone-200 rounded-xl bg-white shadow-md max-h-40 overflow-y-auto divide-y divide-stone-100">
+                                {matchedCoordResidents.length === 0 ? (
+                                  <div className="p-2.5 text-stone-450 italic text-[10px] text-center font-bold">
+                                    No matching active residents found.
+                                  </div>
+                                ) : (
+                                  matchedCoordResidents.slice(0, 5).map(res => {
+                                    const rawRes = residents.find(r => r.gmkId === res.id || r.email === res.email);
+                                    return (
+                                      <div key={res.id} className="p-2 flex items-center justify-between text-[11px] hover:bg-stone-50">
+                                        <div>
+                                          <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
+                                          <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} • {res.email}</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (rawRes) setProgCoordinator(rawRes);
+                                          }}
+                                          className="px-2 py-0.5 bg-[#0f4c2a]/10 text-[#0f4c2a] font-extrabold text-[9px] uppercase tracking-wider rounded-lg hover:bg-[#0f4c2a] hover:text-white transition-all cursor-pointer"
+                                        >
+                                          Select
+                                        </button>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCreateProgramDirectly}
+                      disabled={isSubmitting || !progTitle.trim() || !progCoordinator}
+                      className="w-full py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="w-4 h-4 text-[#d4af37]" />
+                      <span>Create Approved Program</span>
+                    </button>
+                  </div>
+
+                  {/* Programs List & Management Workspace */}
                   {activePrograms.length === 0 ? (
-                    <div className="text-center py-16 border border-dashed border-stone-250 rounded-2xl bg-white space-y-3">
-                      <Flame className="w-10 h-10 mx-auto text-stone-350" />
-                      <h4 className="text-stone-700 font-black">No Program Submissions</h4>
-                      <p className="text-stone-500 text-[10px] max-w-xs mx-auto font-bold">Residents have not submitted any stage performances or listings for this event yet.</p>
+                    <div className="text-center py-12 border border-dashed border-stone-250 rounded-2xl bg-white space-y-2">
+                      <Flame className="w-8 h-8 mx-auto text-stone-350" />
+                      <h4 className="text-stone-700 font-black text-xs">No Stage Programs Registered</h4>
+                      <p className="text-stone-500 text-[10px] max-w-xs mx-auto font-bold">
+                        Create a program above or navigate to the Committee workspace to manage detailed assignments.
+                      </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {activePrograms.map((prog) => (
-                        <div key={prog.id} className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs space-y-4">
-                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-stone-150 pb-3">
-                            <div>
-                              <span className="text-[9px] font-black tracking-widest text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-2 py-0.5 rounded-lg font-mono">
-                                {prog.programType || prog.category || 'Adults'}
-                              </span>
-                              <h4 className="text-stone-850 font-black text-sm font-heading mt-1 capitalize">{prog.title}</h4>
-                              
-                              <p className="text-stone-700 text-[10px] font-bold mt-1">
-                                Coordinator: <strong className="text-stone-900">{prog.coordinators?.[0]?.fullName || 'Unknown'}</strong> • {prog.coordinators?.[0]?.email}
-                              </p>
+                    <div className="space-y-4">
+                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading block border-b border-stone-200 pb-2">
+                        Active Programs ({activePrograms.length})
+                      </h4>
+                      <div className="grid grid-cols-1 gap-4">
+                        {activePrograms.map((prog) => (
+                          <div key={prog.id} className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 border-b border-stone-150 pb-2">
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-[8px] font-black tracking-widest text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-2 py-0.5 rounded-lg font-mono">
+                                    {prog.programType || prog.category || 'Adults'}
+                                  </span>
+                                  <span className="text-[8px] font-mono text-stone-400">
+                                    ID: {prog.id}
+                                  </span>
+                                </div>
+                                <h4 className="text-stone-850 font-black text-sm font-heading mt-1 capitalize">{prog.title}</h4>
+                                <p className="text-stone-600 text-[10px] font-bold mt-0.5">
+                                  Coordinator: <strong className="text-stone-900">{prog.coordinators?.[0]?.fullName || 'Unassigned'}</strong> {prog.coordinators?.[0]?.email ? `(${prog.coordinators[0].email})` : ''}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center space-x-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteProgram(prog.id, prog.title)}
+                                  disabled={isSubmitting}
+                                  className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>Delete Program/Event</span>
+                                </button>
+                              </div>
                             </div>
 
-                            <div className="flex items-center space-x-2 shrink-0">
-                              <span className={`px-2.5 py-1 rounded-full text-[9px] font-black tracking-wider uppercase border ${
-                                prog.status === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                                prog.status === 'rejected' ? 'bg-rose-50 text-rose-800 border-rose-200' :
-                                'bg-amber-50 text-amber-800 border-amber-200'
-                              }`}>
-                                {prog.status || 'pending'}
-                              </span>
+                            {prog.description && (
+                              <p className="text-stone-600 text-[10px] font-medium leading-relaxed">{prog.description}</p>
+                            )}
+
+                            <div className="flex items-center justify-between text-[10px] text-stone-500 pt-1 font-semibold">
+                              <span>Coordinators: {prog.coordinators?.length || 0} • Volunteers: {prog.volunteers?.length || 0} • Expenses: ${(prog.expenses || []).reduce((s, e) => s + e.amount, 0).toFixed(2)}</span>
                             </div>
                           </div>
-
-                          <div>
-                            <h5 className="text-[9px] uppercase font-black text-stone-500 tracking-wider">Description:</h5>
-                            <p className="text-stone-605 text-[10px] font-semibold mt-1 leading-relaxed whitespace-pre-wrap">{prog.description}</p>
-                          </div>
-
-                          {/* Action Controls */}
-                          <div className="pt-3 border-t border-stone-100 flex items-center justify-end space-x-2 font-heading">
-                            {prog.status === 'rejected' && (
-                              <button
-                                onClick={() => handleDeleteProgram(prog.id, prog.title)}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 rounded-xl border border-red-300 hover:border-red-600 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                                <span>Delete Program</span>
-                              </button>
-                            )}
-
-                            {prog.status !== 'rejected' && (
-                              <button
-                                onClick={() => handleRejectProgram(prog.id)}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 rounded-xl border border-red-200 hover:border-red-600 hover:bg-red-50 text-red-600 text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs"
-                              >
-                                Reject
-                              </button>
-                            )}
-
-                            {prog.status !== 'approved' && (
-                              <button
-                                onClick={() => handleApproveProgram(prog.id)}
-                                disabled={isSubmitting}
-                                className="px-4 py-2 rounded-xl bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm flex items-center space-x-1"
-                              >
-                                <Check className="w-3.5 h-3.5 text-[#d4af37]" />
-                                <span>Approve</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -6311,7 +7063,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
               <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
-                    Event Analytics & Gathering Reports
+                    Reports : Reports
                   </h3>
                   <p className="text-stone-550 text-[10px] font-bold">Consolidated review of financial statements, coordination stats, and attendance tallies.</p>
                 </div>
@@ -6324,9 +7076,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                     <div className="border-b border-stone-150 pb-2">
                       <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
                         <span>📊</span>
-                        <span>Gathering Report Summary</span>
+                        <span>Registrations</span>
                       </h4>
-                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Key performance, RSVPs, and financial indicators for this gathering.</p>
+                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Registrations</p>
                     </div>
 
                     {(() => {
@@ -6343,7 +7095,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                               <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
                             </div>
                             <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Total RSVP Attendees:</span>
+                              <span className="text-stone-500">Registered:</span>
                               <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
                             </div>
                             <div className="p-3 flex justify-between">
@@ -6366,7 +7118,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                               onClick={() => setShowSummaryModal(true)}
                               className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs"
                             >
-                              Open Summary Modal
+                              Reports
                             </button>
                             <button
                               type="button"
@@ -6417,6 +7169,25 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                         </div>
                       </div>
 
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowCommitteeDataModal(true)}
+                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
+                        >
+                          <span>👥</span>
+                          <span>Committee data</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportCommitteeDataPDF}
+                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
+                        >
+                          <span>📄</span>
+                          <span>Export to PDF</span>
+                        </button>
+                      </div>
+
                       <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
                         <p className="text-[10px] text-stone-600 font-bold leading-relaxed">
                           Want to adjust committee assignments or programs? Go to the <span className="text-[#0f4c2a] underline font-extrabold cursor-pointer" onClick={() => setActiveTab('committees')}>Committees</span> section to assign leads or add events directly.
@@ -6424,6 +7195,135 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                       </div>
                     </div>
                   </GMKCard>
+
+                  {/* Certificates Section */}
+                  <div className="md:col-span-2 pt-4">
+                    <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
+                      <div className="border-b border-stone-150 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                            <span>📜</span>
+                            <span>Certificates</span>
+                          </h4>
+                          <p className="text-[9px] text-stone-500 font-bold mt-0.5">
+                            Generate official PDF certificates for Committee Leads, Coordinators, Volunteers, and Program Participants.
+                          </p>
+                        </div>
+
+                        {(() => {
+                          const recipients = getCertificateRecipients();
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => generateBulkCertificatesPDF(recipients)}
+                              disabled={recipients.length === 0}
+                              className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 shrink-0"
+                            >
+                              <span>📥</span>
+                              <span>Download All Certificates (PDF)</span>
+                            </button>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Filter Sub-Tabs & Search */}
+                      {(() => {
+                        const allRecipients = getCertificateRecipients();
+                        const filteredRecipients = allRecipients.filter(r => {
+                          const matchesTab = certTab === 'all' ? true :
+                            certTab === 'leads' ? r.type === 'Committee Lead' :
+                            certTab === 'coordinators' ? r.type === 'Coordinator' :
+                            certTab === 'volunteers' ? r.type === 'Volunteer' :
+                            certTab === 'participants' ? r.type === 'Participant' : true;
+
+                          const matchesSearch = certSearch.trim() === '' ? true :
+                            r.name.toLowerCase().includes(certSearch.toLowerCase()) ||
+                            r.roleOrProgram.toLowerCase().includes(certSearch.toLowerCase());
+
+                          return matchesTab && matchesSearch;
+                        });
+
+                        return (
+                          <div className="space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              {/* Filter Tabs */}
+                              <div className="flex flex-wrap gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200 text-[10px] font-extrabold font-mono">
+                                {[
+                                  { id: 'all', label: 'All', count: allRecipients.length },
+                                  { id: 'leads', label: 'Committee Leads', count: allRecipients.filter(r => r.type === 'Committee Lead').length },
+                                  { id: 'coordinators', label: 'Coordinators', count: allRecipients.filter(r => r.type === 'Coordinator').length },
+                                  { id: 'volunteers', label: 'Volunteers', count: allRecipients.filter(r => r.type === 'Volunteer').length },
+                                  { id: 'participants', label: 'Participants', count: allRecipients.filter(r => r.type === 'Participant').length }
+                                ].map(tab => (
+                                  <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setCertTab(tab.id as any)}
+                                    className={`px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1 ${
+                                      certTab === tab.id
+                                        ? 'bg-[#0f4c2a] text-white shadow-xs'
+                                        : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+                                    }`}
+                                  >
+                                    <span>{tab.label}</span>
+                                    <span className={`px-1.5 py-0.2 rounded-full text-[8px] ${certTab === tab.id ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'}`}>
+                                      {tab.count}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Search Box */}
+                              <input
+                                type="text"
+                                value={certSearch}
+                                onChange={(e) => setCertSearch(e.target.value)}
+                                placeholder="Search recipient name..."
+                                className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] w-full sm:w-48"
+                              />
+                            </div>
+
+                            {/* Recipients List Table */}
+                            {filteredRecipients.length === 0 ? (
+                              <div className="text-center py-8 text-stone-400 font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-xl">
+                                No certificate recipients found matching criteria.
+                              </div>
+                            ) : (
+                              <div className="border border-stone-200 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs">
+                                {filteredRecipients.map((rec) => (
+                                  <div key={rec.id} className="p-3.5 bg-white hover:bg-stone-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center space-x-2">
+                                        <span className="font-extrabold text-stone-900">{rec.name}</span>
+                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                                          rec.type === 'Committee Lead' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                                          rec.type === 'Coordinator' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                          rec.type === 'Volunteer' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                          'bg-purple-50 text-purple-800 border-purple-200'
+                                        }`}>
+                                          {rec.type}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-stone-500 font-bold">{rec.context}</p>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => generateSingleCertificatePDF(rec)}
+                                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-xl transition-all cursor-pointer font-extrabold text-[10px] uppercase tracking-wider flex items-center space-x-1 shrink-0"
+                                    >
+                                      <span>📜</span>
+                                      <span>Download PDF Certificate</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </GMKCard>
+                  </div>
 
                   {/* GMK-STAB-002 Resident Registration Diagnostic Report Section */}
                   <div className="md:col-span-2 pt-4 animate-fadeIn">
@@ -6508,6 +7408,156 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
         </main>
       </div>
+
+      {/* Global Summary Modal Overlay */}
+      {showSummaryModal && activeEvent && (() => {
+        const stats = calculateStats();
+        return (
+          <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans">
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="absolute right-4 top-4 text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div>
+                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Registrations</span>
+                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEvent.eventName || activeEvent.title}</h3>
+              </div>
+
+              <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
+                <div className="p-3 bg-stone-50 flex justify-between">
+                  <span className="text-stone-500">Event Status:</span>
+                  <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Total Registered Units:</span>
+                  <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Registered:</span>
+                  <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Adult Count:</span>
+                  <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Children Count:</span>
+                  <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Event Venue:</span>
+                  <span className="font-extrabold text-stone-900">{configVenue || 'Not Set'}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close Summary View
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Global Committee Data Modal Overlay */}
+      {showCommitteeDataModal && activeEvent && (
+        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans max-h-[85vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white z-10 flex items-start justify-between border-b border-stone-150 pb-3">
+              <div>
+                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Committee Roster</span>
+                <h3 className="text-sm font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
+                  Committee Data — {activeEvent.eventName || activeEvent.title}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowCommitteeDataModal(false)}
+                className="text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-semibold">
+              {activeCommittees.filter(c => c.status !== 'archived').length === 0 ? (
+                <p className="text-stone-400 italic text-center py-6">No active committees configured.</p>
+              ) : (
+                activeCommittees.filter(c => c.status !== 'archived').map(comm => {
+                  const leads = (comm.members || []).filter(m => m.role === 'Lead').map(m => m.fullName);
+                  const volunteers = (comm.members || []).filter(m => m.role !== 'Lead').map(m => m.fullName);
+
+                  return (
+                    <div key={comm.id} className="border border-stone-200 rounded-2xl p-4 bg-stone-50/50 space-y-3">
+                      <div className="flex items-center justify-between border-b border-stone-200 pb-2">
+                        <h4 className="font-extrabold text-[#0f4c2a] font-heading text-xs uppercase">{comm.name}</h4>
+                        <span className="text-[9px] font-bold text-stone-500 bg-white px-2 py-0.5 rounded-md border border-stone-200">
+                          {leads.length} Leads • {volunteers.length} Volunteers
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Leads:</span>
+                          {leads.length === 0 ? (
+                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {leads.map((name, i) => (
+                                <span key={i} className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-[11px] font-bold">
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Volunteers:</span>
+                          {volunteers.length === 0 ? (
+                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {volunteers.map((name, i) => (
+                                <span key={i} className="px-2.5 py-1 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-lg text-[11px] font-bold">
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 border-t border-stone-150">
+              <button
+                type="button"
+                onClick={handleExportCommitteeDataPDF}
+                className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer shadow-xs flex items-center space-x-1"
+              >
+                <span>📄</span>
+                <span>Export to PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCommitteeDataModal(false)}
+                className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isConfirmOpen && confirmOptions && (
         <GEASConfirmationDialogUI

@@ -490,8 +490,11 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         regPayload.qrCode);
       console.log('=============================');
 
-      // 1. Log operations beforehand as required by Phase 1
-      console.log("[STEP 1]\nCreating Event Registration...");
+      // Diagnostic wording for CREATE vs UPDATE EXISTING
+      const opType = oldReg ? 'UPDATE EXISTING' : 'CREATE';
+      console.log(`[REGISTRATION OPERATION]\n${opType}`);
+
+      console.log(`[REGISTRATION BATCH 01]\nPATH: event_registrations/${regId}\nOPERATION: ${opType}\nAUTHORITY: Resident ${residentProfile.gmkId} (${residentProfile.email})\nEXPECTED RULE: event_registrations ${opType.toLowerCase()} by primaryMemberGmkId / primaryMemberEmail`);
       batch.set(doc(db, "event_registrations", regId), regPayload);
 
       // B. Write Attendance Record
@@ -505,18 +508,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         updatedAt: new Date().toISOString()
       };
 
-      console.log("=== RTCO INSTRUMENTATION: eventAttendance WRITE ===");
-      console.log("the complete attendancePayload:", JSON.stringify(attPayload, null, 2));
-      console.log("--- Fields and Values ---");
-      Object.keys(attPayload).forEach((fieldName) => {
-        const fieldValue = (attPayload as any)[fieldName];
-        console.log(`Field Name: "${fieldName}" | Field Value: ${JSON.stringify(fieldValue)}`);
-      });
-      console.log("the Firestore document path:", `eventAttendance/${attPayload.id}`);
-      console.log("the authenticated UID:", auth.currentUser?.uid || "Not Authenticated");
-      console.log("the authenticated email:", auth.currentUser?.email || "No Email");
-      console.log("==================================================");
-
+      console.log(`[REGISTRATION BATCH 02]\nPATH: eventAttendance/${attPayload.id}\nOPERATION: SET\nAUTHORITY: Resident ${residentProfile.gmkId}\nEXPECTED RULE: eventAttendance write by gmkId`);
       batch.set(doc(db, "eventAttendance", attPayload.id), attPayload);
 
       // C. Write Food Voucher Coupon Record
@@ -530,6 +522,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      console.log(`[REGISTRATION BATCH 03]\nPATH: eventFood/${foodPayload.id}\nOPERATION: SET\nAUTHORITY: Resident ${residentProfile.gmkId}\nEXPECTED RULE: eventFood write by gmkId`);
       batch.set(doc(db, "eventFood", foodPayload.id), foodPayload);
 
       // D. Update Event Report Summary Document (Consistency Count Check)

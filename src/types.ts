@@ -301,6 +301,7 @@ export interface EventCommittee {
   requiresVolunteers?: boolean;
   requiresParticipants?: boolean;
   expenses?: EventCommitteeExpense[];
+  status?: 'active' | 'archived';
   createdAt: string;
   updatedAt: string;
 }

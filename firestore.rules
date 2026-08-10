@@ -216,113 +216,66 @@ service cloud.firestore {
 
     // EVENTS COLLECTION
     match /events/{id} {
-      allow read: if isAuth();
-      allow create, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
-      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees'])
-      );
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT TEMPLATES COLLECTION
     match /eventTemplates/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT SETTINGS COLLECTION
     match /eventSettings/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT COMMITTEES COLLECTION
     match /eventCommittees/{id} {
-      allow read: if isAuth();
-      allow create, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
-      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || isProgramLead() || isAuth();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT PROGRAMS COLLECTION
     match /eventPrograms/{id} {
-      allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || isProgramLead() || (
-        isAuth() && request.resource.data.status == "pending"
-      );
-      allow delete: if (isSuperAdmin() || isEventDirector() || isProgramLead()) && resource.data.status == "rejected";
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT ATTENDANCE COLLECTION
     match /eventAttendance/{id} {
-      allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() && (
-          isResidentOwner(request.resource.data.gmkId) ||
-          (resource != null && isResidentOwner(resource.data.gmkId))
-        )
-      );
-      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
-      );
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT FOOD COLLECTION
     match /eventFood/{id} {
-      allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() && (
-          isResidentOwner(request.resource.data.gmkId) ||
-          (resource != null && isResidentOwner(resource.data.gmkId))
-        )
-      );
-      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() && resource != null && isResidentOwner(resource.data.gmkId)
-      );
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT CERTIFICATES COLLECTION
     match /eventCertificates/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     match /eventCertificate/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT FINANCE COLLECTION
     match /eventFinance/{id} {
-      allow read: if isAuth();
-      allow create: if isAuth();
-      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || isPresidentOrVP() || (
-        isAuth() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalRevenue', 'netBalance', 'updatedAt'])
-      );
-      allow delete: if isSuperAdmin() || isPresidentOrVP();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT REPORTS COLLECTION
     match /eventReports/{id} {
-      allow read: if isAuth();
-      allow create: if isAuth();
-      allow update: if isSuperAdmin() || isAdmin() || isEventDirector() || (
-        isAuth() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasAny(['registrationsCount', 'totalRevenue', 'attendanceCount', 'mealsIssuedCount', 'lastUpdated'])
-      );
-      allow delete: if isSuperAdmin() || isAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT COMMUNICATIONS COLLECTION
     match /eventCommunications/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT PERMISSIONS COLLECTION
     match /eventPermissions/{id} {
-      allow read: if isAuth();
-      allow create, update, delete: if isSuperAdmin() || isEventDirector();
+      allow read, create, update, delete: if isAuth();
     }
 
     // EVENT TIMELINE COLLECTION
@@ -409,22 +362,27 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwner(request.resource.data.primaryMemberGmkId)
+        isResidentOwner(request.resource.data.primaryMemberGmkId) ||
+        (request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == getUserEmail())
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() || (
-          isResidentOwner(resource.data.primaryMemberGmkId) &&
-          isResidentOwner(request.resource.data.primaryMemberGmkId)
+          resource != null && (
+            isResidentOwner(resource.data.primaryMemberGmkId) ||
+            (resource.data.primaryMemberEmail != null && resource.data.primaryMemberEmail.lower() == getUserEmail())
+          )
         )
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() || (
-          resource != null &&
-          isResidentOwner(resource.data.primaryMemberGmkId)
+          resource != null && (
+            isResidentOwner(resource.data.primaryMemberGmkId) ||
+            (resource.data.primaryMemberEmail != null && resource.data.primaryMemberEmail.lower() == getUserEmail())
+          )
         )
       );
     }
