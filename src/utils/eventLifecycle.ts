@@ -59,7 +59,7 @@ export function getRegistrationStatusLabel(status: RegistrationStatusType): stri
     case 'not_started':
       return 'Registration Not Started';
     case 'open':
-      return 'Register Now';
+      return 'Registration Open';
     case 'closing_soon':
       return 'Registration Closing Soon';
     case 'closed':

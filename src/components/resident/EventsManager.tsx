@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
-import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, DollarSign, ArrowLeft } from 'lucide-react';
+import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft } from 'lucide-react';
 import { createAuditLog } from '../../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from '../gmk/GEASConfirmationDialog';
 import { getEventRegistrationStatus, getRegistrationStatusLabel } from '../../utils/eventLifecycle';
@@ -27,6 +27,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   const [activeEventForReg, setActiveEventForReg] = useState<CommunityEvent | null>(null);
   const [viewingRegDetails, setViewingRegDetails] = useState<EventRegistration | null>(null);
   const [showingPaymentModalEvent, setShowingPaymentModalEvent] = useState<{ evt: CommunityEvent; reg?: EventRegistration } | null>(null);
+  const [showingPricingModalEvent, setShowingPricingModalEvent] = useState<CommunityEvent | null>(null);
   
   // Registration form selections
   const [checkedFamilyMembers, setCheckedFamilyMembers] = useState<Record<string, boolean>>({});
@@ -901,24 +902,19 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                     </div>
 
                     <div className="pt-2 border-t border-stone-150 flex flex-col space-y-2 font-heading">
-                      {/* View Registration button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (reg) {
-                            setViewingRegDetails(reg);
-                          } else if (onViewEventDetails) {
-                            onViewEventDetails(evt);
-                          }
-                        }}
-                        className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
-                      >
-                        View Registration
-                      </button>
-
                       {reg ? (
-                        /* When registration completed: No Register Now button, show active Payment Options */
-                        <div className="flex w-full space-x-2">
+                        /* WHEN REGISTRATION IS COMPLETED */
+                        <div className="flex flex-col space-y-2">
+                          {/* 1. View Registration */}
+                          <button
+                            type="button"
+                            onClick={() => setViewingRegDetails(reg)}
+                            className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                          >
+                            View Registration
+                          </button>
+
+                          {/* 2. Payment Options */}
                           <button
                             type="button"
                             onClick={() => setShowingPaymentModalEvent({ evt, reg })}
@@ -926,10 +922,20 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                           >
                             <span>Payment options</span>
                           </button>
+
+                          {/* 3. Pricing Details */}
+                          <button
+                            type="button"
+                            onClick={() => setShowingPricingModalEvent(evt)}
+                            className="w-full py-2 text-center bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center justify-center"
+                          >
+                            <span>Pricing Details</span>
+                          </button>
                         </div>
                       ) : (
-                        /* When registration not completed */
+                        /* WHEN REGISTRATION IS NOT COMPLETED */
                         <div className="flex flex-col space-y-2">
+                          {/* 1. Register Participation (above) */}
                           {(regStatus === 'open' || regStatus === 'closing_soon') ? (
                             <button
                               type="button"
@@ -944,7 +950,16 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                             </div>
                           )}
 
-                          {/* Inactive Payment Options when registration is not completed */}
+                          {/* 2. Pricing Details */}
+                          <button
+                            type="button"
+                            onClick={() => setShowingPricingModalEvent(evt)}
+                            className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center"
+                          >
+                            <span>Pricing Details</span>
+                          </button>
+
+                          {/* 3. Inactive Payment Options when not registered */}
                           <button
                             type="button"
                             disabled
@@ -1452,6 +1467,72 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
               <button
                 type="button"
                 onClick={() => setShowingPaymentModalEvent(null)}
+                className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRICING DETAILS MODAL */}
+      {showingPricingModalEvent && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white border border-stone-220 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 text-left animate-scaleUp font-sans">
+            <button
+              type="button"
+              onClick={() => setShowingPricingModalEvent(null)}
+              className="absolute right-4 top-4 text-stone-500 hover:text-stone-900 transition-colors cursor-pointer font-black"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Official Event Tariff</span>
+              <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
+                {showingPricingModalEvent.title}
+              </h3>
+              <p className="text-stone-500 text-xs mt-1">
+                Review the applicable registration rates and fee breakdown for this gathering.
+              </p>
+            </div>
+
+            {showingPricingModalEvent.pricing ? (
+              <div className="border border-stone-200 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
+                <div className="p-3 bg-stone-50 text-stone-600 flex justify-between font-extrabold uppercase text-[9px] tracking-wider font-heading">
+                  <span>Registration Plan Composition</span>
+                  <span>Fee Rate</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Individual Resident Unit</span>
+                  <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.singleRate ?? 0).toFixed(3)}</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Couple Resident Unit</span>
+                  <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.coupleRate ?? 0).toFixed(3)}</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Full Family Unit Cap</span>
+                  <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.familyRate ?? 0).toFixed(3)}</span>
+                </div>
+                {showingPricingModalEvent.pricing.allowExternal && (
+                  <div className="p-3 bg-emerald-50/40 flex justify-between">
+                    <span className="text-emerald-900 font-extrabold">Registered Guest Fee</span>
+                    <span className="font-mono text-emerald-800 font-black">OMR {(showingPricingModalEvent.pricing.externalRate ?? 0).toFixed(3)} per guest</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs text-stone-500 italic font-medium text-center">
+                No custom pricing structure set. Standard event entry rules apply.
+              </div>
+            )}
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowingPricingModalEvent(null)}
                 className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
               >
                 Close
