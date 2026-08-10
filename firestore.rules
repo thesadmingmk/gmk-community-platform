@@ -263,20 +263,32 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email)
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        )
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email) ||
-        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        ) ||
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
     }
 
@@ -287,20 +299,32 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email)
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        )
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email) ||
-        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        ) ||
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
     }
 
@@ -417,20 +441,32 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.primaryMemberGmkId, request.resource.data.primaryMemberEmail)
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        )
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(request.resource.data.primaryMemberGmkId, request.resource.data.primaryMemberEmail) ||
-        (resource != null && isResidentOwnerPayload(resource.data.primaryMemberGmkId, resource.data.primaryMemberEmail))
+        isResidentOwnerPayload(
+          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
+          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        ) ||
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        (resource != null && isResidentOwnerPayload(resource.data.primaryMemberGmkId, resource.data.primaryMemberEmail))
+        (resource != null && isResidentOwnerPayload(
+          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
+          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
+        ))
       );
     }
 
