@@ -19,20 +19,6 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
-    version: "v1.4.1",
-    title: "Program Creation Firestore Payload Hotfix (RTCO-022)",
-    releaseDate: "2026-08-10",
-    author: "Event Management Team",
-    notes: [
-      "Fixed Program creation failure caused by undefined Firestore payload values (e.g. missing candidate gmkId or optional fields).",
-      "Added payload validation and recursive sanitization before Program creation.",
-      "Preserved existing Program Lead and Coordinator eligibility logic.",
-      "Preserved Adult/Kids/Mixed participant filtering and contact display.",
-      "Preserved contact information and Program workspace functionality.",
-      "No changes made to production registration functionality."
-    ]
-  },
-  {
     version: "v1.4.0",
     title: "Deployment Automation & Password Activation Release",
     releaseDate: "2026-06-25",
