@@ -838,14 +838,14 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                       )}
 
                       <div className="flex items-start justify-between">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-wider uppercase ${badgeClass}`}>
-                          ● {regStatusLabel}
-                        </span>
-                        
-                        {reg && (
-                          <span className="flex items-center space-x-0.5 text-emerald-855 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-xl text-[9px] font-extrabold">
+                        {reg ? (
+                          <span className="flex items-center space-x-1 text-emerald-855 bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
                             <Check className="w-3 h-3" />
                             <span>Registered</span>
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-wider uppercase ${badgeClass}`}>
+                            ● {regStatusLabel}
                           </span>
                         )}
                       </div>

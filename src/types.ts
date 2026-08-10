@@ -43,7 +43,16 @@ export interface Family {
   expertiseCategories?: string[]; // Multiple expertise categories / tags
   contactPreference?: 'Phone' | 'Email' | 'WhatsApp' | 'Any'; // Contact preferences for the community
   directoryConsent: boolean; // default: false
+  directoryOption?: 'me' | 'spouse' | 'both' | 'none';
   doctorConsent?: boolean; // default: false
+  spouseProfessionCategory?: string;
+  spouseProfessionTitle?: string;
+  spouseCompany?: string;
+  spouseExpertiseCategories?: string[];
+  spouseContactPreference?: 'Phone' | 'Email' | 'WhatsApp' | 'Any';
+  spouseDoctorConsent?: boolean;
+  spouseName?: string;
+  spousePhone?: string;
   onboardingCompleted: boolean;
   createdAt: string;
   updatedAt: string;

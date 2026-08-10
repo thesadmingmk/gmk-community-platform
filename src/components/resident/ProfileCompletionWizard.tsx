@@ -371,7 +371,11 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
   const [depGender, setDepGender] = useState<'male' | 'female' | ''>('');
   const [depNotes, setDepNotes] = useState('');
 
-  // --- STEP 3: Profession & Company ---
+  // --- STEP 3: Directory Consent & Professional Info ---
+  const [directoryOption, setDirectoryOption] = useState<'me' | 'spouse' | 'both' | 'none'>('none');
+  const [directoryConsent, setDirectoryConsent] = useState(false);
+
+  // Primary Resident Profession
   const [professionCategory, setProfessionCategory] = useState('');
   const [customProfessionCategory, setCustomProfessionCategory] = useState('');
   const [professionTitle, setProfessionTitle] = useState('');
@@ -379,10 +383,17 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
   const [expertiseCategories, setExpertiseCategories] = useState<string[]>([]);
   const [expertiseKeywords, setExpertiseKeywords] = useState('');
   const [contactPreference, setContactPreference] = useState<'Phone' | 'Email' | 'WhatsApp' | 'Any' | ''>('');
-
-  // --- STEP 4: Directory Consent ---
-  const [directoryConsent, setDirectoryConsent] = useState(false);
   const [doctorConsent, setDoctorConsent] = useState(false);
+
+  // Spouse Profession
+  const [spouseProfessionCategory, setSpouseProfessionCategory] = useState('');
+  const [customSpouseProfessionCategory, setCustomSpouseProfessionCategory] = useState('');
+  const [spouseProfessionTitle, setSpouseProfessionTitle] = useState('');
+  const [spouseCompany, setSpouseCompany] = useState('');
+  const [spouseExpertiseCategories, setSpouseExpertiseCategories] = useState<string[]>([]);
+  const [spouseExpertiseKeywords, setSpouseExpertiseKeywords] = useState('');
+  const [spouseContactPreference, setSpouseContactPreference] = useState<'Phone' | 'Email' | 'WhatsApp' | 'Any' | ''>('');
+  const [spouseDoctorConsent, setSpouseDoctorConsent] = useState(false);
 
   // Prepopulate from existing families and familyMembers if they exist
   useEffect(() => {
@@ -431,6 +442,14 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
           if (famData.whatsAppSameAsMobile !== undefined) {
             setWhatsAppSameAsMobile(famData.whatsAppSameAsMobile);
           }
+          if (famData.directoryOption) {
+            setDirectoryOption(famData.directoryOption);
+            setDirectoryConsent(famData.directoryOption !== 'none');
+          } else if (famData.directoryConsent !== undefined) {
+            setDirectoryConsent(famData.directoryConsent);
+            setDirectoryOption(famData.directoryConsent ? 'me' : 'none');
+          }
+
           if (famData.professionCategory) {
             if (PROFESSION_CATEGORIES.includes(famData.professionCategory)) {
               setProfessionCategory(famData.professionCategory);
@@ -456,11 +475,35 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
           if (famData.contactPreference) {
             setContactPreference(famData.contactPreference);
           }
-          if (famData.directoryConsent !== undefined) {
-            setDirectoryConsent(famData.directoryConsent);
-          }
           if (famData.doctorConsent !== undefined) {
             setDoctorConsent(famData.doctorConsent);
+          }
+
+          // Spouse profession fields prepopulate
+          if (famData.spouseProfessionCategory) {
+            if (PROFESSION_CATEGORIES.includes(famData.spouseProfessionCategory)) {
+              setSpouseProfessionCategory(famData.spouseProfessionCategory);
+              setCustomSpouseProfessionCategory('');
+            } else {
+              setSpouseProfessionCategory('Other');
+              setCustomSpouseProfessionCategory(famData.spouseProfessionCategory);
+            }
+          }
+          if (famData.spouseProfessionTitle) {
+            setSpouseProfessionTitle(famData.spouseProfessionTitle);
+          }
+          if (famData.spouseCompany) {
+            setSpouseCompany(famData.spouseCompany);
+          }
+          if (famData.spouseExpertiseCategories) {
+            setSpouseExpertiseCategories(famData.spouseExpertiseCategories);
+            setSpouseExpertiseKeywords(famData.spouseExpertiseCategories.join(', '));
+          }
+          if (famData.spouseContactPreference) {
+            setSpouseContactPreference(famData.spouseContactPreference);
+          }
+          if (famData.spouseDoctorConsent !== undefined) {
+            setSpouseDoctorConsent(famData.spouseDoctorConsent);
           }
         }
 
@@ -650,14 +693,33 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
   };
 
   const validateStep3 = () => {
-    if (!directoryConsent) return null;
-    if (!professionCategory) return "Primary Profession Category is required.";
-    if (professionCategory === 'Other' && !customProfessionCategory.trim()) {
-      return "Please specify your custom profession category.";
+    if (directoryOption === 'none' || !directoryConsent) return null;
+
+    // Validate Primary Resident if 'me' or 'both'
+    if (directoryOption === 'me' || directoryOption === 'both') {
+      if (!professionCategory) return "Primary Resident profession category is required.";
+      if (professionCategory === 'Other' && !customProfessionCategory.trim()) {
+        return "Please specify Primary Resident custom profession category.";
+      }
+      if (!professionTitle.trim()) return "Primary Resident profession title is required.";
+      if (!company.trim()) return "Primary Resident company / organization is required.";
+      if (!contactPreference) return "Please choose Primary Resident contact preference.";
     }
-    if (!professionTitle.trim()) return "Profession Title is required (e.g. Architect, Surgeon, Manager, etc.).";
-    if (!company.trim()) return "Company / Organization is required.";
-    if (!contactPreference) return "Please choose a Contact Preference.";
+
+    // Validate Spouse if 'spouse' or 'both'
+    if (directoryOption === 'spouse' || directoryOption === 'both') {
+      if (!spouseName.trim()) {
+        return "Spouse full name is required when listing spouse in directory.";
+      }
+      if (!spouseProfessionCategory) return "Spouse profession category is required.";
+      if (spouseProfessionCategory === 'Other' && !customSpouseProfessionCategory.trim()) {
+        return "Please specify Spouse custom profession category.";
+      }
+      if (!spouseProfessionTitle.trim()) return "Spouse profession title is required.";
+      if (!spouseCompany.trim()) return "Spouse company / organization is required.";
+      if (!spouseContactPreference) return "Please choose Spouse contact preference.";
+    }
+
     return null;
   };
 
@@ -798,16 +860,30 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
 
       const normalizedResidentName = normalizeName(fullName);
 
-      const dbProfessionCategory = directoryConsent 
+      const dbDirectoryConsent = directoryOption !== 'none';
+
+      const dbProfessionCategory = (directoryOption === 'me' || directoryOption === 'both') 
         ? (professionCategory === 'Other' ? (customProfessionCategory.trim() || 'Other') : professionCategory)
         : '';
-      const dbProfessionTitle = directoryConsent ? professionTitle.trim() : '';
-      const dbCompany = directoryConsent ? company.trim() : '';
-      const dbExpertiseCategories = directoryConsent 
+      const dbProfessionTitle = (directoryOption === 'me' || directoryOption === 'both') ? professionTitle.trim() : '';
+      const dbCompany = (directoryOption === 'me' || directoryOption === 'both') ? company.trim() : '';
+      const dbExpertiseCategories = (directoryOption === 'me' || directoryOption === 'both') 
         ? expertiseKeywords.split(',').map(s => s.trim()).filter(Boolean)
         : [];
-      const dbDoctorConsent = directoryConsent 
+      const dbDoctorConsent = (directoryOption === 'me' || directoryOption === 'both') 
         ? ((dbProfessionTitle.toLowerCase().includes('doctor') || dbProfessionCategory === 'Healthcare' || salutation === 'Dr') ? doctorConsent : false)
+        : false;
+
+      const dbSpouseProfessionCategory = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? (spouseProfessionCategory === 'Other' ? (customSpouseProfessionCategory.trim() || 'Other') : spouseProfessionCategory)
+        : '';
+      const dbSpouseProfessionTitle = (directoryOption === 'spouse' || directoryOption === 'both') ? spouseProfessionTitle.trim() : '';
+      const dbSpouseCompany = (directoryOption === 'spouse' || directoryOption === 'both') ? spouseCompany.trim() : '';
+      const dbSpouseExpertiseCategories = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? spouseExpertiseKeywords.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+      const dbSpouseDoctorConsent = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? ((dbSpouseProfessionTitle.toLowerCase().includes('doctor') || dbSpouseProfessionCategory === 'Healthcare') ? spouseDoctorConsent : false)
         : false;
 
       const partialFamilyModel: Partial<Family> = {
@@ -826,9 +902,18 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         professionTitle: dbProfessionTitle,
         company: dbCompany,
         expertiseCategories: dbExpertiseCategories,
-        contactPreference,
-        directoryConsent,
+        contactPreference: (directoryOption === 'me' || directoryOption === 'both') ? contactPreference : undefined,
+        directoryConsent: dbDirectoryConsent,
+        directoryOption,
         doctorConsent: dbDoctorConsent,
+        spouseProfessionCategory: dbSpouseProfessionCategory,
+        spouseProfessionTitle: dbSpouseProfessionTitle,
+        spouseCompany: dbSpouseCompany,
+        spouseExpertiseCategories: dbSpouseExpertiseCategories,
+        spouseContactPreference: (directoryOption === 'spouse' || directoryOption === 'both') ? spouseContactPreference : undefined,
+        spouseDoctorConsent: dbSpouseDoctorConsent,
+        spouseName: spouseName.trim(),
+        spousePhone: spouseWhatsApp.trim() ? `${spouseWhatsAppCode}${validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized}` : '',
         onboardingCompleted: false, // NOT finished yet
         updatedAt: new Date().toISOString()
       };
@@ -949,16 +1034,30 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
 
       const normalizedResidentName = normalizeName(fullName);
 
-      const dbProfessionCategory = directoryConsent 
+      const dbDirectoryConsent = directoryOption !== 'none';
+
+      const dbProfessionCategory = (directoryOption === 'me' || directoryOption === 'both') 
         ? (professionCategory === 'Other' ? (customProfessionCategory.trim() || 'Other') : professionCategory)
         : '';
-      const dbProfessionTitle = directoryConsent ? professionTitle.trim() : '';
-      const dbCompany = directoryConsent ? company.trim() : '';
-      const dbExpertiseCategories = directoryConsent 
+      const dbProfessionTitle = (directoryOption === 'me' || directoryOption === 'both') ? professionTitle.trim() : '';
+      const dbCompany = (directoryOption === 'me' || directoryOption === 'both') ? company.trim() : '';
+      const dbExpertiseCategories = (directoryOption === 'me' || directoryOption === 'both') 
         ? expertiseKeywords.split(',').map(s => s.trim()).filter(Boolean)
         : [];
-      const dbDoctorConsent = directoryConsent 
+      const dbDoctorConsent = (directoryOption === 'me' || directoryOption === 'both') 
         ? ((dbProfessionTitle.toLowerCase().includes('doctor') || dbProfessionCategory === 'Healthcare' || salutation === 'Dr') ? doctorConsent : false)
+        : false;
+
+      const dbSpouseProfessionCategory = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? (spouseProfessionCategory === 'Other' ? (customSpouseProfessionCategory.trim() || 'Other') : spouseProfessionCategory)
+        : '';
+      const dbSpouseProfessionTitle = (directoryOption === 'spouse' || directoryOption === 'both') ? spouseProfessionTitle.trim() : '';
+      const dbSpouseCompany = (directoryOption === 'spouse' || directoryOption === 'both') ? spouseCompany.trim() : '';
+      const dbSpouseExpertiseCategories = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? spouseExpertiseKeywords.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+      const dbSpouseDoctorConsent = (directoryOption === 'spouse' || directoryOption === 'both') 
+        ? ((dbSpouseProfessionTitle.toLowerCase().includes('doctor') || dbSpouseProfessionCategory === 'Healthcare') ? spouseDoctorConsent : false)
         : false;
 
       // 1. Prepare decoupled family payloads
@@ -978,9 +1077,18 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         professionTitle: dbProfessionTitle,
         company: dbCompany,
         expertiseCategories: dbExpertiseCategories,
-        contactPreference,
-        directoryConsent,
+        contactPreference: (directoryOption === 'me' || directoryOption === 'both') ? contactPreference : undefined,
+        directoryConsent: dbDirectoryConsent,
+        directoryOption,
         doctorConsent: dbDoctorConsent,
+        spouseProfessionCategory: dbSpouseProfessionCategory,
+        spouseProfessionTitle: dbSpouseProfessionTitle,
+        spouseCompany: dbSpouseCompany,
+        spouseExpertiseCategories: dbSpouseExpertiseCategories,
+        spouseContactPreference: (directoryOption === 'spouse' || directoryOption === 'both') ? spouseContactPreference : undefined,
+        spouseDoctorConsent: dbSpouseDoctorConsent,
+        spouseName: spouseName.trim(),
+        spousePhone: spouseWhatsApp.trim() ? `${spouseWhatsAppCode}${validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized}` : '',
         onboardingCompleted: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -1759,24 +1867,18 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
               {/* Directory Listing Consent Question */}
               <div className="p-5 bg-stone-50 border border-stone-200 rounded-2xl space-y-3 shadow-sm">
                 <p className="text-xs text-stone-900 font-extrabold block mb-1">
-                  Would you want to be listed in the Community Directory? *
+                  Community Directory Listing Options *
                 </p>
 
                 <div className="space-y-2.5 pl-1">
                   <label className="flex items-center space-x-3 cursor-pointer select-none">
                     <input
                       type="radio"
-                      name="community_directory_listed"
-                      checked={directoryConsent === true}
+                      name="community_directory_listed_option"
+                      checked={directoryOption === 'me'}
                       onChange={() => {
+                        setDirectoryOption('me');
                         setDirectoryConsent(true);
-                        setProfessionCategory('');
-                        setCustomProfessionCategory('');
-                        setProfessionTitle('');
-                        setCompany('');
-                        setExpertiseKeywords('');
-                        setContactPreference('');
-                        setDoctorConsent(false);
                       }}
                       className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 cursor-pointer"
                     />
@@ -1786,177 +1888,331 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                   <label className="flex items-center space-x-3 cursor-pointer select-none">
                     <input
                       type="radio"
-                      name="community_directory_listed"
-                      checked={directoryConsent === false}
-                      onChange={() => setDirectoryConsent(false)}
+                      name="community_directory_listed_option"
+                      checked={directoryOption === 'spouse'}
+                      onChange={() => {
+                        setDirectoryOption('spouse');
+                        setDirectoryConsent(true);
+                        setSpouseEnabled(true);
+                      }}
                       className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 cursor-pointer"
                     />
-                    <span className="text-xs font-bold text-stone-800">No, do not list me</span>
+                    <span className="text-xs font-bold text-stone-800">Yes list my spouse only</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="community_directory_listed_option"
+                      checked={directoryOption === 'both'}
+                      onChange={() => {
+                        setDirectoryOption('both');
+                        setDirectoryConsent(true);
+                        setSpouseEnabled(true);
+                      }}
+                      className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-stone-800">Yes list me and Spouse</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="community_directory_listed_option"
+                      checked={directoryOption === 'none'}
+                      onChange={() => {
+                        setDirectoryOption('none');
+                        setDirectoryConsent(false);
+                      }}
+                      className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-stone-800">No do not list us</span>
                   </label>
                 </div>
               </div>
 
-              {directoryConsent ? (
+              {directoryOption !== 'none' ? (
                 <div className="space-y-6 animate-fadeIn">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
-                        Primary Profession Category *
-                      </label>
-                      <select
-                        value={professionCategory}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setProfessionCategory(val);
-                        }}
-                        className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-stone-50/50 text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-semibold"
-                      >
-                        <option value="">-Select-</option>
-                        {PROFESSION_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                      </select>
+                  {/* Primary Resident Section */}
+                  {(directoryOption === 'me' || directoryOption === 'both') && (
+                    <div className="p-5 bg-stone-50/80 border border-stone-200 rounded-2xl space-y-4 shadow-xs">
+                      <div className="border-b border-stone-200 pb-2 flex items-center justify-between">
+                        <h4 className="text-xs font-black text-[#0f4c2a] uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-[#d4af37]"></span>
+                          <span>Primary Resident: {salutation} {fullName}</span>
+                        </h4>
+                        <span className="text-[10px] font-extrabold text-stone-600 bg-white px-2 py-0.5 border border-stone-200 rounded-md">
+                          Primary Member
+                        </span>
+                      </div>
 
-                      {professionCategory === 'Other' && (
-                        <div className="mt-3 animate-fadeIn">
-                          <label className="block text-[10px] uppercase font-bold tracking-wider text-[#0f4c2a] font-black mb-1.5 font-heading text-xs">
-                            Please specify your Profession Category *
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                            Primary Profession Category *
+                          </label>
+                          <select
+                            value={professionCategory}
+                            onChange={(e) => setProfessionCategory(e.target.value)}
+                            className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-white text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-semibold"
+                          >
+                            <option value="">-Select-</option>
+                            {PROFESSION_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                          </select>
+
+                          {professionCategory === 'Other' && (
+                            <div className="mt-3 animate-fadeIn">
+                              <label className="block text-[10px] uppercase font-bold tracking-wider text-[#0f4c2a] font-black mb-1.5 font-heading text-xs">
+                                Please specify Profession Category *
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                placeholder="e.g. Writer, Fitness Trainer, Chef..."
+                                value={customProfessionCategory}
+                                onChange={(e) => setCustomProfessionCategory(e.target.value)}
+                                className="block w-full px-3 py-2.5 border border-[#ced4da] rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                            Profession Title *
                           </label>
                           <input
                             type="text"
                             required
-                            placeholder="e.g. Writer, Fitness Trainer, Chef, Musician..."
-                            value={customProfessionCategory}
-                            onChange={(e) => setCustomProfessionCategory(e.target.value)}
-                            className="block w-full px-3 py-2.5 border border-[#ced4da] rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                            placeholder="Software Architect, Surgeon, Senior Accountant..."
+                            value={professionTitle}
+                            onChange={(e) => setProfessionTitle(e.target.value)}
+                            className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
                           />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
+                          Company / Organization *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Type company name or Self Employed / Retired"
+                          value={company}
+                          onChange={(e) => setCompany(e.target.value)}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
+                          Additional Expertise Keywords (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Tax Planning, Interior Design, Web Development..."
+                          value={expertiseKeywords}
+                          onChange={(e) => setExpertiseKeywords(e.target.value)}
+                          onBlur={() => {
+                            if (expertiseKeywords.trim()) {
+                              setExpertiseKeywords(normalizeExpertiseKeywords(expertiseKeywords));
+                            }
+                          }}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                          Contact Preference *
+                        </label>
+                        <select
+                          value={contactPreference}
+                          onChange={(e) => setContactPreference(e.target.value as any)}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-white text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-bold"
+                        >
+                          <option value="">-Select-</option>
+                          <option value="Any">Any Contact Method (Email, Phone, WhatsApp)</option>
+                          <option value="WhatsApp">WhatsApp Only</option>
+                          <option value="Email">Email Only</option>
+                          <option value="Phone">Voice Call Only</option>
+                        </select>
+                      </div>
+
+                      {(professionCategory === 'Healthcare' || professionTitle.toLowerCase().includes('doctor') || salutation === 'Dr') && (
+                        <div className="p-4 bg-amber-50/60 border border-[#d4af37]/30 rounded-2xl space-y-3 animate-fadeIn">
+                          <div className="flex items-start space-x-2.5">
+                            <input
+                              type="checkbox"
+                              id="doc_consent_check"
+                              checked={doctorConsent}
+                              onChange={(e) => setDoctorConsent(e.target.checked)}
+                              className="h-5 w-5 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer mt-0.5"
+                            />
+                            <div>
+                              <label htmlFor="doc_consent_check" className="text-xs uppercase font-extrabold text-[#0f4c2a] cursor-pointer select-none font-heading flex items-center space-x-1">
+                                <Heart className="w-4 h-4 text-[#d4af37] animate-pulse" />
+                                <span>Medical Assistance Consent</span>
+                              </label>
+                              <p className="text-[11px] text-stone-700 leading-relaxed mt-1">
+                                Would you be willing to assist fellow community members during medical emergencies or provide health-related guidance?
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
+                  )}
 
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
-                        Profession Title *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={professionTitle}
-                        onChange={(e) => setProfessionTitle(e.target.value)}
-                        className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-semibold"
-                      />
-                      <p className="text-[10px] text-stone-705 font-bold mt-1">E.g., Software Architect, Surgeon, Senior Accountant, Store Manager</p>
-                    </div>
-                  </div>
+                  {/* Spouse Section */}
+                  {(directoryOption === 'spouse' || directoryOption === 'both') && (
+                    <div className="p-5 bg-stone-50/80 border border-stone-200 rounded-2xl space-y-4 shadow-xs">
+                      <div className="border-b border-stone-200 pb-2 flex items-center justify-between">
+                        <h4 className="text-xs font-black text-[#0f4c2a] uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-[#d4af37]"></span>
+                          <span>Spouse Details</span>
+                        </h4>
+                        <span className="text-[10px] font-extrabold text-stone-600 bg-white px-2 py-0.5 border border-stone-200 rounded-md">
+                          Spouse Member
+                        </span>
+                      </div>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
-                      Company / Organization *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={company}
-                      onChange={(e) => setCompany(e.target.value)}
-                      className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
-                    />
-                    <p className="text-[10px] text-stone-705 font-bold mt-1">If self-employed or retired, please type Self Employed or Retired</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
-                      Additional Expertise Keywords (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Tax Planning, Interior Design, Web Development, Yoga instruction..."
-                      value={expertiseKeywords}
-                      onChange={(e) => setExpertiseKeywords(e.target.value)}
-                      onBlur={() => {
-                        if (expertiseKeywords.trim()) {
-                          const normalized = normalizeExpertiseKeywords(expertiseKeywords);
-                          setExpertiseKeywords(normalized);
-                        }
-                      }}
-                      className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-semibold"
-                    />
-                    <p className="text-[10px] text-stone-705 font-bold mt-1">E.g: Tyres, Battery, Building materials, Construction etc.</p>
-
-                    {/* Check spelling and suggest terms as they type */}
-                    {(() => {
-                      if (!expertiseKeywords.trim()) return null;
-                      const parts = expertiseKeywords.split(',');
-                      const lastPart = parts[parts.length - 1].trim();
-                      if (!lastPart) return null;
-                      
-                      const matched = POPULAR_EXPERTISE_SUGGESTIONS.filter(item => 
-                        item.toLowerCase().includes(lastPart.toLowerCase()) && 
-                        !parts.slice(0, -1).map(p => p.trim().toLowerCase()).includes(item.toLowerCase())
-                      ).slice(0, 5);
-
-                      if (matched.length === 0) return null;
-
-                      return (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5 animate-fadeIn">
-                          <span className="text-[10px] text-stone-500 font-extrabold mr-1">Suggested:</span>
-                          {matched.map((s) => (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => {
-                                const newParts = parts.slice(0, -1).map(p => normalizeExpertiseKeywords(p));
-                                newParts.push(s);
-                                setExpertiseKeywords(newParts.join(', ') + ', ');
-                              }}
-                              className="px-2 py-0.5 bg-[#0f4c2a]/10 hover:bg-[#0f4c2a]/20 text-[#0f4c2a] text-[10px] font-bold rounded-md transition-colors cursor-pointer"
-                            >
-                              + {s}
-                            </button>
-                          ))}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
-                      Contact Preference *
-                    </label>
-                    <select
-                      value={contactPreference}
-                      onChange={(e) => setContactPreference(e.target.value as any)}
-                      className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-stone-50/50 text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-bold"
-                    >
-                      <option value="">-Select-</option>
-                      <option value="Any">Any Contact Method (Email, Phone, WhatsApp)</option>
-                      <option value="WhatsApp">WhatsApp Only</option>
-                      <option value="Email">Email Only</option>
-                      <option value="Phone">Voice Call Only</option>
-                    </select>
-                    <p className="text-[10px] text-stone-705 font-bold mt-1">Select your preferred way for community members to contact you regarding your expertise.</p>
-                  </div>
-
-                  {/* Doctors Emergency Special Consent (Moved here from Step 4) */}
-                  {(professionCategory === 'Healthcare' || professionTitle.toLowerCase().includes('doctor') || salutation === 'Dr') && (
-                    <div className="p-4 bg-amber-50/50 border border-[#d4af37]/20 rounded-2xl space-y-3 animate-fadeIn">
-                      <div className="flex items-start space-x-2.5">
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                          Spouse Full Name *
+                        </label>
                         <input
-                          type="checkbox"
-                          id="doc_consent_check"
-                          checked={doctorConsent}
-                          onChange={(e) => setDoctorConsent(e.target.checked)}
-                          className="h-5 w-5 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer mt-0.5"
+                          type="text"
+                          required
+                          placeholder="Enter spouse full name"
+                          value={spouseName}
+                          onChange={(e) => {
+                            setSpouseName(e.target.value);
+                            setSpouseEnabled(true);
+                          }}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
                         />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label htmlFor="doc_consent_check" className="text-xs uppercase font-extrabold text-[#0f4c2a] cursor-pointer select-none font-heading block flex items-center space-x-1">
-                            <Heart className="w-4 h-4 text-[#d4af37] animate-pulse" />
-                            <span>Medical Assistance Consent</span>
+                          <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                            Spouse Profession Category *
                           </label>
-                          <p className="text-[11px] text-stone-700 leading-relaxed mt-1">
-                            Would you be willing to assist fellow community members during medical emergencies or provide health-related advisory guidance when contacted?
-                            <br />
-                            <strong>Doctors will remain hidden in emergency searches unless this explicit YES consent is activated here.</strong>
-                          </p>
+                          <select
+                            value={spouseProfessionCategory}
+                            onChange={(e) => setSpouseProfessionCategory(e.target.value)}
+                            className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-white text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-semibold"
+                          >
+                            <option value="">-Select-</option>
+                            {PROFESSION_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                          </select>
+
+                          {spouseProfessionCategory === 'Other' && (
+                            <div className="mt-3 animate-fadeIn">
+                              <label className="block text-[10px] uppercase font-bold tracking-wider text-[#0f4c2a] font-black mb-1.5 font-heading text-xs">
+                                Please specify Spouse Profession Category *
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                placeholder="e.g. Writer, Fitness Trainer, Chef..."
+                                value={customSpouseProfessionCategory}
+                                onChange={(e) => setCustomSpouseProfessionCategory(e.target.value)}
+                                className="block w-full px-3 py-2.5 border border-[#ced4da] rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                            Spouse Profession Title *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Architect, Surgeon, Senior Accountant..."
+                            value={spouseProfessionTitle}
+                            onChange={(e) => setSpouseProfessionTitle(e.target.value)}
+                            className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                          />
                         </div>
                       </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
+                          Spouse Company / Organization *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Type company name or Self Employed / Retired"
+                          value={spouseCompany}
+                          onChange={(e) => setSpouseCompany(e.target.value)}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-855 font-black mb-1.5 font-heading text-xs">
+                          Spouse Additional Expertise Keywords (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Tax Planning, Interior Design, Web Development..."
+                          value={spouseExpertiseKeywords}
+                          onChange={(e) => setSpouseExpertiseKeywords(e.target.value)}
+                          onBlur={() => {
+                            if (spouseExpertiseKeywords.trim()) {
+                              setSpouseExpertiseKeywords(normalizeExpertiseKeywords(spouseExpertiseKeywords));
+                            }
+                          }}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
+                          Spouse Contact Preference *
+                        </label>
+                        <select
+                          value={spouseContactPreference}
+                          onChange={(e) => setSpouseContactPreference(e.target.value as any)}
+                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl bg-white text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] cursor-pointer font-bold"
+                        >
+                          <option value="">-Select-</option>
+                          <option value="Any">Any Contact Method (Email, Phone, WhatsApp)</option>
+                          <option value="WhatsApp">WhatsApp Only</option>
+                          <option value="Email">Email Only</option>
+                          <option value="Phone">Voice Call Only</option>
+                        </select>
+                      </div>
+
+                      {(spouseProfessionCategory === 'Healthcare' || spouseProfessionTitle.toLowerCase().includes('doctor')) && (
+                        <div className="p-4 bg-amber-50/60 border border-[#d4af37]/30 rounded-2xl space-y-3 animate-fadeIn">
+                          <div className="flex items-start space-x-2.5">
+                            <input
+                              type="checkbox"
+                              id="spouse_doc_consent_check"
+                              checked={spouseDoctorConsent}
+                              onChange={(e) => setSpouseDoctorConsent(e.target.checked)}
+                              className="h-5 w-5 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer mt-0.5"
+                            />
+                            <div>
+                              <label htmlFor="spouse_doc_consent_check" className="text-xs uppercase font-extrabold text-[#0f4c2a] cursor-pointer select-none font-heading flex items-center space-x-1">
+                                <Heart className="w-4 h-4 text-[#d4af37] animate-pulse" />
+                                <span>Spouse Medical Assistance Consent</span>
+                              </label>
+                              <p className="text-[11px] text-stone-700 leading-relaxed mt-1">
+                                Willing to assist fellow community members during medical emergencies or provide health guidance?
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1964,7 +2220,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                   {!isStep3Valid() && (
                     <div className="mt-4 p-3 bg-red-50/50 border border-red-100 rounded-xl text-red-750 text-[10px] font-bold flex items-center space-x-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse shrink-0"></span>
-                      <span>Required fields: Category, Custom Category (if other specifies), Title, Company Name, and Contact Preference must be filled/selected.</span>
+                      <span>Required fields: Category, Title, Company Name, and Contact Preference must be filled/selected for all listed individuals.</span>
                     </div>
                   )}
                 </div>
@@ -1974,7 +2230,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                     You have opted out of being listed in the Community Directory.
                   </p>
                   <p className="text-[11px] text-stone-500 font-medium">
-                    No professional details will be asked. Click <strong className="text-[#0f4c2a]">Next</strong> to continue to the review page and complete your verification.
+                    No details will be asked. Click <strong className="text-[#0f4c2a]">Next</strong> to continue to the review page and complete your verification.
                   </p>
                 </div>
               )}
@@ -2032,13 +2288,16 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                     <div>
                       <span className="text-stone-655 block font-extrabold text-[9px] uppercase tracking-wider">Directory Discoverability</span>
                       <span className="font-extrabold uppercase text-[10px] tracking-wider text-emerald-800">
-                        {directoryConsent ? "✓ Discoverable Approved" : "✗ Hidden (NO)"}
+                        {directoryOption === 'me' && "✓ Listed (Primary Only)"}
+                        {directoryOption === 'spouse' && "✓ Listed (Spouse Only)"}
+                        {directoryOption === 'both' && "✓ Listed (Primary & Spouse)"}
+                        {directoryOption === 'none' && "✗ Hidden (Do not list us)"}
                       </span>
                     </div>
                     <div>
                       <span className="text-stone-655 block font-extrabold text-[9px] uppercase tracking-wider">Emergency Medical Helper</span>
                       <span className="font-extrabold uppercase text-[10px] tracking-wider text-emerald-800">
-                        {doctorConsent ? "✓ Emergency Helper Approved" : "✗ Disabled or Non-Doctor"}
+                        {(doctorConsent || spouseDoctorConsent) ? "✓ Emergency Helper Approved" : "✗ Disabled / Non-Doctor"}
                       </span>
                     </div>
                     <div className="col-span-2 pt-2">

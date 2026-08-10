@@ -18,16 +18,17 @@ export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T):
     'primaryMemberEmail', 'fullName', 'salutation', 'phone', 'unitKey', 
     'displayUnitNumber', 'unitType', 'createdAt', 'updatedAt', 'email', 'gmkId', 
     'gatedCommunity', 'status', 'remarks', 'professionCategory', 'professionTitle', 
+    'spouseProfessionCategory', 'spouseProfessionTitle', 'spouseCompany', 'spouseContactPreference', 'spouseName', 'spousePhone', 'directoryOption',
     'uid', 'assignedBy', 'assignedAt', 'role', 'eventId', 'title', 'description', 
     'coordinatorEmail', 'coordinatorName', 'timestamp', 'action', 'actorEmail'
   ];
 
   const booleanFields = [
-    'whatsAppSameAsMobile', 'directoryConsent', 'doctorConsent', 'onboardingCompleted', 'isActive'
+    'whatsAppSameAsMobile', 'directoryConsent', 'doctorConsent', 'spouseDoctorConsent', 'onboardingCompleted', 'isActive'
   ];
 
   const arrayFields = [
-    'participants', 'attendees', 'roles', 'members', 'volunteers', 'pricingRules'
+    'participants', 'attendees', 'roles', 'members', 'volunteers', 'pricingRules', 'expertiseCategories', 'spouseExpertiseCategories'
   ];
 
   // For arrays

@@ -45,7 +45,66 @@ export default function ProfessionalSearch() {
       });
 
       // 2. Perform in-memory client-side filters for Category and Search Query matching
-      let filtered = [...list];
+      interface DirectoryEntry {
+        id: string;
+        personType: 'primary' | 'spouse';
+        fullName: string;
+        salutation?: string;
+        professionCategory: string;
+        professionTitle: string;
+        company: string;
+        expertiseCategories: string[];
+        contactPreference?: string;
+        email: string;
+        phone: string;
+        doctorConsent: boolean;
+      }
+
+      let entries: DirectoryEntry[] = [];
+
+      list.forEach(f => {
+        const option = f.directoryOption || (f.directoryConsent ? 'me' : 'none');
+
+        if (option === 'me' || option === 'both') {
+          if (f.professionTitle || f.professionCategory) {
+            entries.push({
+              id: `${f.id}_primary`,
+              personType: 'primary',
+              fullName: f.fullName,
+              salutation: f.salutation,
+              professionCategory: f.professionCategory || '',
+              professionTitle: f.professionTitle || '',
+              company: f.company || '',
+              expertiseCategories: f.expertiseCategories || [],
+              contactPreference: f.contactPreference,
+              email: f.primaryMemberEmail || '',
+              phone: f.phone || '',
+              doctorConsent: f.doctorConsent || false
+            });
+          }
+        }
+
+        if (option === 'spouse' || option === 'both') {
+          if (f.spouseProfessionTitle || f.spouseProfessionCategory) {
+            entries.push({
+              id: `${f.id}_spouse`,
+              personType: 'spouse',
+              fullName: f.spouseName || 'Spouse',
+              salutation: '',
+              professionCategory: f.spouseProfessionCategory || '',
+              professionTitle: f.spouseProfessionTitle || '',
+              company: f.spouseCompany || '',
+              expertiseCategories: f.spouseExpertiseCategories || [],
+              contactPreference: f.spouseContactPreference || f.contactPreference,
+              email: f.primaryMemberEmail || '',
+              phone: f.spousePhone || f.phone || '',
+              doctorConsent: f.spouseDoctorConsent || false
+            });
+          }
+        }
+      });
+
+      let filtered = [...entries];
 
       if (selectedCategory) {
         filtered = filtered.filter(f => {
@@ -72,7 +131,7 @@ export default function ProfessionalSearch() {
         });
       }
 
-      setResults(filtered);
+      setResults(filtered as any);
     } catch (err: any) {
       console.error("❌ Expertise search failure:", err);
       setErrorMsg("Database connection error. Failed to retrieve experts directory.");
@@ -223,7 +282,7 @@ export default function ProfessionalSearch() {
                           </div>
                           <div className="flex items-center space-x-1.5 break-all">
                             <Mail className="w-3.5 h-3.5 text-stone-450 shrink-0" />
-                            <span className={r.contactPreference === 'Email' || r.contactPreference === 'Any' || !r.contactPreference ? 'text-[#0f4c2a] font-black' : 'text-stone-500 line-through decoration-stone-300'}>{r.primaryMemberEmail}</span>
+                            <span className={r.contactPreference === 'Email' || r.contactPreference === 'Any' || !r.contactPreference ? 'text-[#0f4c2a] font-black' : 'text-stone-500 line-through decoration-stone-300'}>{r.email}</span>
                           </div>
                           <div className="flex items-center space-x-1.5">
                             <Phone className="w-3.5 h-3.5 text-stone-450 shrink-0" />
