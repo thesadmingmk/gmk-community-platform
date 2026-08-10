@@ -3038,7 +3038,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               <div>
                 <div className="text-xs font-bold text-[#0F4C2A]">Admin Security Access: VERIFIED</div>
                 <p className="text-[10.5px] text-stone-650 mt-0.5 leading-snug">
-                  You are authorized with Greens Malayalee Kootayama (GMK) administrator access. Credentials and role restrictions are governed by the association board.
+                  You are authorized with Greens Malayalee Koottayma (GMK) administrator access. Credentials and role restrictions are governed by the association board.
                 </p>
               </div>
             </div>
@@ -3134,7 +3134,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                       <div>
                         <h4 className="text-xs font-black text-[#0f4c2a] uppercase tracking-wide">Pristine Zero-Drift Certified</h4>
                         <p className="text-[11px] text-[#0f4c2a] mt-0.5 leading-relaxed font-semibold">
-                          All database collections fully comply with Greens Malayalee Kootayama (GMK) Enterprise Architecture Standards (GEAS) v1.0. No unauthorized, orphaned, or unmapped identity drift is present in active operational collections.
+                          All database collections fully comply with Greens Malayalee Koottayma (GMK) Enterprise Architecture Standards (GEAS) v1.0. No unauthorized, orphaned, or unmapped identity drift is present in active operational collections.
                         </p>
                       </div>
                     </div>

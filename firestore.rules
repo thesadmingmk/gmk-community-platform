@@ -137,12 +137,18 @@ service cloud.firestore {
     }
 
     function isResidentOwnerPayload(targetGmkId, targetEmail) {
-      return isAuth() && 
-        targetEmail != null && targetEmail != "" && getUserEmail() != "" && targetEmail.lower() == getUserEmail() && (
-          (targetGmkId != null && targetGmkId != "" && getUserGmkId() != "" && getUserGmkId() == targetGmkId) ||
-          (targetGmkId != null && targetGmkId != "" && exists(/databases/$(database)/documents/residents/$(targetGmkId)) && "email" in get(/databases/$(database)/documents/residents/$(targetGmkId)).data && get(/databases/$(database)/documents/residents/$(targetGmkId)).data.email != null && get(/databases/$(database)/documents/residents/$(targetGmkId)).data.email.lower() == getUserEmail()) ||
-          (getUserGmkId() == "" && targetEmail != null && targetEmail != "" && targetEmail.lower() == getUserEmail())
-        );
+      return isAuth() && (
+        (targetEmail != null && targetEmail != "" && getUserEmail() != "" && targetEmail.lower() == getUserEmail()) ||
+        (targetGmkId != null && targetGmkId != "" && getUserGmkId() != "" && getUserGmkId() == targetGmkId) ||
+        (targetGmkId != null && targetGmkId != "" && isResidentOwner(targetGmkId))
+      );
+    }
+
+    function isResidentOwnerByGmkId(targetGmkId) {
+      return isAuth() && targetGmkId != null && targetGmkId != "" && (
+        (getUserGmkId() != "" && getUserGmkId() == targetGmkId) ||
+        isResidentOwner(targetGmkId)
+      );
     }
 
     // USERS COLLECTION
@@ -260,35 +266,29 @@ service cloud.firestore {
     match /eventAttendance/{id} {
       allow read: if isAuth();
       allow create: if isAuth() && (
+        (request.auth.token.email != null && request.auth.token.email != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()) ||
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector() ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
-        )
+        isEventDirector()
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
-        ) ||
-        (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        ))
+        (getUserGmkId() != "" && "gmkId" in request.resource.data && request.resource.data.gmkId != null && request.resource.data.gmkId == getUserGmkId()) ||
+        (resource != null && "gmkId" in resource.data && resource.data.gmkId != null && getUserGmkId() != "" && resource.data.gmkId == getUserGmkId()) ||
+        (getUserEmail() != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == getUserEmail()) ||
+        (resource != null && "email" in resource.data && resource.data.email != null && getUserEmail() != "" && resource.data.email.lower() == getUserEmail()) ||
+        isResidentOwnerByGmkId(request.resource.data.get('gmkId', '')) ||
+        (resource != null && isResidentOwnerByGmkId(resource.data.get('gmkId', '')))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        ))
+        (resource != null && "gmkId" in resource.data && resource.data.gmkId != null && getUserGmkId() != "" && resource.data.gmkId == getUserGmkId()) ||
+        (resource != null && "email" in resource.data && resource.data.email != null && getUserEmail() != "" && resource.data.email.lower() == getUserEmail()) ||
+        (resource != null && isResidentOwnerByGmkId(resource.data.get('gmkId', '')))
       );
     }
 
@@ -296,35 +296,29 @@ service cloud.firestore {
     match /eventFood/{id} {
       allow read: if isAuth();
       allow create: if isAuth() && (
+        (request.auth.token.email != null && request.auth.token.email != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()) ||
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector() ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
-        )
+        isEventDirector()
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
-        ) ||
-        (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        ))
+        (getUserGmkId() != "" && "gmkId" in request.resource.data && request.resource.data.gmkId != null && request.resource.data.gmkId == getUserGmkId()) ||
+        (resource != null && "gmkId" in resource.data && resource.data.gmkId != null && getUserGmkId() != "" && resource.data.gmkId == getUserGmkId()) ||
+        (getUserEmail() != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == getUserEmail()) ||
+        (resource != null && "email" in resource.data && resource.data.email != null && getUserEmail() != "" && resource.data.email.lower() == getUserEmail()) ||
+        isResidentOwnerByGmkId(request.resource.data.get('gmkId', '')) ||
+        (resource != null && isResidentOwnerByGmkId(request.resource.data.get('gmkId', '')))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        ))
+        (resource != null && "gmkId" in resource.data && resource.data.gmkId != null && getUserGmkId() != "" && resource.data.gmkId == getUserGmkId()) ||
+        (resource != null && "email" in resource.data && resource.data.email != null && getUserEmail() != "" && resource.data.email.lower() == getUserEmail()) ||
+        (resource != null && isResidentOwnerByGmkId(resource.data.get('gmkId', '')))
       );
     }
 
@@ -438,9 +432,13 @@ service cloud.firestore {
     match /event_registrations/{regId} {
       allow read: if isAuth();
       allow create: if isAuth() && (
+        (request.auth.token.email != null && request.auth.token.email != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == request.auth.token.email.lower()) ||
+        (request.auth.token.email != null && request.auth.token.email != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()) ||
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
+        (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
+        (getUserGmkId() != "" && "gmkId" in request.resource.data && request.resource.data.gmkId != null && request.resource.data.gmkId == getUserGmkId()) ||
         isResidentOwnerPayload(
           request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
           request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
@@ -450,6 +448,10 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
+        (getUserEmail() != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
+        (resource != null && "primaryMemberEmail" in resource.data && resource.data.primaryMemberEmail != null && getUserEmail() != "" && resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
+        (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
+        (resource != null && "primaryMemberGmkId" in resource.data && resource.data.primaryMemberGmkId != null && getUserGmkId() != "" && resource.data.primaryMemberGmkId == getUserGmkId()) ||
         isResidentOwnerPayload(
           request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
           request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
@@ -463,6 +465,8 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
+        (resource != null && "primaryMemberEmail" in resource.data && resource.data.primaryMemberEmail != null && getUserEmail() != "" && resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
+        (resource != null && "primaryMemberGmkId" in resource.data && resource.data.primaryMemberGmkId != null && getUserGmkId() != "" && resource.data.primaryMemberGmkId == getUserGmkId()) ||
         (resource != null && isResidentOwnerPayload(
           resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
           resource.data.get('primaryMemberEmail', resource.data.get('email', ''))

@@ -432,7 +432,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
             {errorMsg}
           </p>
           <p className="text-stone-650 font-semibold">
-            If this issue persists, please check your network connection or contact the Greens Malayalee Kootayama (GMK) administrator group.
+            If this issue persists, please check your network connection or contact the Greens Malayalee Koottayma (GMK) administrator group.
           </p>
           <div className="pt-2 flex gap-3">
             <button

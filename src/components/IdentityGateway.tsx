@@ -533,7 +533,7 @@ export default function IdentityGateway() {
       {/* Decorative Warm Banner */}
       <div className="bg-[#0f4c2a] text-emerald-100 py-3 text-center text-xs font-semibold uppercase tracking-wider px-4 flex items-center justify-center space-x-2">
         <Sparkles className="w-4 h-4 text-[#d4af37] animate-pulse" />
-        <span>Greens Malayalee Kootayama • Community • Culture • Connection</span>
+        <span>Greens Malayalee Koottayma • Community • Culture • Connection</span>
       </div>
 
       <div className="flex-1 flex flex-col-reverse md:flex-row items-center justify-center p-6 md:p-12 max-w-7xl mx-auto w-full gap-8">
@@ -542,7 +542,7 @@ export default function IdentityGateway() {
         <div className="w-full md:w-1/2 space-y-6 text-center md:text-left md:pr-8 animate-fadeIn">
           
           <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-[#0f4c2a] font-heading leading-tight">
-            Greens Malayalee Kootayama
+            Greens Malayalee Koottayma
           </h1>
           
           <p className="text-stone-850 text-sm md:text-base leading-relaxed font-sans font-medium">
@@ -585,7 +585,7 @@ export default function IdentityGateway() {
               
               <div className="text-xs text-stone-750 leading-relaxed text-left bg-emerald-50/70 border border-emerald-150 p-5 rounded-2xl space-y-3">
                 <p className="font-extrabold text-center text-emerald-900 text-sm">
-                  Welcome to Greens Malayalee Kootayama
+                  Welcome to Greens Malayalee Koottayma
                 </p>
                 <p className="font-medium text-center text-stone-600">
                   Your account has been successfully activated. You may now sign in using your registered email address and the password you just created.

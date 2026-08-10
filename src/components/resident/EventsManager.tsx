@@ -493,26 +493,38 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         updatedAt: new Date().toISOString()
       };
 
-      // Step C: STAGE AUTHORIZED WRITES BATCH
-      const opType = oldReg ? 'UPDATE EXISTING' : 'CREATE';
-      console.log(`[REGISTRATION BATCH PREPARATION]\nStaging resident-owned writes for: ${opType}`);
+      // Phase 1: Explicitly check current Firestore existence of the 3 core documents BEFORE staging writes
+      const regDocRef = doc(db, "event_registrations", regId);
+      const attDocRef = doc(db, "eventAttendance", attPayload.id);
+      const foodDocRef = doc(db, "eventFood", foodPayload.id);
 
-      const batch = writeBatch(db);
+      const [regSnap, attSnap, foodSnap] = await Promise.all([
+        getDoc(regDocRef),
+        getDoc(attDocRef),
+        getDoc(foodDocRef)
+      ]);
 
-      console.log(`[REGISTRATION BATCH 01] event_registrations/${regId}`);
-      batch.set(doc(db, "event_registrations", regId), regPayload);
+      const registrationExists = regSnap.exists();
+      const attendanceExists = attSnap.exists();
+      const foodExists = foodSnap.exists();
 
-      console.log(`[REGISTRATION BATCH 02] eventAttendance/${attPayload.id}`);
-      batch.set(doc(db, "eventAttendance", attPayload.id), attPayload);
-
-      console.log(`[REGISTRATION BATCH 03] eventFood/${foodPayload.id}`);
-      batch.set(doc(db, "eventFood", foodPayload.id), foodPayload);
+      // Phase 2: Determine actual Firestore operation for each document
+      const regOp = registrationExists ? "UPDATE" : "CREATE";
+      const attOp = attendanceExists ? "UPDATE" : "CREATE";
+      const foodOp = foodExists ? "UPDATE" : "CREATE";
 
       // Identity & Ownership Diagnostic Logging
       const authUid = currentUser.uid;
       const userGmkId = profile?.gmkId || residentGmkId;
       const userEmail = profile?.email || residentEmail || authEmail;
       const roles = profile?.roles || userRoles;
+
+      // Phase 3: Print actual Firebase runtime configuration
+      console.log("[FIREBASE RUNTIME CONFIG]", {
+        firebaseProjectId: db.app.options.projectId,
+        firebaseDatabaseId: (db.app.options as any).databaseId || '(default)',
+        firestoreInstance: db ? "INITIALIZED" : "NULL"
+      });
 
       console.log("[REGISTRATION AUTHENTICATED USER IDENTITY]", {
         AUTH_UID: authUid,
@@ -527,37 +539,34 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         PRIMARY_MEMBER_EMAIL: regPayload.primaryMemberEmail
       });
 
-      const ownerByGmkId = Boolean(userGmkId && userGmkId === regPayload.primaryMemberGmkId);
-      const ownerByEmail = Boolean(authEmail && authEmail === regPayload.primaryMemberEmail.toLowerCase().trim());
+      // Verification of ownership if updating existing document
+      if (registrationExists) {
+        const existingData = regSnap.data();
+        const isOwner = (existingData?.primaryMemberGmkId && existingData.primaryMemberGmkId === residentGmkId) ||
+                        (existingData?.primaryMemberEmail && existingData.primaryMemberEmail.toLowerCase().trim() === authEmail);
+        if (!isOwner && !isExecutiveAdmin) {
+          throw new Error("Access Denied: You are not authorized to update another resident's registration.");
+        }
+      }
 
-      console.log("[REGISTRATION AUTH CHECK]", {
-        ownerByGmkId,
-        ownerByEmail
-      });
+      // Step C: STAGE AUTHORIZED WRITES BATCH
+      console.log(`[REGISTRATION BATCH PREPARATION]\nStaging resident-owned writes - reg: ${regOp}, att: ${attOp}, food: ${foodOp}`);
+
+      const batch = writeBatch(db);
+
+      console.log(`[REGISTRATION BATCH 01] event_registrations/${regId}`);
+      batch.set(regDocRef, regPayload);
+
+      console.log(`[REGISTRATION BATCH 02] eventAttendance/${attPayload.id}`);
+      batch.set(attDocRef, attPayload);
+
+      console.log(`[REGISTRATION BATCH 03] eventFood/${foodPayload.id}`);
+      batch.set(foodDocRef, foodPayload);
 
       // Step D: COMMIT CORE ATOMIC RESIDENT BATCH
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 1 - Committing Core Resident Batch...");
-      try {
-        await batch.commit();
-        console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 2 - Core Batch Commit Successful");
-      } catch (commitErr: any) {
-        console.error("❌ CORE REGISTRATION BATCH COMMIT FAILED:", commitErr);
-        console.error("[REGISTRATION BATCH FAILURE DETAILS]", {
-          errorName: commitErr?.name,
-          errorCode: commitErr?.code,
-          errorMessage: commitErr?.message,
-          batchTargetCollections: [
-            `event_registrations/${regId}`,
-            `eventAttendance/${attPayload.id}`,
-            `eventFood/${foodPayload.id}`
-          ]
-        });
-
-        if (commitErr?.code === 'permission-denied') {
-          throw new Error("Access Denied: You do not have authorization to create this event registration. Please contact your administrator.");
-        }
-        throw commitErr;
-      }
+      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] Committing Core Resident Batch...");
+      await batch.commit();
+      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] Core Batch Commit Successful");
 
       // Save references for UI notification
       const savedEventTitle = activeEventForReg.title;

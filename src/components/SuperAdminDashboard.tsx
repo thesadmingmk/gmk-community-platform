@@ -2459,7 +2459,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
                         <div>
                           <h4 className="text-xs font-black text-[#0f4c2a] uppercase tracking-wide">Pristine Zero-Drift Certified</h4>
                           <p className="text-[11px] text-[#0f4c2a] mt-0.5 leading-relaxed font-semibold">
-                            All database collections fully comply with Greens Malayalee Kootayama (GMK) Enterprise Architecture Standards (GEAS) v1.0. No unauthorized, orphaned, or unmapped identity drift is present in active operational collections.
+                            All database collections fully comply with Greens Malayalee Koottayma (GMK) Enterprise Architecture Standards (GEAS) v1.0. No unauthorized, orphaned, or unmapped identity drift is present in active operational collections.
                           </p>
                         </div>
                       </div>

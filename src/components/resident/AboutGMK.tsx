@@ -17,7 +17,7 @@ export default function AboutGMK() {
         <div className="relative max-w-3xl space-y-4">
           <div className="inline-flex items-center space-x-1.5 bg-white/10 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest text-[#d4af37]">
             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-            <span>Greens Malayalee Kootayama</span>
+            <span>Greens Malayalee Koottayma</span>
           </div>
           
           <h3 className="text-3xl md:text-4xl font-extrabold tracking-tight font-heading text-white">
@@ -25,7 +25,7 @@ export default function AboutGMK() {
           </h3>
           
           <p className="text-emerald-100 text-xs sm:text-sm leading-relaxed font-sans font-medium">
-            Greens Malayalee Kootayama (GMK) is the official cultural and social consortium of Malayali residents living inside the Al Hail Greens and surrounding vicinity, Muscat, Oman. Established to protect, celebrate, and propagate traditional cultural roots, GMK functions as a unified support circle and family collective.
+            Greens Malayalee Koottayma (GMK) is the official cultural and social consortium of Malayali residents living inside the Al Hail Greens and surrounding vicinity, Muscat, Oman. Established to protect, celebrate, and propagate traditional cultural roots, GMK functions as a unified support circle and family collective.
           </p>
         </div>
       </div>
