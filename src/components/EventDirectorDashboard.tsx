@@ -446,7 +446,22 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState('');
   const [progCoordSearchQuery, setProgCoordSearchQuery] = useState('');
   const [progVolSearchQuery, setProgVolSearchQuery] = useState('');
+  const [progParticipantSearchQuery, setProgParticipantSearchQuery] = useState('');
+  const [participantAgeFilter, setParticipantAgeFilter] = useState('All');
+  const [participantGenderFilter, setParticipantGenderFilter] = useState('All');
   const [searchAudienceFilter, setSearchAudienceFilter] = useState<'Children' | 'Adults' | 'Mixed'>('Mixed');
+
+  // Auto-open program workspace if ?programWorkspace=<id> is in URL
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const progId = params.get('programWorkspace') || params.get('programId');
+      if (progId) {
+        setActiveCommitteeToConfigure('Program Committee');
+        setActiveProgForManagement(progId);
+      }
+    }
+  }, []);
 
   // Auto-clear success and error alerts
   useEffect(() => {
@@ -3150,37 +3165,97 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     }
   };
 
+  // Forensic logging & payload sanitization for Firestore RTCO-022
+  const sanitizeFirestorePayload = <T,>(obj: T): T => {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(sanitizeFirestorePayload).filter(v => v !== undefined) as unknown as T;
+    }
+    if (typeof obj === 'object') {
+      const cleaned: Record<string, any> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value === undefined) {
+          continue; // Omit undefined keys from payload
+        }
+        cleaned[key] = sanitizeFirestorePayload(value);
+      }
+      return cleaned as T;
+    }
+    return obj;
+  };
+
+  const logPayloadForensics = (label: string, payload: any) => {
+    console.log(`[PROGRAM CREATE FORENSIC] ${label} PAYLOAD:`, payload);
+    if (payload && typeof payload === 'object') {
+      Object.entries(payload).forEach(([key, value]) => {
+        console.log(`[PROGRAM CREATE FORENSIC] Key: "${key}", Value:`, value, `, Type:`, typeof value);
+        if (value === undefined) {
+          console.error(`[PROGRAM CREATE FORENSIC] DETECTED UNDEFINED AT KEY: "${key}"`);
+        }
+      });
+    }
+  };
+
   // Create Program directly from ED/Program Workspace
   const handleCreateProgramDirectly = async () => {
-    if (!selectedEventId || !progTitle.trim() || !progCoordinator) {
-      setErrorMsg('Please provide a program title and assign a Coordinator.');
+    if (!selectedEventId || !progTitle.trim()) {
+      setErrorMsg('Please provide a program title.');
       return;
     }
     if (!progType || progType === 'Select') {
       setErrorMsg('Please select a valid Program Type (Adults, Kids, or Mix).');
       return;
     }
-    if (false) {
-      setErrorMsg("Please fill in program title and assign a coordinator.");
-      return;
-    }
+
     setIsSubmitting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
+
     try {
       const progId = `prog_${selectedEventId}_${Date.now()}`;
-      const payload: EventProgram = {
+
+      // Build Coordinators array safely without undefined values
+      const coordinatorsList: Array<{
+        residentId: string;
+        fullName: string;
+        email: string;
+        phone?: string;
+        unitDisplay?: string;
+      }> = [];
+
+      if (progCoordinator) {
+        const cResId = progCoordinator.gmkId || (progCoordinator as any).residentId || (progCoordinator as any).id || '';
+        const cName = progCoordinator.fullName || '';
+        const cEmail = progCoordinator.email || (progCoordinator as any).rawResident?.email || '';
+        const cPhone = progCoordinator.phone || (progCoordinator as any).rawResident?.phone || (progCoordinator as any).rawResident?.whatsAppNumber || '';
+        const cUnit = progCoordinator.displayUnitNumber || (progCoordinator as any).unitDisplay || (progCoordinator as any).rawResident?.displayUnitNumber || 'N/A';
+
+        coordinatorsList.push({
+          residentId: cResId,
+          fullName: cName,
+          email: cEmail,
+          phone: cPhone,
+          unitDisplay: cUnit
+        });
+      }
+
+      // Map UI progType to schema type ('ADULTS' | 'KIDS' | 'MIXED')
+      let normalizedProgType: 'ADULTS' | 'KIDS' | 'MIXED' = 'MIXED';
+      const upperType = (progType || '').toUpperCase();
+      if (upperType === 'ADULTS') normalizedProgType = 'ADULTS';
+      if (upperType === 'KIDS' || upperType === 'CHILDREN') normalizedProgType = 'KIDS';
+      if (upperType === 'MIXED' || upperType === 'MIX') normalizedProgType = 'MIXED';
+
+      const rawPayload: EventProgram = {
         id: progId,
         eventId: selectedEventId,
         title: progTitle.trim(),
-        description: progDescription.trim(),
-        category: progType,
-        programType: progType as any,
-        coordinators: [{
-          residentId: progCoordinator.gmkId,
-          fullName: progCoordinator.fullName,
-          email: progCoordinator.email
-        }],
+        description: (progDescription || '').trim(),
+        category: normalizedProgType,
+        programType: normalizedProgType,
+        coordinators: coordinatorsList,
         participants: [],
         volunteers: [],
         status: 'approved',
@@ -3189,31 +3264,47 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         expenses: []
       };
 
+      // Sanitize payload to recursively remove any undefined fields
+      const payload = sanitizeFirestorePayload(rawPayload);
+
+      // Forensic diagnostic logging before Firestore write
+      logPayloadForensics('PROGRAM_CREATE_DIRECTLY', payload);
+
       await setDoc(doc(db, "eventPrograms", progId), payload);
 
-      // Assign resident as role program_coordinator
-      const assignmentId = `${progCoordinator.gmkId}_program_coordinator_${selectedEventId}`;
-      const emailAssignmentId = `${progCoordinator.email.toLowerCase().trim()}_program_coordinator_${selectedEventId}`;
-      const rolePayload = {
-        id: assignmentId,
-        gmkId: progCoordinator.gmkId,
-        email: progCoordinator.email.toLowerCase().trim(),
-        position: 'program_coordinator',
-        role: 'program_coordinator',
-        eventId: selectedEventId,
-        assignedBy: profile?.email || 'event_director',
-        assignedAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, "roleAssignments", assignmentId), rolePayload);
-      await setDoc(doc(db, "roleAssignments", emailAssignmentId), { ...rolePayload, id: emailAssignmentId });
+      // If coordinator was assigned, update role assignments and user records
+      if (progCoordinator) {
+        const coordResId = progCoordinator.gmkId || (progCoordinator as any).residentId || (progCoordinator as any).id || '';
+        const coordEmail = (progCoordinator.email || (progCoordinator as any).rawResident?.email || '').toLowerCase().trim();
 
-      // Sync User Roles
-      const userQ = query(collection(db, "users"), where("email", "==", progCoordinator.email.toLowerCase().trim()));
-      const userSnap = await getDocs(userQ);
-      for (const uDoc of userSnap.docs) {
-        const currentRoles: string[] = uDoc.data().roles || [];
-        const updatedRoles = Array.from(new Set([...currentRoles, 'program_coordinator']));
-        await setDoc(doc(db, "users", uDoc.id), { roles: updatedRoles }, { merge: true });
+        if (coordResId) {
+          const assignmentId = `${coordResId}_program_coordinator_${selectedEventId}`;
+          const rolePayload = sanitizeFirestorePayload({
+            id: assignmentId,
+            gmkId: coordResId,
+            email: coordEmail,
+            position: 'program_coordinator',
+            role: 'program_coordinator',
+            eventId: selectedEventId,
+            assignedBy: profile?.email || 'event_director',
+            assignedAt: new Date().toISOString()
+          });
+
+          await setDoc(doc(db, "roleAssignments", assignmentId), rolePayload);
+
+          if (coordEmail) {
+            const emailAssignmentId = `${coordEmail}_program_coordinator_${selectedEventId}`;
+            await setDoc(doc(db, "roleAssignments", emailAssignmentId), { ...rolePayload, id: emailAssignmentId });
+
+            const userQ = query(collection(db, "users"), where("email", "==", coordEmail));
+            const userSnap = await getDocs(userQ);
+            for (const uDoc of userSnap.docs) {
+              const currentRoles: string[] = uDoc.data().roles || [];
+              const updatedRoles = Array.from(new Set([...currentRoles, 'program_coordinator']));
+              await setDoc(doc(db, "users", uDoc.id), { roles: updatedRoles }, { merge: true });
+            }
+          }
+        }
       }
 
       await createAuditLog(
@@ -3221,24 +3312,366 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         profile?.email || 'event_director',
         'program',
         progId,
-        `Event Director created program '${progTitle.trim()}' and assigned coordinator ${progCoordinator.fullName}`
+        `Event Director created program '${progTitle.trim()}'${progCoordinator ? ` and assigned coordinator ${progCoordinator.fullName}` : ''}`
       );
 
-      setSuccessMsg(`✓ Successfully created program "${progTitle.trim()}" and assigned ${progCoordinator.fullName} as Coordinator.`);
+      setSuccessMsg(`✓ Successfully created program "${progTitle.trim()}"${progCoordinator ? ` and assigned ${progCoordinator.fullName} as Coordinator` : ''}.`);
       setProgTitle('');
       setProgDescription('');
       setProgCoordinator(null);
       setProgCoordinatorSearch('');
     } catch (err: any) {
-      console.error(err);
+      console.error("[PROGRAM CREATE ERROR]", err);
       setErrorMsg("Failed to create program: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // --- RTCO-021 PROGRAM WORKSPACE SEARCH & CANDIDATE EVALUATION HELPERS ---
+
+  // Program Coordinator candidate search: STRICTLY Primary Resident + Spouse ONLY
+  const searchProgramCoordinatorCandidates = (queryStr: string) => {
+    const query = queryStr.toLowerCase().trim();
+    if (!query) return [];
+
+    console.log(`[PROGRAM COORDINATOR SEARCH] Authenticated user: ${profile?.email || 'user'}`);
+
+    const candidates: Array<{
+      id: string;
+      residentId: string;
+      fullName: string;
+      email: string;
+      displayUnitNumber: string;
+      phone: string;
+      isFamilyMember: boolean;
+      relationship: 'Primary Resident' | 'Spouse';
+      rawResident?: ResidentProfile;
+    }> = [];
+
+    // 1. Active Primary Residents
+    residents.forEach(r => {
+      if (r.status !== 'active') {
+        console.log(`[PROGRAM COORDINATOR SEARCH] Candidate: ${r.fullName}, Relationship: Primary Resident, Eligible: FALSE, Reason: Resident status is not active`);
+        return;
+      }
+      const matches = r.fullName?.toLowerCase().includes(query) ||
+        r.gmkId?.toLowerCase().includes(query) ||
+        r.email?.toLowerCase().includes(query) ||
+        r.displayUnitNumber?.toLowerCase().includes(query) ||
+        r.phone?.toLowerCase().includes(query);
+
+      if (matches) {
+        console.log(`[PROGRAM COORDINATOR SEARCH] Candidate: ${r.fullName}, Relationship: Primary Resident, Eligible: TRUE, Reason: Active Primary Resident`);
+        candidates.push({
+          id: r.gmkId,
+          residentId: r.gmkId,
+          fullName: r.fullName,
+          email: r.email,
+          displayUnitNumber: r.displayUnitNumber || 'N/A',
+          phone: r.phone || r.whatsAppNumber || '',
+          isFamilyMember: false,
+          relationship: 'Primary Resident',
+          rawResident: r
+        });
+      }
+    });
+
+    // 2. Spouses ONLY (DO NOT show children, parents, or other family members)
+    familyMembers.forEach(m => {
+      const rel = (m.relationship || '').toLowerCase();
+      if (rel !== 'spouse') {
+        console.log(`[PROGRAM COORDINATOR SEARCH] Candidate: ${m.name}, Relationship: ${m.relationship || 'Dependent'}, Eligible: FALSE, Reason: Only Primary Resident and Spouse are eligible for Coordinator role`);
+        return;
+      }
+
+      const parentId = m.familyId ? m.familyId.replace('fam_', '') : '';
+      const parentRes = residents.find(r => r.gmkId === parentId);
+      if (!parentRes || parentRes.status !== 'active') return;
+
+      const matches = m.name?.toLowerCase().includes(query) ||
+        m.id?.toLowerCase().includes(query) ||
+        parentRes.gmkId?.toLowerCase().includes(query) ||
+        parentRes.email?.toLowerCase().includes(query) ||
+        parentRes.displayUnitNumber?.toLowerCase().includes(query);
+
+      if (matches) {
+        console.log(`[PROGRAM COORDINATOR SEARCH] Candidate: ${m.name}, Relationship: Spouse, Eligible: TRUE, Reason: Spouse of active resident`);
+        candidates.push({
+          id: m.id || `${parentRes.gmkId}_spouse`,
+          residentId: parentRes.gmkId,
+          fullName: m.name,
+          email: parentRes.email,
+          displayUnitNumber: parentRes.displayUnitNumber || 'N/A',
+          phone: m.phone || m.whatsAppNumber || parentRes.phone || parentRes.whatsAppNumber || '',
+          isFamilyMember: true,
+          relationship: 'Spouse'
+        });
+      }
+    });
+
+    return candidates;
+  };
+
+  // Program Participant candidate search: Calculates eligibility based on Program Type (ADULTS / KIDS / MIXED) + Age + Gender
+  const searchProgramParticipantCandidates = (
+    queryStr: string,
+    progType: 'ADULTS' | 'KIDS' | 'MIXED' | string,
+    ageFilter: string = 'All',
+    genderFilter: string = 'All'
+  ) => {
+    const query = queryStr.toLowerCase().trim();
+    const normalizedProgType = (progType || 'ADULTS').toUpperCase() as 'ADULTS' | 'KIDS' | 'MIXED';
+
+    console.log(`[PROGRAM PARTICIPANT SEARCH] Query: "${query}", Program Type: ${normalizedProgType}, AgeFilter: ${ageFilter}, GenderFilter: ${genderFilter}`);
+
+    const candidates: Array<{
+      id: string;
+      residentId: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      parentPhone: string;
+      unitDisplay: string;
+      accommodationType: string;
+      isChild: boolean;
+      age: number;
+      gender: string;
+      relationship: string;
+    }> = [];
+
+    const currentYear = new Date().getFullYear();
+
+    // Age filter helper
+    const matchesAgeFilter = (personAge: number) => {
+      if (ageFilter === 'All') return true;
+      if (ageFilter === 'Adults' || ageFilter === '18+') return personAge >= 18;
+      if (ageFilter === '0-5') return personAge >= 0 && personAge <= 5;
+      if (ageFilter === '6-10') return personAge >= 6 && personAge <= 10;
+      if (ageFilter === '11-14') return personAge >= 11 && personAge <= 14;
+      if (ageFilter === '15-17') return personAge >= 15 && personAge <= 17;
+      return true;
+    };
+
+    // Gender filter helper
+    const matchesGenderFilter = (personGender: string) => {
+      if (genderFilter === 'All') return true;
+      return personGender.toLowerCase() === genderFilter.toLowerCase();
+    };
+
+    // 1. Primary Residents (Adults, age 18+)
+    residents.forEach(r => {
+      if (r.status !== 'active') return;
+      const personAge = 25; // Adults >= 18
+      const personGender = (r.gender || 'male').toLowerCase();
+
+      let eligible = true;
+      let reason = '';
+
+      if (normalizedProgType === 'KIDS') {
+        eligible = false;
+        reason = 'AGE >= 18 (Adults excluded in KIDS programs)';
+      } else if (normalizedProgType === 'ADULTS' || normalizedProgType === 'MIXED') {
+        eligible = true;
+        reason = `${normalizedProgType} program allows adults (Age ${personAge} >= 18)`;
+      }
+
+      if (query) {
+        const qMatch = r.fullName?.toLowerCase().includes(query) ||
+          r.gmkId?.toLowerCase().includes(query) ||
+          r.email?.toLowerCase().includes(query) ||
+          r.displayUnitNumber?.toLowerCase().includes(query) ||
+          r.phone?.toLowerCase().includes(query);
+        if (!qMatch) return;
+      }
+
+      console.log(`[PROGRAM PARTICIPANT SEARCH] Program Type: ${normalizedProgType}`);
+      console.log(`[PROGRAM PARTICIPANT SEARCH] Candidate: ${r.fullName}, Age: ${personAge}, Gender: ${r.gender || 'Male'}, Eligible: ${eligible ? 'TRUE' : 'FALSE'}, Reason: ${reason}`);
+
+      if (eligible && matchesAgeFilter(personAge) && matchesGenderFilter(personGender)) {
+        candidates.push({
+          id: r.gmkId,
+          residentId: r.gmkId,
+          fullName: r.fullName,
+          email: r.email,
+          phone: r.phone || r.whatsAppNumber || '',
+          parentPhone: '',
+          unitDisplay: r.displayUnitNumber || 'N/A',
+          accommodationType: r.unitType || 'Apartment',
+          isChild: false,
+          age: personAge,
+          gender: r.gender || 'Male',
+          relationship: 'Primary Resident'
+        });
+      }
+    });
+
+    // 2. Family Members (Spouses, Children, Parents)
+    familyMembers.forEach(m => {
+      const parentId = m.familyId ? m.familyId.replace('fam_', '') : '';
+      const parentRes = residents.find(r => r.gmkId === parentId);
+      if (!parentRes || parentRes.status !== 'active') return;
+
+      const rel = (m.relationship || '').toLowerCase();
+      let personAge = 25;
+      let isChild = false;
+
+      if (rel === 'child') {
+        if (m.yearOfBirth) {
+          const yob = parseInt(m.yearOfBirth);
+          personAge = !isNaN(yob) ? (currentYear - yob) : 10;
+        } else {
+          personAge = 10;
+        }
+        // If child is 18+, they are treated as an ADULT!
+        isChild = personAge < 18;
+      } else {
+        personAge = rel === 'parent' ? 60 : 35;
+        isChild = false;
+      }
+
+      const personGender = (m.gender || (rel === 'spouse' ? 'female' : 'male')).toLowerCase();
+
+      let eligible = true;
+      let reason = '';
+
+      if (normalizedProgType === 'ADULTS') {
+        if (isChild) {
+          eligible = false;
+          reason = `AGE ${personAge} < 18 (Children excluded in ADULTS programs)`;
+        } else {
+          eligible = true;
+          reason = `AGE ${personAge} >= 18 (Adults eligible)`;
+        }
+      } else if (normalizedProgType === 'KIDS') {
+        if (!isChild) {
+          eligible = false;
+          reason = `AGE ${personAge} >= 18 (Adults excluded in KIDS programs)`;
+        } else {
+          eligible = true;
+          reason = `AGE ${personAge} < 18 (Kids eligible)`;
+        }
+      } else {
+        eligible = true;
+        reason = 'MIXED program allows both adults and children';
+      }
+
+      if (query) {
+        const qMatch = m.name?.toLowerCase().includes(query) ||
+          m.id?.toLowerCase().includes(query) ||
+          parentRes.gmkId?.toLowerCase().includes(query) ||
+          parentRes.email?.toLowerCase().includes(query) ||
+          parentRes.displayUnitNumber?.toLowerCase().includes(query) ||
+          m.phone?.toLowerCase().includes(query);
+        if (!qMatch) return;
+      }
+
+      console.log(`[PROGRAM PARTICIPANT SEARCH] Program Type: ${normalizedProgType}`);
+      console.log(`[PROGRAM PARTICIPANT SEARCH] Candidate: ${m.name}, Age: ${personAge}, Gender: ${m.gender || (rel === 'spouse' ? 'Female' : 'Male')}, Eligible: ${eligible ? 'TRUE' : 'FALSE'}, Reason: ${reason}`);
+
+      if (eligible && matchesAgeFilter(personAge) && matchesGenderFilter(personGender)) {
+        const directPhone = m.phone || m.whatsAppNumber || '';
+        const householdPhone = parentRes.phone || parentRes.whatsAppNumber || '';
+        // Fallback for female spouse or participant without direct phone
+        const displayPhone = directPhone || householdPhone || 'Not Available';
+        const parentGuardianPhone = isChild ? (householdPhone || 'Not Available') : '';
+
+        candidates.push({
+          id: m.id || `${parentRes.gmkId}_${rel}`,
+          residentId: m.id || `${parentRes.gmkId}_${rel}`,
+          fullName: m.name,
+          email: parentRes.email,
+          phone: displayPhone,
+          parentPhone: parentGuardianPhone,
+          unitDisplay: parentRes.displayUnitNumber || 'N/A',
+          accommodationType: parentRes.unitType || 'Apartment',
+          isChild: isChild,
+          age: personAge,
+          gender: m.gender || (rel === 'spouse' ? 'Female' : 'Male'),
+          relationship: m.relationship || 'Family Member'
+        });
+      }
+    });
+
+    return candidates;
+  };
+
+  // Assign program participant
+  const handleAssignProgramParticipant = async (programId: string, participantData: any) => {
+    const prog = activePrograms.find(p => p.id === programId);
+    if (!prog) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const currentParticipants = prog.participants || [];
+      const resId = participantData.residentId || participantData.id || '';
+      const fullName = participantData.fullName || '';
+
+      if (currentParticipants.some(p => p.residentId === resId || (fullName && p.fullName.toLowerCase() === fullName.toLowerCase()))) {
+        setErrorMsg("Participant is already added to this program.");
+        return;
+      }
+
+      const cleanParticipant = sanitizeFirestorePayload({
+        residentId: resId,
+        fullName: fullName,
+        email: participantData.email || '',
+        phone: participantData.phone || '',
+        unitDisplay: participantData.unitDisplay || 'N/A',
+        accommodationType: participantData.accommodationType || 'Apartment',
+        parentPhone: participantData.parentPhone || '',
+        isChild: !!participantData.isChild,
+        age: participantData.age,
+        gender: participantData.gender || ''
+      });
+
+      const updatedParticipants = [...currentParticipants, cleanParticipant];
+
+      await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
+        participants: updatedParticipants,
+        updatedAt: new Date().toISOString()
+      }));
+
+      setSuccessMsg(`✓ Added ${fullName} as participant for ${prog.title}.`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to assign participant: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Remove program participant
+  const handleRemoveProgramParticipant = async (programId: string, residentId: string, fullName: string) => {
+    const prog = activePrograms.find(p => p.id === programId);
+    if (!prog) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const updatedParticipants = (prog.participants || []).filter(p => p.residentId !== residentId && p.fullName !== fullName);
+
+      await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
+        participants: updatedParticipants,
+        updatedAt: new Date().toISOString()
+      }));
+
+      setSuccessMsg(`✓ Removed participant.`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to remove participant: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Assign program coordinator to an existing program
-  const handleAssignProgramCoordinator = async (programId: string, resident: ResidentProfile) => {
+  const handleAssignProgramCoordinator = async (programId: string, resident: any) => {
     const prog = activePrograms.find(p => p.id === programId);
     if (!prog) return;
 
@@ -3248,39 +3681,53 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
     try {
       const currentCoordinators = prog.coordinators || [];
-      if (currentCoordinators.some(c => c.residentId === resident.gmkId)) {
+      const resId = resident.gmkId || resident.residentId || resident.id || '';
+      const fullName = resident.fullName || '';
+      const email = (resident.email || resident.rawResident?.email || '').toLowerCase().trim();
+      const phone = resident.phone || resident.rawResident?.phone || '';
+      const unitDisplay = resident.displayUnitNumber || resident.unitDisplay || resident.rawResident?.displayUnitNumber || 'N/A';
+
+      if (currentCoordinators.some(c => c.residentId === resId || (fullName && c.fullName.toLowerCase() === fullName.toLowerCase()))) {
         setErrorMsg("Resident is already a coordinator for this program.");
         return;
       }
 
-      const updatedCoordinators = [...currentCoordinators, {
-        residentId: resident.gmkId,
-        fullName: resident.fullName,
-        email: resident.email
-      }];
-
-      await updateDoc(doc(db, "eventPrograms", programId), {
-        coordinators: updatedCoordinators,
-        updatedAt: new Date().toISOString()
+      const newCoord = sanitizeFirestorePayload({
+        residentId: resId,
+        fullName: fullName,
+        email: email,
+        phone: phone,
+        unitDisplay: unitDisplay
       });
 
-      // assign role
-      const assignmentId = `${resident.gmkId}_program_coordinator_${selectedEventId}`;
-      const emailAssignmentId = `${resident.email.toLowerCase().trim()}_program_coordinator_${selectedEventId}`;
-      const rolePayload = {
-        id: assignmentId,
-        gmkId: resident.gmkId,
-        email: resident.email.toLowerCase().trim(),
-        position: 'program_coordinator',
-        role: 'program_coordinator',
-        eventId: selectedEventId,
-        assignedBy: profile?.email || 'event_director',
-        assignedAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, "roleAssignments", assignmentId), rolePayload);
-      await setDoc(doc(db, "roleAssignments", emailAssignmentId), { ...rolePayload, id: emailAssignmentId });
+      const updatedCoordinators = [...currentCoordinators, newCoord];
 
-      setSuccessMsg(`✓ Assigned ${resident.fullName} as a coordinator for ${prog.title}.`);
+      await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
+        coordinators: updatedCoordinators,
+        updatedAt: new Date().toISOString()
+      }));
+
+      // assign role
+      if (resId) {
+        const assignmentId = `${resId}_program_coordinator_${selectedEventId}`;
+        const rolePayload = sanitizeFirestorePayload({
+          id: assignmentId,
+          gmkId: resId,
+          email: email,
+          position: 'program_coordinator',
+          role: 'program_coordinator',
+          eventId: selectedEventId,
+          assignedBy: profile?.email || 'event_director',
+          assignedAt: new Date().toISOString()
+        });
+        await setDoc(doc(db, "roleAssignments", assignmentId), rolePayload);
+        if (email) {
+          const emailAssignmentId = `${email}_program_coordinator_${selectedEventId}`;
+          await setDoc(doc(db, "roleAssignments", emailAssignmentId), { ...rolePayload, id: emailAssignmentId });
+        }
+      }
+
+      setSuccessMsg(`✓ Assigned ${fullName} as a coordinator for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign coordinator: " + err.message);
@@ -3301,18 +3748,21 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     try {
       const updatedCoordinators = (prog.coordinators || []).filter(c => c.residentId !== residentId);
 
-      await updateDoc(doc(db, "eventPrograms", programId), {
+      await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
         coordinators: updatedCoordinators,
         updatedAt: new Date().toISOString()
-      });
+      }));
 
       // delete role assignment if they are not coordinating any other program for this event
       const matchesOther = activePrograms.some(p => p.id !== programId && (p.coordinators || []).some(c => c.residentId === residentId));
       if (!matchesOther) {
         const assignmentId = `${residentId}_program_coordinator_${selectedEventId}`;
-        const emailAssignmentId = `${email.toLowerCase().trim()}_program_coordinator_${selectedEventId}`;
+        const safeEmail = (email || '').toLowerCase().trim();
         await deleteDoc(doc(db, "roleAssignments", assignmentId));
-        await deleteDoc(doc(db, "roleAssignments", emailAssignmentId));
+        if (safeEmail) {
+          const emailAssignmentId = `${safeEmail}_program_coordinator_${selectedEventId}`;
+          await deleteDoc(doc(db, "roleAssignments", emailAssignmentId));
+        }
       }
 
       setSuccessMsg(`✓ Removed coordinator assignment.`);
@@ -3325,7 +3775,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   };
 
   // Assign program volunteer
-  const handleAssignProgramVolunteer = async (programId: string, resident: ResidentProfile) => {
+  const handleAssignProgramVolunteer = async (programId: string, resident: any) => {
     const prog = activePrograms.find(p => p.id === programId);
     if (!prog) return;
 
@@ -3335,23 +3785,33 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
     try {
       const currentVolunteers = prog.volunteers || [];
-      if (currentVolunteers.some(v => v.residentId === resident.gmkId)) {
+      const resId = resident.gmkId || resident.residentId || resident.id || '';
+      const fullName = resident.fullName || '';
+      const email = resident.email || resident.rawResident?.email || '';
+      const phone = resident.phone || resident.rawResident?.phone || '';
+      const unitDisplay = resident.displayUnitNumber || resident.unitDisplay || resident.rawResident?.displayUnitNumber || 'N/A';
+
+      if (currentVolunteers.some(v => v.residentId === resId || (fullName && v.fullName.toLowerCase() === fullName.toLowerCase()))) {
         setErrorMsg("Resident is already a volunteer for this program.");
         return;
       }
 
-      const updatedVolunteers = [...currentVolunteers, {
-        residentId: resident.gmkId,
-        fullName: resident.fullName,
-        email: resident.email
-      }];
-
-      await updateDoc(doc(db, "eventPrograms", programId), {
-        volunteers: updatedVolunteers,
-        updatedAt: new Date().toISOString()
+      const newVol = sanitizeFirestorePayload({
+        residentId: resId,
+        fullName: fullName,
+        email: email,
+        phone: phone,
+        unitDisplay: unitDisplay
       });
 
-      setSuccessMsg(`✓ Assigned ${resident.fullName} as a volunteer for ${prog.title}.`);
+      const updatedVolunteers = [...currentVolunteers, newVol];
+
+      await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
+        volunteers: updatedVolunteers,
+        updatedAt: new Date().toISOString()
+      }));
+
+      setSuccessMsg(`✓ Assigned ${fullName} as a volunteer for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign volunteer: " + err.message);
@@ -6066,49 +6526,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                     // 1. UNIQUE PROGRAM COMMITTEE WORKSPACE
                     if (isProgramComm) {
-                      const matchedCoordCandidates: Array<any> = [];
-                      if (progCoordinatorSearch.toLowerCase().trim()) {
-                        const lower = progCoordinatorSearch.toLowerCase().trim();
-                        residents.forEach(r => {
-                          if (r.status !== 'active') return;
-                          if (r.fullName?.toLowerCase().includes(lower) || r.displayUnitNumber?.toLowerCase().includes(lower) || r.email?.toLowerCase().includes(lower)) {
-                            matchedCoordCandidates.push({
-                              id: r.gmkId,
-                              gmkId: r.gmkId,
-                              fullName: r.fullName,
-                              email: r.email,
-                              displayUnitNumber: r.displayUnitNumber || 'N/A',
-                              isSpouse: false,
-                              rawResident: r
-                            });
-                          }
-                        });
-                        familyMembers.forEach(m => {
-                          if (m.relationship !== 'spouse') return;
-                          const parentId = m.familyId ? m.familyId.replace('fam_', '') : '';
-                          const parentRes = residents.find(r => r.gmkId === parentId);
-                          if (!parentRes || parentRes.status !== 'active') return;
-                          if (
-                            m.name?.toLowerCase().includes(lower) ||
-                            parentRes.displayUnitNumber?.toLowerCase().includes(lower) ||
-                            parentRes.email?.toLowerCase().includes(lower)
-                          ) {
-                            matchedCoordCandidates.push({
-                              id: m.id || (parentRes.gmkId + '_spouse'),
-                              gmkId: parentRes.gmkId,
-                              fullName: m.name,
-                              email: parentRes.email,
-                              displayUnitNumber: parentRes.displayUnitNumber || 'N/A',
-                              isSpouse: true,
-                              rawResident: {
-                                ...parentRes,
-                                fullName: m.name
-                              }
-                            });
-                          }
-                        });
-                      }
-                      const matchedCoordResidents = matchedCoordCandidates;
+                      const matchedCoordResidents = searchProgramCoordinatorCandidates(progCoordinatorSearch);
 
                       return (
                         <div className="space-y-8 animate-fadeIn">
@@ -6217,7 +6635,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           {/* STAGE B: CREATE NEW EVENT PROGRAM DIRECTLY */}
                           <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
                             <h4 className="font-extrabold text-stone-900 text-sm uppercase tracking-wider font-heading border-b border-stone-150 pb-2">
-                              Create Direct Approved Program
+                              Create Direct Program
                             </h4>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -6295,7 +6713,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                         </div>
                                       ) : (
                                         matchedCoordResidents.slice(0, 5).map(res => (
-                                          <div key={res.gmkId} className="p-2 flex items-center justify-between text-[11px] hover:bg-stone-50">
+                                          <div key={res.id} className="p-2 flex items-center justify-between text-[11px] hover:bg-stone-50">
                                             <div>
                                               <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
                                               <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} • {res.email}</span>
@@ -6319,11 +6737,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                             <button
                               type="button"
                               onClick={handleCreateProgramDirectly}
-                              disabled={isSubmitting || !progTitle.trim() || !progCoordinator}
+                              disabled={isSubmitting || !progTitle.trim() || progType === 'Select'}
                               className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-md disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
                             >
                               <Plus className="w-4 h-4 text-[#d4af37]" />
-                              <span>Create Approved Program</span>
+                              <span>Create Program</span>
                             </button>
                           </div>
 
@@ -6388,12 +6806,23 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                     const expensesList = prog.expenses || [];
                                     const expensesTotal = expensesList.reduce((sum, e) => sum + e.amount, 0);
 
-                                    const matchedCoordAdd = getFilteredSearchMatches(progCoordSearchQuery, searchAudienceFilter).filter(m => {
-                                      return !(prog.coordinators || []).some(c => c.residentId === m.id);
+                                    const progTypeNormalized = (prog.programType || prog.category || 'ADULTS').toUpperCase();
+
+                                    const matchedCoordCandidates = searchProgramCoordinatorCandidates(progCoordSearchQuery).filter(c => {
+                                      return !(prog.coordinators || []).some(existing => existing.residentId === c.residentId || existing.fullName === c.fullName);
                                     });
 
-                                    const matchedVolAdd = getFilteredSearchMatches(progVolSearchQuery, searchAudienceFilter).filter(m => {
-                                      return !(prog.volunteers || []).some(v => v.residentId === m.id);
+                                    const matchedVolCandidates = searchProgramCoordinatorCandidates(progVolSearchQuery).filter(c => {
+                                      return !(prog.volunteers || []).some(existing => existing.residentId === c.residentId);
+                                    });
+
+                                    const matchedParticipantCandidates = searchProgramParticipantCandidates(
+                                      progParticipantSearchQuery,
+                                      progTypeNormalized,
+                                      participantAgeFilter,
+                                      participantGenderFilter
+                                    ).filter(candidate => {
+                                      return !(prog.participants || []).some(p => p.residentId === candidate.residentId || p.fullName.toLowerCase() === candidate.fullName.toLowerCase());
                                     });
 
                                     return (
@@ -6540,21 +6969,25 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                               {(prog.coordinators || []).length === 0 ? (
                                                 <p className="text-[10px] text-stone-500 italic font-bold">None assigned.</p>
                                               ) : (
-                                                (prog.coordinators || []).map(coord => (
-                                                  <div key={coord.residentId} className="flex items-center justify-between p-1.5 bg-white border border-stone-150 rounded-xl">
-                                                    <div className="truncate min-w-0 pr-1.5">
-                                                      <span className="text-[10px] font-black text-stone-850 block truncate">{coord.fullName}</span>
-                                                      <span className="text-[8px] text-stone-500 font-bold block truncate">Flat: {residents.find(r => r.gmkId === coord.residentId)?.displayUnitNumber || 'N/A'}</span>
+                                                (prog.coordinators || []).map(coord => {
+                                                  const parentRes = residents.find(r => r.gmkId === coord.residentId);
+                                                  const coordPhone = coord.phone || (parentRes ? (parentRes.phone || parentRes.whatsAppNumber) : 'N/A');
+                                                  return (
+                                                    <div key={coord.residentId + coord.fullName} className="flex items-center justify-between p-1.5 bg-white border border-stone-150 rounded-xl">
+                                                      <div className="truncate min-w-0 pr-1.5">
+                                                        <span className="text-[10px] font-black text-stone-850 block truncate">{coord.fullName}</span>
+                                                        <span className="text-[8px] text-stone-500 font-bold block truncate">Unit: {coord.displayUnitNumber || parentRes?.displayUnitNumber || 'N/A'} • 📱 {coordPhone}</span>
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveProgramCoordinator(prog.id, coord.residentId, coord.email)}
+                                                        className="p-1 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer hover:bg-stone-100 transition-colors shrink-0"
+                                                      >
+                                                        <X className="w-3 h-3" />
+                                                      </button>
                                                     </div>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleRemoveProgramCoordinator(prog.id, coord.residentId, coord.email)}
-                                                      className="p-1 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer hover:bg-stone-100 transition-colors"
-                                                    >
-                                                      <X className="w-3 h-3" />
-                                                    </button>
-                                                  </div>
-                                                ))
+                                                  );
+                                                })
                                               )}
                                             </div>
 
@@ -6563,31 +6996,32 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                                 type="text"
                                                 value={progCoordSearchQuery}
                                                 onChange={(e) => setProgCoordSearchQuery(e.target.value)}
-                                                placeholder="Add coordinator..."
+                                                placeholder="Search primary resident or spouse..."
                                                 className="w-full px-2 py-1 font-bold bg-white border border-stone-200 rounded-lg text-[10px] text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
                                               />
 
                                               {progCoordSearchQuery && (
-                                                <div className="border border-stone-200 rounded-lg bg-white shadow-md max-h-36 overflow-y-auto divide-y divide-stone-100 text-[9px] relative z-20">
-                                                  {matchedCoordAdd.length === 0 ? (
-                                                    <div className="p-2 text-stone-400 italic text-center font-bold">No active members.</div>
+                                                <div className="border border-stone-200 rounded-lg bg-white shadow-md max-h-40 overflow-y-auto divide-y divide-stone-100 text-[9px] relative z-20">
+                                                  {matchedCoordCandidates.length === 0 ? (
+                                                    <div className="p-2 text-stone-400 italic text-center font-bold">No eligible primary resident/spouse found.</div>
                                                   ) : (
-                                                    matchedCoordAdd.slice(0, 5).map(r => (
-                                                      <div key={r.id} className="p-1.5 flex items-center justify-between gap-1.5 hover:bg-stone-50">
+                                                    matchedCoordCandidates.slice(0, 5).map(c => (
+                                                      <div key={c.id} className="p-1.5 flex items-center justify-between gap-1.5 hover:bg-stone-50">
                                                         <div className="flex flex-col min-w-0">
-                                                          <span className="font-extrabold text-stone-850 truncate max-w-[120px] block">{r.fullName}</span>
+                                                          <span className="font-extrabold text-stone-850 truncate max-w-[120px] block">{c.fullName}</span>
                                                           <span className="text-[8px] text-stone-400 block font-semibold truncate">
-                                                            Flat {r.displayUnitNumber} {r.isFamilyMember ? `(${r.relationship})` : ''}
+                                                            Unit {c.displayUnitNumber} ({c.relationship}) • 📱 {c.phone || 'N/A'}
                                                           </span>
                                                         </div>
                                                         <button
                                                           type="button"
                                                           onClick={() => {
                                                             const mockResidentObj = {
-                                                              gmkId: r.id,
-                                                              fullName: r.fullName,
-                                                              email: r.email,
-                                                              displayUnitNumber: r.displayUnitNumber
+                                                              gmkId: c.residentId,
+                                                              fullName: c.fullName,
+                                                              email: c.email,
+                                                              displayUnitNumber: c.displayUnitNumber,
+                                                              phone: c.phone
                                                             } as any;
                                                             handleAssignProgramCoordinator(prog.id, mockResidentObj);
                                                             setProgCoordSearchQuery('');
@@ -6606,28 +7040,32 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
                                           {/* COLUMN 2: VOLUNTEERS */}
                                           <div className="bg-stone-50 border border-stone-200 p-3 rounded-2xl space-y-3">
-                                            <h6 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider border-b border-stone-150 pb-1">
-                                              Volunteers
+                                            <h6 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider border-b border-stone-150 pb-1 flex justify-between items-center">
+                                              <span>Volunteers</span>
+                                              <span className="text-[8px] font-mono text-stone-500">{(prog.volunteers || []).length}</span>
                                             </h6>
                                             <div className="space-y-1.5 max-h-36 overflow-y-auto">
                                               {(prog.volunteers || []).length === 0 ? (
                                                 <p className="text-[10px] text-stone-550 italic font-bold">None assigned.</p>
                                               ) : (
-                                                (prog.volunteers || []).map(vol => (
-                                                  <div key={vol.residentId} className="flex items-center justify-between p-1.5 bg-white border border-stone-150 rounded-xl">
-                                                    <div className="truncate min-w-0 pr-1.5">
-                                                      <span className="text-[10px] font-black text-stone-850 block truncate">{vol.fullName}</span>
-                                                      <span className="text-[8px] text-stone-500 font-bold block truncate">Flat: {residents.find(r => r.gmkId === vol.residentId)?.displayUnitNumber || 'N/A'}</span>
+                                                (prog.volunteers || []).map(vol => {
+                                                  const parentRes = residents.find(r => r.gmkId === vol.residentId);
+                                                  return (
+                                                    <div key={vol.residentId} className="flex items-center justify-between p-1.5 bg-white border border-stone-150 rounded-xl">
+                                                      <div className="truncate min-w-0 pr-1.5">
+                                                        <span className="text-[10px] font-black text-stone-850 block truncate">{vol.fullName}</span>
+                                                        <span className="text-[8px] text-stone-500 font-bold block truncate">Unit: {residents.find(r => r.gmkId === vol.residentId)?.displayUnitNumber || 'N/A'}</span>
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveProgramVolunteer(prog.id, vol.residentId)}
+                                                        className="p-1 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer hover:bg-stone-100 transition-colors"
+                                                      >
+                                                        <X className="w-3 h-3" />
+                                                      </button>
                                                     </div>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleRemoveProgramVolunteer(prog.id, vol.residentId)}
-                                                      className="p-1 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer hover:bg-stone-100 transition-colors"
-                                                    >
-                                                      <X className="w-3 h-3" />
-                                                    </button>
-                                                  </div>
-                                                ))
+                                                  );
+                                                })
                                               )}
                                             </div>
 
@@ -6636,31 +7074,31 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                                 type="text"
                                                 value={progVolSearchQuery}
                                                 onChange={(e) => setProgVolSearchQuery(e.target.value)}
-                                                placeholder="Add volunteer..."
+                                                placeholder="Search volunteer candidate..."
                                                 className="w-full px-2 py-1 font-bold bg-white border border-stone-200 rounded-lg text-[10px] text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
                                               />
 
                                               {progVolSearchQuery && (
-                                                <div className="border border-stone-200 rounded-lg bg-white shadow-md max-h-36 overflow-y-auto divide-y divide-stone-100 text-[9px] relative z-20">
-                                                  {matchedVolAdd.length === 0 ? (
-                                                    <div className="p-2 text-stone-400 italic text-center font-bold">No active members.</div>
+                                                <div className="border border-stone-200 rounded-lg bg-white shadow-md max-h-40 overflow-y-auto divide-y divide-stone-100 text-[9px] relative z-20">
+                                                  {matchedVolCandidates.length === 0 ? (
+                                                    <div className="p-2 text-stone-400 italic text-center font-bold">No eligible volunteers found.</div>
                                                   ) : (
-                                                    matchedVolAdd.slice(0, 5).map(r => (
-                                                      <div key={r.id} className="p-1.5 flex items-center justify-between gap-1.5 hover:bg-stone-50">
+                                                    matchedVolCandidates.slice(0, 5).map(v => (
+                                                      <div key={v.id} className="p-1.5 flex items-center justify-between gap-1.5 hover:bg-stone-50">
                                                         <div className="flex flex-col min-w-0">
-                                                          <span className="font-extrabold text-stone-850 truncate max-w-[120px] block">{r.fullName}</span>
+                                                          <span className="font-extrabold text-stone-850 truncate max-w-[120px] block">{v.fullName}</span>
                                                           <span className="text-[8px] text-stone-400 block font-semibold truncate">
-                                                            Flat {r.displayUnitNumber} {r.isFamilyMember ? `(${r.relationship})` : ''}
+                                                            Unit {v.displayUnitNumber} ({v.relationship})
                                                           </span>
                                                         </div>
                                                         <button
                                                           type="button"
                                                           onClick={() => {
                                                             const mockResidentObj = {
-                                                              gmkId: r.id,
-                                                              fullName: r.fullName,
-                                                              email: r.email,
-                                                              displayUnitNumber: r.displayUnitNumber
+                                                              gmkId: v.residentId,
+                                                              fullName: v.fullName,
+                                                              email: v.email,
+                                                              displayUnitNumber: v.displayUnitNumber
                                                             } as any;
                                                             handleAssignProgramVolunteer(prog.id, mockResidentObj);
                                                             setProgVolSearchQuery('');
@@ -6738,6 +7176,217 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                                                   Add
                                                 </button>
                                               </div>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* PARTICIPANTS MANAGEMENT SECTION (RTCO-021) */}
+                                        <div className="bg-stone-50 border border-stone-200 p-4 rounded-2xl space-y-3.5 mt-4">
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200 pb-2.5">
+                                            <div>
+                                              <div className="flex items-center space-x-2">
+                                                <Users className="w-4 h-4 text-[#0f4c2a]" />
+                                                <h6 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
+                                                  Program Participants
+                                                </h6>
+                                                <span className="px-2 py-0.5 bg-[#0f4c2a]/10 text-[#0f4c2a] rounded-md text-[9px] font-black uppercase font-mono">
+                                                  {progTypeNormalized} Program Eligibility
+                                                </span>
+                                              </div>
+                                              <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                                                Search, filter and enroll community participants based on program age and gender requirements.
+                                              </p>
+                                            </div>
+                                            <span className="text-xs font-mono font-black text-[#0f4c2a] bg-white border border-stone-200 px-2.5 py-1 rounded-xl shadow-xs self-start sm:self-auto">
+                                              {(prog.participants || []).length} Enrolled
+                                            </span>
+                                          </div>
+
+                                          {/* CURRENT ENROLLED PARTICIPANTS */}
+                                          <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-[10px] uppercase font-black text-stone-600 tracking-wider">Enrolled Roster:</span>
+                                              {(prog.participants || []).length > 0 && (
+                                                <span className="text-[9px] text-stone-400 font-mono">Showing all enrolled members</span>
+                                              )}
+                                            </div>
+
+                                            {(prog.participants || []).length === 0 ? (
+                                              <div className="p-3 text-center bg-white border border-dashed border-stone-250 rounded-xl text-[10px] text-stone-400 font-bold italic">
+                                                No participants enrolled yet. Use the search & filter tools below to add eligible candidates.
+                                              </div>
+                                            ) : (
+                                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
+                                                {(prog.participants || []).map((p, idx) => {
+                                                  const parentRes = residents.find(r => r.gmkId === p.residentId || r.fullName.toLowerCase() === p.fullName.toLowerCase());
+                                                  const isChild = (p.age !== undefined && p.age < 18) || p.relationship === 'Child' || p.relationship === 'Kid';
+                                                  const contactPhone = p.phone || (parentRes ? (parentRes.phone || parentRes.whatsAppNumber) : 'N/A');
+
+                                                  return (
+                                                    <div key={p.residentId || idx} className="p-2 bg-white border border-stone-200 rounded-xl flex items-start justify-between gap-1.5 shadow-xs">
+                                                      <div className="min-w-0 flex-1 space-y-0.5">
+                                                        <div className="flex items-center space-x-1.5 flex-wrap">
+                                                          <span className="font-extrabold text-stone-850 text-[10px] truncate block">{p.fullName}</span>
+                                                          {p.gender && (
+                                                            <span className="text-[8px] font-mono px-1 py-0.2 bg-stone-100 text-stone-600 rounded">
+                                                              {p.gender}
+                                                            </span>
+                                                          )}
+                                                          {p.age !== undefined && (
+                                                            <span className="text-[8px] font-mono px-1 py-0.2 bg-stone-100 text-stone-600 rounded">
+                                                              Age {p.age}
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                        <div className="text-[8.5px] font-bold text-stone-500 truncate">
+                                                          Unit: {p.displayUnitNumber || parentRes?.displayUnitNumber || 'N/A'} {p.relationship ? `(${p.relationship})` : ''}
+                                                        </div>
+                                                        {isChild ? (
+                                                          <div className="text-[8.5px] font-mono font-bold text-amber-800 bg-amber-50/80 px-1.5 py-0.5 rounded border border-amber-200/60 truncate mt-0.5">
+                                                            👨‍👩‍👧 Parent/Guardian: {contactPhone}
+                                                          </div>
+                                                        ) : (
+                                                          <div className="text-[8.5px] font-mono font-bold text-emerald-800 truncate">
+                                                            📱 {contactPhone}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveProgramParticipant(prog.id, p.residentId, p.fullName)}
+                                                        className="p-1 text-stone-400 hover:text-red-600 rounded-lg cursor-pointer hover:bg-stone-100 transition-colors shrink-0"
+                                                        title="Remove participant from program"
+                                                      >
+                                                        <X className="w-3.5 h-3.5" />
+                                                      </button>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          {/* SEARCH & ENROLL PARTICIPANTS */}
+                                          <div className="pt-2 border-t border-stone-200 space-y-2">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                              <label className="text-[10px] font-black uppercase text-[#0f4c2a] tracking-wider block">
+                                                Add Eligible Participant:
+                                              </label>
+
+                                              {/* Age & Gender Quick Filters */}
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                <div className="flex items-center bg-stone-200/80 rounded-lg p-0.5 border border-stone-250">
+                                                  <span className="text-[8px] font-black uppercase text-stone-500 px-1">Age:</span>
+                                                  {[
+                                                    { label: 'All', val: 'ALL' },
+                                                    { label: '<12', val: 'UNDER_12' },
+                                                    { label: '12-17', val: 'TEENS' },
+                                                    { label: '18+', val: 'ADULTS' }
+                                                  ].map(f => (
+                                                    <button
+                                                      key={f.val}
+                                                      type="button"
+                                                      onClick={() => setParticipantAgeFilter(f.val as any)}
+                                                      className={`px-1.5 py-0.5 text-[8px] font-black uppercase rounded transition-all cursor-pointer ${
+                                                        participantAgeFilter === f.val
+                                                          ? 'bg-[#0f4c2a] text-white shadow-xs'
+                                                          : 'text-stone-600 hover:text-stone-900'
+                                                      }`}
+                                                    >
+                                                      {f.label}
+                                                    </button>
+                                                  ))}
+                                                </div>
+
+                                                <div className="flex items-center bg-stone-200/80 rounded-lg p-0.5 border border-stone-250">
+                                                  <span className="text-[8px] font-black uppercase text-stone-500 px-1">Gender:</span>
+                                                  {[
+                                                    { label: 'All', val: 'ALL' },
+                                                    { label: 'Male', val: 'MALE' },
+                                                    { label: 'Female', val: 'FEMALE' }
+                                                  ].map(f => (
+                                                    <button
+                                                      key={f.val}
+                                                      type="button"
+                                                      onClick={() => setParticipantGenderFilter(f.val as any)}
+                                                      className={`px-1.5 py-0.5 text-[8px] font-black uppercase rounded transition-all cursor-pointer ${
+                                                        participantGenderFilter === f.val
+                                                          ? 'bg-[#0f4c2a] text-white shadow-xs'
+                                                          : 'text-stone-600 hover:text-stone-900'
+                                                      }`}
+                                                    >
+                                                      {f.label}
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            <div className="relative">
+                                              <input
+                                                type="text"
+                                                value={progParticipantSearchQuery}
+                                                onChange={(e) => setProgParticipantSearchQuery(e.target.value)}
+                                                placeholder={`Search candidates for ${progTypeNormalized} program (by name, flat, relationship)...`}
+                                                className="w-full px-3 py-1.5 font-bold bg-white border border-stone-250 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a] shadow-xs"
+                                              />
+
+                                              {progParticipantSearchQuery && (
+                                                <div className="mt-1 border border-stone-250 rounded-xl bg-white shadow-lg max-h-56 overflow-y-auto divide-y divide-stone-100 text-[9.5px] z-30 relative">
+                                                  {matchedParticipantCandidates.length === 0 ? (
+                                                    <div className="p-3 text-stone-400 italic text-center font-bold">
+                                                      No candidates matching "{progParticipantSearchQuery}" eligible for {progTypeNormalized} program (Age: {participantAgeFilter}, Gender: {participantGenderFilter}).
+                                                    </div>
+                                                  ) : (
+                                                    matchedParticipantCandidates.slice(0, 8).map(candidate => {
+                                                      const isChild = (candidate.age !== undefined && candidate.age < 18) || candidate.relationship === 'Child' || candidate.relationship === 'Kid';
+
+                                                      return (
+                                                        <div key={candidate.id} className="p-2 flex items-center justify-between gap-2 hover:bg-stone-50">
+                                                          <div className="flex flex-col min-w-0 space-y-0.5">
+                                                            <div className="flex items-center space-x-1.5 flex-wrap">
+                                                              <span className="font-black text-stone-850 text-xs truncate">{candidate.fullName}</span>
+                                                              {candidate.age !== undefined && (
+                                                                <span className="text-[8px] font-mono px-1 py-0.2 bg-stone-100 text-stone-700 rounded font-bold">
+                                                                  Age {candidate.age}
+                                                                </span>
+                                                              )}
+                                                              {candidate.gender && (
+                                                                <span className="text-[8px] font-mono px-1 py-0.2 bg-stone-100 text-stone-700 rounded font-bold">
+                                                                  {candidate.gender}
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                            <div className="text-[8.5px] text-stone-500 font-bold truncate">
+                                                              Unit {candidate.unitDisplay} • {candidate.relationship}
+                                                            </div>
+                                                            {isChild ? (
+                                                              <div className="text-[8.5px] font-mono text-amber-800 font-bold truncate">
+                                                                👨‍👩‍👧 Parent Contact: {candidate.phone || 'N/A'}
+                                                              </div>
+                                                            ) : (
+                                                              <div className="text-[8.5px] font-mono text-emerald-800 font-bold truncate">
+                                                                📱 Phone: {candidate.phone || 'N/A'}
+                                                              </div>
+                                                            )}
+                                                          </div>
+
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              handleAssignProgramParticipant(prog.id, candidate);
+                                                              setProgParticipantSearchQuery('');
+                                                            }}
+                                                            className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black shrink-0 cursor-pointer shadow-xs"
+                                                          >
+                                                            Enroll
+                                                          </button>
+                                                        </div>
+                                                      );
+                                                    })
+                                                  )}
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         </div>
@@ -7113,7 +7762,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                   {/* Create Program Desk */}
                   <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
                     <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading block">
-                      Create Approved Program
+                      Create Program
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="space-y-1">
@@ -7222,11 +7871,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                     <button
                       type="button"
                       onClick={handleCreateProgramDirectly}
-                      disabled={isSubmitting || !progTitle.trim() || !progCoordinator}
+                      disabled={isSubmitting || !progTitle.trim() || progType === 'Select'}
                       className="w-full py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-4 h-4 text-[#d4af37]" />
-                      <span>Create Approved Program</span>
+                      <span>Create Program</span>
                     </button>
                   </div>
 
