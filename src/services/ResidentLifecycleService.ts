@@ -257,18 +257,39 @@ export const ResidentLifecycleService = {
 
       // --- PHASE 3 & 4: EXECUTE & COMMIT TRANSACTION ---
       // We run all updates/deletions atomically in a single Firestore transaction.
-      // If any write or operation fails, the entire transaction is rolled back by Firestore.
+      // ALL READS MUST BE EXECUTED BEFORE ALL WRITES (Firestore Transaction Rule).
+      console.log(`[RESIDENT DELETE 01] Permanent deletion workflow initiated for Resident ID: ${residentId} (${residentEmail})`);
+      console.log("[RESIDENT DELETE 02] Phase 1: Executing all transaction read operations...");
+
       await runTransaction(db, async (transaction) => {
-        // A. Resident cleanup
+        // --- READ PHASE: Perform all transaction.get() calls FIRST ---
+        let txResSnap = null;
         if (residentExists) {
           const resRef = doc(db, "residents", residentId);
-          // Re-verify inside transaction to ensure concurrency safety
-          const txResSnap = await transaction.get(resRef);
-          if (txResSnap.exists()) {
-            transaction.delete(resRef);
-          }
+          txResSnap = await transaction.get(resRef);
+        }
+
+        const userSnapsList: Array<{ ref: any; exists: boolean; data: any }> = [];
+        for (const uId of usersList) {
+          const uRef = doc(db, "users", uId);
+          const uSnap = await transaction.get(uRef);
+          userSnapsList.push({
+            ref: uRef,
+            exists: uSnap.exists(),
+            data: uSnap.data()
+          });
+        }
+
+        console.log("[RESIDENT DELETE 03] Phase 1 completed: All required reads executed successfully.");
+        console.log("[RESIDENT DELETE 04] Phase 2: Executing transaction write operations (deletions & updates)...");
+
+        // --- WRITE PHASE: Perform all transaction deletes and updates AFTER reads ---
+        // A. Resident cleanup
+        if (residentExists && txResSnap && txResSnap.exists()) {
+          const resRef = doc(db, "residents", residentId);
+          transaction.delete(resRef);
         } else {
-          console.log(`[GEAS] Resident ${residentId} does not exist. Skipping update.`);
+          console.log(`[GEAS] Resident ${residentId} does not exist. Skipping resident doc delete.`);
         }
 
         // B. Families cleanup
@@ -283,18 +304,14 @@ export const ResidentLifecycleService = {
           transaction.delete(mRef);
         }
 
-        // D. Users cleanup (Do not remove resident role unless appropriate. Prune other roles)
-        for (const uId of usersList) {
-          const uRef = doc(db, "users", uId);
-          const uSnap = await transaction.get(uRef);
-          if (uSnap.exists()) {
-            const data = uSnap.data();
-            const currentRoles: string[] = data.roles || [];
-            // Remove committee and program authority roles, but preserve resident / pending role
+        // D. Users cleanup
+        for (const uObj of userSnapsList) {
+          if (uObj.exists) {
+            const currentRoles: string[] = uObj.data?.roles || [];
             const updatedRoles = currentRoles.filter(
               r => r === 'resident' || r === 'pending'
             );
-            transaction.update(uRef, {
+            transaction.update(uObj.ref, {
               roles: updatedRoles,
               updatedAt: timestamp
             });
@@ -356,7 +373,11 @@ export const ResidentLifecycleService = {
           const foodRef = doc(db, "eventFood", foodId);
           transaction.delete(foodRef);
         }
+
+        console.log("[RESIDENT DELETE 05] Phase 2 completed: All transaction writes staged.");
       });
+
+      console.log("[RESIDENT DELETE 06] Transaction committed successfully without read-after-write violations.");
 
       // --- PHASE 5: GEAS VERIFICATION SCAN ---
       // Re-run the queries to verify everything has been cleaned up.
@@ -609,35 +630,49 @@ export const ResidentLifecycleService = {
 
       // 2. Execute transaction
       await runTransaction(db, async (transaction) => {
-        // A. Does Resident Exist? YES: Update, NO: Skip
+        // --- ALL READS FIRST ---
+        let txResSnap = null;
         if (residentExists) {
-          // Double-check inside transaction to prevent race conditions
-          const txResSnap = await transaction.get(residentRef);
-          if (txResSnap.exists()) {
-            transaction.update(residentRef, {
-              committee: "",
-              updatedAt: timestamp
+          txResSnap = await transaction.get(residentRef);
+        }
+
+        const assignmentRef = doc(db, "roleAssignments", assignmentId);
+        const emailAssignmentRef = doc(db, "roleAssignments", emailAssignmentId);
+        const txAsgSnap = await transaction.get(assignmentRef);
+        const txEmailAsgSnap = await transaction.get(emailAssignmentRef);
+
+        const txCommSnap = await transaction.get(committeeRef);
+
+        const userSnapsList: Array<{ ref: any; exists: boolean; data: any }> = [];
+        if (!hasOtherAssignments) {
+          for (const uId of usersList) {
+            const uRef = doc(db, "users", uId);
+            const uSnap = await transaction.get(uRef);
+            userSnapsList.push({
+              ref: uRef,
+              exists: uSnap.exists(),
+              data: uSnap.data()
             });
           }
+        }
+
+        // --- ALL WRITES AFTER READS ---
+        if (residentExists && txResSnap && txResSnap.exists()) {
+          transaction.update(residentRef, {
+            committee: "",
+            updatedAt: timestamp
+          });
         } else {
           console.log(`[GEAS] Resident ${residentId} does not exist. Skipping resident update.`);
         }
 
-        // B. Delete Role Assignments (Discover and delete)
-        const assignmentRef = doc(db, "roleAssignments", assignmentId);
-        const emailAssignmentRef = doc(db, "roleAssignments", emailAssignmentId);
-        
-        const txAsgSnap = await transaction.get(assignmentRef);
         if (txAsgSnap.exists()) {
           transaction.delete(assignmentRef);
         }
-        const txEmailAsgSnap = await transaction.get(emailAssignmentRef);
         if (txEmailAsgSnap.exists()) {
           transaction.delete(emailAssignmentRef);
         }
 
-        // C. Remove Committee Member
-        const txCommSnap = await transaction.get(committeeRef);
         if (txCommSnap.exists()) {
           const latestCommittee = txCommSnap.data();
           const updatedMembers = (latestCommittee.members || []).filter(
@@ -649,15 +684,12 @@ export const ResidentLifecycleService = {
           });
         }
 
-        // D. Update Users
         if (!hasOtherAssignments) {
-          for (const uId of usersList) {
-            const uRef = doc(db, "users", uId);
-            const uSnap = await transaction.get(uRef);
-            if (uSnap.exists()) {
-              const currentRoles: string[] = uSnap.data().roles || [];
+          for (const uObj of userSnapsList) {
+            if (uObj.exists) {
+              const currentRoles: string[] = uObj.data?.roles || [];
               const updatedRoles = currentRoles.filter(r => r !== roleToRemove);
-              transaction.update(uRef, {
+              transaction.update(uObj.ref, {
                 roles: updatedRoles,
                 updatedAt: timestamp
               });

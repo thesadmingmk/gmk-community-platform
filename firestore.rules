@@ -12,7 +12,8 @@ service cloud.firestore {
     }
 
     function getUserEmail() {
-      return ("email" in request.auth.token && request.auth.token.email != null) ? request.auth.token.email.lower() : "";
+      return ("email" in request.auth.token && request.auth.token.email != null && request.auth.token.email != "") ? request.auth.token.email.lower() : 
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && "email" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email != null) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email.lower() : "";
     }
 
     function getUserData(uid) {
@@ -121,11 +122,27 @@ service cloud.firestore {
       return isAuth();
     }
 
+    function getUserGmkId() {
+      return (isAuth() && userExists(request.auth.uid) && "gmkId" in getUserData(request.auth.uid) && getUserData(request.auth.uid).gmkId != null) 
+        ? getUserData(request.auth.uid).gmkId 
+        : "";
+    }
+
     function isResidentOwner(gmkId) {
-      return isAuth() && (
-        exists(/databases/$(database)/documents/residents/$(gmkId)) &&
-        get(/databases/$(database)/documents/residents/$(gmkId)).data.email.lower() == getUserEmail()
+      return isAuth() && gmkId != null && gmkId != "" && (
+        (getUserGmkId() != "" && getUserGmkId() == gmkId) ||
+        (getUserEmail() != "" && exists(/databases/$(database)/documents/residents/$(gmkId)) && "email" in get(/databases/$(database)/documents/residents/$(gmkId)).data && get(/databases/$(database)/documents/residents/$(gmkId)).data.email != null && get(/databases/$(database)/documents/residents/$(gmkId)).data.email.lower() == getUserEmail()) ||
+        (userExists(request.auth.uid) && "email" in getUserData(request.auth.uid) && exists(/databases/$(database)/documents/residents/$(gmkId)) && "email" in get(/databases/$(database)/documents/residents/$(gmkId)).data && get(/databases/$(database)/documents/residents/$(gmkId)).data.email != null && get(/databases/$(database)/documents/residents/$(gmkId)).data.email.lower() == getUserData(request.auth.uid).email.lower())
       );
+    }
+
+    function isResidentOwnerPayload(targetGmkId, targetEmail) {
+      return isAuth() && 
+        targetEmail != null && targetEmail != "" && getUserEmail() != "" && targetEmail.lower() == getUserEmail() && (
+          (targetGmkId != null && targetGmkId != "" && getUserGmkId() != "" && getUserGmkId() == targetGmkId) ||
+          (targetGmkId != null && targetGmkId != "" && exists(/databases/$(database)/documents/residents/$(targetGmkId)) && "email" in get(/databases/$(database)/documents/residents/$(targetGmkId)).data && get(/databases/$(database)/documents/residents/$(targetGmkId)).data.email != null && get(/databases/$(database)/documents/residents/$(targetGmkId)).data.email.lower() == getUserEmail()) ||
+          (getUserGmkId() == "" && targetEmail != null && targetEmail != "" && targetEmail.lower() == getUserEmail())
+        );
     }
 
     // USERS COLLECTION
@@ -241,12 +258,50 @@ service cloud.firestore {
 
     // EVENT ATTENDANCE COLLECTION
     match /eventAttendance/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email)
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email) ||
+        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+      );
     }
 
     // EVENT FOOD COLLECTION
     match /eventFood/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email)
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        isResidentOwnerPayload(request.resource.data.gmkId, request.resource.data.email) ||
+        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirector() ||
+        (resource != null && isResidentOwnerPayload(resource.data.gmkId, resource.data.email))
+      );
     }
 
     // EVENT CERTIFICATES COLLECTION
@@ -362,28 +417,20 @@ service cloud.firestore {
         isSuperAdmin() ||
         isAdmin() ||
         isEventDirector() ||
-        isResidentOwner(request.resource.data.primaryMemberGmkId) ||
-        (request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == getUserEmail())
+        isResidentOwnerPayload(request.resource.data.primaryMemberGmkId, request.resource.data.primaryMemberEmail)
       );
       allow update: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector() || (
-          resource != null && (
-            isResidentOwner(resource.data.primaryMemberGmkId) ||
-            (resource.data.primaryMemberEmail != null && resource.data.primaryMemberEmail.lower() == getUserEmail())
-          )
-        )
+        isEventDirector() ||
+        isResidentOwnerPayload(request.resource.data.primaryMemberGmkId, request.resource.data.primaryMemberEmail) ||
+        (resource != null && isResidentOwnerPayload(resource.data.primaryMemberGmkId, resource.data.primaryMemberEmail))
       );
       allow delete: if isAuth() && (
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector() || (
-          resource != null && (
-            isResidentOwner(resource.data.primaryMemberGmkId) ||
-            (resource.data.primaryMemberEmail != null && resource.data.primaryMemberEmail.lower() == getUserEmail())
-          )
-        )
+        isEventDirector() ||
+        (resource != null && isResidentOwnerPayload(resource.data.primaryMemberGmkId, resource.data.primaryMemberEmail))
       );
     }
 

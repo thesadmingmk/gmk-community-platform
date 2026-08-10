@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../../context/AuthContext';
+import { db, auth, useAuth } from '../../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
 import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft } from 'lucide-react';
@@ -14,6 +14,7 @@ interface EventsManagerProps {
 }
 
 export default function EventsManager({ residentProfile, onViewEventDetails }: EventsManagerProps) {
+  const { profile } = useAuth();
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<CommunityEvent[]>([]);
@@ -372,10 +373,34 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     setLoading(true);
 
     try {
-      const familyId = `fam_${residentProfile.gmkId}`;
-      const regId = `reg_${residentProfile.gmkId}_${activeEventForReg.id}`;
+      // Identity & Ownership Gate: Enforce that the registration belongs to the authenticated resident
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("Authentication error: You must be logged in to register for events.");
+      }
 
-      // Validation 5: Family profile check
+      const authEmail = (currentUser.email || '').toLowerCase().trim();
+      const residentEmail = (residentProfile.email || '').toLowerCase().trim();
+      const residentGmkId = (residentProfile.gmkId || '').trim();
+
+      if (!residentGmkId || !residentEmail) {
+        throw new Error("Access Denied: Invalid resident profile credentials.");
+      }
+
+      // Ensure that non-administrative users register under their own verified identity
+      const userRoles = profile?.roles || ['resident'];
+      const isExecutiveAdmin = userRoles.some((r: string) => 
+        ['super_admin', 'admin', 'event_director'].includes(r)
+      );
+
+      if (!isExecutiveAdmin && authEmail && residentEmail && authEmail !== residentEmail) {
+        throw new Error("Access Denied: You are not authorized to create a registration for another resident.");
+      }
+
+      const familyId = `fam_${residentGmkId}`;
+      const regId = `reg_${residentGmkId}_${activeEventForReg.id}`;
+
+      // Step A: READ PHASE (All Reads Before Write Batch Instantiation)
       console.log(`[FAMILY LOADING] Fetching family document: ${familyId}`);
       const familyDocRef = doc(db, "families", familyId);
       const familySnap = await getDoc(familyDocRef);
@@ -397,9 +422,6 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       }
       console.log(`[PRICING CALCULATED] Final calculated fee: OMR ${pricingResult.totalAmount} (${pricingResult.registrationType})`);
 
-      // Firestore Validation Passed
-      console.log(`[FIRESTORE VALIDATION PASSED] All client constraints satisfied. Compiling atomic writes...`);
-
       // Sync state calculations
       const oldReg = registrations.find(r => r.eventId === activeEventForReg.id);
       const oldTotal = oldReg ? oldReg.totalParticipants : 0;
@@ -408,22 +430,21 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const diffParticipants = (participantsList.length + externalCount) - oldTotal;
       const diffRevenue = pricingResult.totalAmount - oldRevenue;
 
-      const batch = writeBatch(db);
-
-      // A. Write Event Registration Document
+      // Step B: PREPARE RESIDENT-OWNED PAYLOADS
       const regPayload: any = {
         id: regId,
         eventId: activeEventForReg.id,
         familyId,
-        primaryMemberGmkId: residentProfile.gmkId,
-        primaryMemberEmail: residentProfile.email,
+        primaryMemberGmkId: residentGmkId,
+        primaryMemberEmail: residentEmail,
         participants: participantsList,
         totalParticipants: participantsList.length + externalCount,
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        // Extra consistency and schema properties
         registrationType: pricingResult.registrationType,
         paymentAmount: pricingResult.totalAmount,
+        paymentStatus: 'pending',
+        qrCode: null,
         paymentSummary: {
           baseRate: pricingResult.baseRate || 0,
           baseRateApplied: pricingResult.registrationType,
@@ -449,194 +470,186 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         }
       };
 
-      console.log('=== GMK REGISTRATION PAYLOAD DIAGNOSTIC ===');
-      console.log('[FIELD CHECK 1] primaryMemberEmail:', {
-        value: regPayload.primaryMemberEmail,
-        type: typeof regPayload.primaryMemberEmail,
-        isLowercase: regPayload.primaryMemberEmail === 
-                     regPayload.primaryMemberEmail?.toLowerCase(),
-        matchesAuth: regPayload.primaryMemberEmail === 
-                     'way2anand@yahoo.com'
-      });
-      console.log('[FIELD CHECK 2] paymentStatus:', {
-        value: regPayload.paymentStatus,
-        type: typeof regPayload.paymentStatus,
-        exactMatch: regPayload.paymentStatus === 'pending'
-      });
-      console.log('[FIELD CHECK 3] qrCode:', {
-        value: regPayload.qrCode,
-        type: typeof regPayload.qrCode,
-        isNull: regPayload.qrCode === null,
-        isUndefined: regPayload.qrCode === undefined,
-        fieldExists: 'qrCode' in regPayload
-      });
-      console.log('[FULL PAYLOAD]', JSON.stringify(regPayload, null, 2));
-      console.log('===========================================');
-
-      // Correction 1 — force lowercase email
-      regPayload.primaryMemberEmail = 
-        (regPayload.primaryMemberEmail || '').toLowerCase().trim();
-
-      // Correction 2 — force exact pending string
-      regPayload.paymentStatus = 'pending';
-
-      // Correction 3 — force null (not undefined, not missing)
-      regPayload.qrCode = null;
-
-      console.log('=== GMK CORRECTED PAYLOAD ===');
-      console.log('[CORRECTED] primaryMemberEmail:', 
-        regPayload.primaryMemberEmail);
-      console.log('[CORRECTED] paymentStatus:', 
-        regPayload.paymentStatus);
-      console.log('[CORRECTED] qrCode:', 
-        regPayload.qrCode);
-      console.log('=============================');
-
-      // Diagnostic wording for CREATE vs UPDATE EXISTING
-      const opType = oldReg ? 'UPDATE EXISTING' : 'CREATE';
-      console.log(`[REGISTRATION OPERATION]\n${opType}`);
-
-      console.log(`[REGISTRATION BATCH 01]\nPATH: event_registrations/${regId}\nOPERATION: ${opType}\nAUTHORITY: Resident ${residentProfile.gmkId} (${residentProfile.email})\nEXPECTED RULE: event_registrations ${opType.toLowerCase()} by primaryMemberGmkId / primaryMemberEmail`);
-      batch.set(doc(db, "event_registrations", regId), regPayload);
-
-      // B. Write Attendance Record
       const attPayload = {
-        id: `att_${residentProfile.gmkId}_${activeEventForReg.id}`,
+        id: `att_${residentGmkId}_${activeEventForReg.id}`,
         eventId: activeEventForReg.id,
-        gmkId: residentProfile.gmkId,
+        gmkId: residentGmkId,
+        email: residentEmail,
         fullName: residentProfile.fullName,
         status: 'registered',
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
 
-      console.log(`[REGISTRATION BATCH 02]\nPATH: eventAttendance/${attPayload.id}\nOPERATION: SET\nAUTHORITY: Resident ${residentProfile.gmkId}\nEXPECTED RULE: eventAttendance write by gmkId`);
-      batch.set(doc(db, "eventAttendance", attPayload.id), attPayload);
-
-      // C. Write Food Voucher Coupon Record
       const foodPayload = {
-        id: `food_${residentProfile.gmkId}_${activeEventForReg.id}`,
+        id: `food_${residentGmkId}_${activeEventForReg.id}`,
         eventId: activeEventForReg.id,
-        gmkId: residentProfile.gmkId,
+        gmkId: residentGmkId,
+        email: residentEmail,
         fullName: residentProfile.fullName,
         mealCouponStatus: 'issued',
         mealCount: { 'standard': participantsList.length + externalCount },
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-      console.log(`[REGISTRATION BATCH 03]\nPATH: eventFood/${foodPayload.id}\nOPERATION: SET\nAUTHORITY: Resident ${residentProfile.gmkId}\nEXPECTED RULE: eventFood write by gmkId`);
+
+      // Step C: STAGE AUTHORIZED WRITES BATCH
+      const opType = oldReg ? 'UPDATE EXISTING' : 'CREATE';
+      console.log(`[REGISTRATION BATCH PREPARATION]\nStaging resident-owned writes for: ${opType}`);
+
+      const batch = writeBatch(db);
+
+      console.log(`[REGISTRATION BATCH 01] event_registrations/${regId}`);
+      batch.set(doc(db, "event_registrations", regId), regPayload);
+
+      console.log(`[REGISTRATION BATCH 02] eventAttendance/${attPayload.id}`);
+      batch.set(doc(db, "eventAttendance", attPayload.id), attPayload);
+
+      console.log(`[REGISTRATION BATCH 03] eventFood/${foodPayload.id}`);
       batch.set(doc(db, "eventFood", foodPayload.id), foodPayload);
 
-      // D. Update Event Report Summary Document (Consistency Count Check)
-      console.log("[STEP 2]\nUpdating Event Report...");
-      const reportDocRef = doc(db, "eventReports", `rep_${activeEventForReg.id}`);
-      const reportSnap = await getDoc(reportDocRef);
-      let reportPayload;
-      if (reportSnap.exists()) {
-        const reportData = reportSnap.data();
-        reportPayload = {
-          ...reportData,
-          registrationsCount: Math.max(0, (reportData.registrationsCount || 0) + diffParticipants),
-          totalRevenue: Math.max(0, (reportData.totalRevenue || 0) + diffRevenue),
-          lastUpdated: new Date().toISOString()
-        };
-      } else {
-        reportPayload = {
-          id: `rep_${activeEventForReg.id}`,
-          eventId: activeEventForReg.id,
-          registrationsCount: Math.max(0, diffParticipants),
-          attendanceCount: 0,
-          mealsIssuedCount: 0,
-          totalRevenue: Math.max(0, diffRevenue),
-          totalExpenses: 0,
-          programsCount: 0,
-          volunteersCount: 0,
-          lastUpdated: new Date().toISOString()
-        };
-      }
-      // E. Prepare Event Finance Payload for secondary non-blocking update
-      const finDocRef = doc(db, "eventFinance", `fin_${activeEventForReg.id}`);
-      const finSnap = await getDoc(finDocRef);
-      let finPayload;
-      if (finSnap.exists()) {
-        const finData = finSnap.data();
-        const newRev = Math.max(0, (finData.totalRevenue || 0) + diffRevenue);
-        const netBal = newRev - (finData.totalExpenses || 0);
-        finPayload = {
-          ...finData,
-          totalRevenue: newRev,
-          netBalance: netBal,
-          updatedAt: new Date().toISOString()
-        };
-      } else {
-        finPayload = {
-          id: `fin_${activeEventForReg.id}`,
-          eventId: activeEventForReg.id,
-          openingBalanceApproved: false,
-          closingStatementsApproved: false,
-          budgetAllocations: {},
-          totalRevenue: Math.max(0, diffRevenue),
-          totalExpenses: 0,
-          netBalance: Math.max(0, diffRevenue),
-          status: 'draft',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-      }
+      // Identity & Ownership Diagnostic Logging
+      const authUid = currentUser.uid;
+      const userGmkId = profile?.gmkId || residentGmkId;
+      const userEmail = profile?.email || residentEmail || authEmail;
+      const roles = profile?.roles || userRoles;
 
-      // F. Prepare Event Master Attendees for secondary non-blocking update
-      const eventRef = doc(db, "events", activeEventForReg.id);
-      let updatedAttendees = [...(activeEventForReg.attendees || [])];
-      if (!updatedAttendees.includes(residentProfile.email)) {
-        updatedAttendees.push(residentProfile.email);
-      }
+      console.log("[REGISTRATION AUTHENTICATED USER IDENTITY]", {
+        AUTH_UID: authUid,
+        AUTH_EMAIL: authEmail,
+        USER_GMK_ID: userGmkId,
+        USER_EMAIL: userEmail,
+        USER_ROLES: roles
+      });
 
-      // Commit the Core Resident-Writeable Atomic Transaction Batch (Guaranteed to succeed)
+      console.log("[REGISTRATION PAYLOAD IDENTITY]", {
+        PRIMARY_MEMBER_GMK_ID: regPayload.primaryMemberGmkId,
+        PRIMARY_MEMBER_EMAIL: regPayload.primaryMemberEmail
+      });
+
+      const ownerByGmkId = Boolean(userGmkId && userGmkId === regPayload.primaryMemberGmkId);
+      const ownerByEmail = Boolean(authEmail && authEmail === regPayload.primaryMemberEmail.toLowerCase().trim());
+
+      console.log("[REGISTRATION AUTH CHECK]", {
+        ownerByGmkId,
+        ownerByEmail
+      });
+
+      // Step D: COMMIT CORE ATOMIC RESIDENT BATCH
       console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 1 - Committing Core Resident Batch...");
       try {
         await batch.commit();
         console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 2 - Core Batch Commit Successful");
       } catch (commitErr: any) {
-        console.error("Core Batch commit failed:", commitErr);
+        console.error("❌ CORE REGISTRATION BATCH COMMIT FAILED:", commitErr);
+        console.error("[REGISTRATION BATCH FAILURE DETAILS]", {
+          errorName: commitErr?.name,
+          errorCode: commitErr?.code,
+          errorMessage: commitErr?.message,
+          batchTargetCollections: [
+            `event_registrations/${regId}`,
+            `eventAttendance/${attPayload.id}`,
+            `eventFood/${foodPayload.id}`
+          ]
+        });
+
+        if (commitErr?.code === 'permission-denied') {
+          throw new Error("Access Denied: You do not have authorization to create this event registration. Please contact your administrator.");
+        }
         throw commitErr;
       }
 
-      // Immediately close modal and lock registration form
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 3 - Closing RSVP Modal and locking registration form");
+      // Save references for UI notification
       const savedEventTitle = activeEventForReg.title;
       const totalParticipantsCount = regPayload.totalParticipants;
       const paymentAmountVal = regPayload.paymentAmount;
       
+      // Step E: CLOSE RSVP MODAL AND LOCK FORM IMMEDIATELY
+      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 3 - Closing RSVP Modal");
       setActiveEventForReg(null);
       setLivePricing(null);
 
-      // Perform secondary non-critical updates asynchronously & gracefully
+      // Step F: NON-BLOCKING POST-COMMIT METRICS & ATTENDEES UPDATES
       try {
-        console.log("[POST-REGISTRATION STATS] Attempting to update secondary metrics and finance...");
+        console.log("[POST-REGISTRATION STATS] Attempting secondary non-blocking metrics updates...");
+        const reportDocRef = doc(db, "eventReports", `rep_${activeEventForReg.id}`);
+        const reportSnap = await getDoc(reportDocRef);
+        let reportPayload;
+        if (reportSnap.exists()) {
+          const reportData = reportSnap.data();
+          reportPayload = {
+            ...reportData,
+            registrationsCount: Math.max(0, (reportData.registrationsCount || 0) + diffParticipants),
+            totalRevenue: Math.max(0, (reportData.totalRevenue || 0) + diffRevenue),
+            lastUpdated: new Date().toISOString()
+          };
+        } else {
+          reportPayload = {
+            id: `rep_${activeEventForReg.id}`,
+            eventId: activeEventForReg.id,
+            registrationsCount: Math.max(0, diffParticipants),
+            attendanceCount: 0,
+            mealsIssuedCount: 0,
+            totalRevenue: Math.max(0, diffRevenue),
+            totalExpenses: 0,
+            programsCount: 0,
+            volunteersCount: 0,
+            lastUpdated: new Date().toISOString()
+          };
+        }
+
+        const finDocRef = doc(db, "eventFinance", `fin_${activeEventForReg.id}`);
+        const finSnap = await getDoc(finDocRef);
+        let finPayload;
+        if (finSnap.exists()) {
+          const finData = finSnap.data();
+          const newRev = Math.max(0, (finData.totalRevenue || 0) + diffRevenue);
+          const netBal = newRev - (finData.totalExpenses || 0);
+          finPayload = {
+            ...finData,
+            totalRevenue: newRev,
+            netBalance: netBal,
+            updatedAt: new Date().toISOString()
+          };
+        } else {
+          finPayload = {
+            id: `fin_${activeEventForReg.id}`,
+            eventId: activeEventForReg.id,
+            openingBalanceApproved: false,
+            closingStatementsApproved: false,
+            budgetAllocations: {},
+            totalRevenue: Math.max(0, diffRevenue),
+            totalExpenses: 0,
+            netBalance: Math.max(0, diffRevenue),
+            status: 'draft',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+
+        const eventRef = doc(db, "events", activeEventForReg.id);
+        let updatedAttendees = [...(activeEventForReg.attendees || [])];
+        if (!updatedAttendees.includes(residentEmail)) {
+          updatedAttendees.push(residentEmail);
+        }
+
         const statsBatch = writeBatch(db);
-        
-        // D. Update Event Report
         statsBatch.set(reportDocRef, reportPayload, { merge: true });
-
-        // E. Update Event Finance
         statsBatch.set(finDocRef, finPayload, { merge: true });
-
-        // F. Update Event Attendees
         statsBatch.set(eventRef, { attendees: updatedAttendees }, { merge: true });
-
         await statsBatch.commit();
         console.log("[POST-REGISTRATION STATS] Secondary metrics/finance updated successfully.");
       } catch (statsErr) {
-        console.warn("⚠️ Non-blocking stats, finance, or attendee updates failed (this is expected for standard resident accounts and is handled gracefully):", statsErr);
+        console.warn("⚠️ Non-blocking stats, finance, or attendee updates skipped (handled gracefully):", statsErr);
       }
 
-      // Write Audit Trail Entry (non-blocking, wrapped independently)
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 4 - Attempting to Create Audit Log...");
+      // Step G: AUDIT LOG (NON-BLOCKING)
+      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 4 - Creating Audit Log...");
       const actionType = oldReg ? 'EVENT_REGISTRATION_UPDATED' : 'EVENT_REGISTERED';
       try {
         await createAuditLog(
           actionType,
-          residentProfile.email,
+          residentEmail,
           'registration',
           regId,
           `Resident unit registered ${totalParticipantsCount} participants for event '${savedEventTitle}' (Payment: OMR ${paymentAmountVal}).`
@@ -646,14 +659,13 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         console.error("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 5 ERROR - Audit log write failed:", auditErr);
       }
 
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 6 - Displaying Success Message and Completing Flow");
+      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 6 - Displaying Success Message");
       setSuccessMsg(`✓ Successfully registered ${totalParticipantsCount} member(s) of your family for ${savedEventTitle}!`);
     } catch (err: any) {
       console.error("❌ Event registration failed:", err);
-      // Translate to clean, user-friendly error hiding technical database stack-traces
       const cleanError = err.message || "A verification error occurred during transaction processing. Please contact your GMK Administrator.";
       setErrorMsg(cleanError.includes("Missing or insufficient permissions") 
-        ? "Access Denied: Your registration could not be finalized. Please ensure your resident profile onboarding is fully complete and active."
+        ? "Access Denied: You do not have authorization to complete this event registration. Please contact your administrator."
         : cleanError
       );
     } finally {
@@ -678,63 +690,71 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     setLoading(true);
 
     try {
+      console.log(`[REGISTRATION CANCEL 01] Authenticated resident verified: GMK ID ${residentProfile.gmkId} (${residentProfile.email})`);
+
       const regId = `reg_${residentProfile.gmkId}_${eventId}`;
-      const oldReg = registrations.find(r => r.eventId === eventId);
-      if (!oldReg) {
+      const attId = `att_${residentProfile.gmkId}_${eventId}`;
+      const foodId = `food_${residentProfile.gmkId}_${eventId}`;
+
+      const regRef = doc(db, "event_registrations", regId);
+      const attRef = doc(db, "eventAttendance", attId);
+      const foodRef = doc(db, "eventFood", foodId);
+
+      // STEP 1: READ ALL REQUIRED DOCUMENTS BEFORE ANY BATCH WRITES
+      console.log(`[REGISTRATION CANCEL 02] Performing pre-reads for reg: ${regId}, att: ${attId}, food: ${foodId}`);
+      const [regSnap, attSnap, foodSnap] = await Promise.all([
+        getDoc(regRef),
+        getDoc(attRef),
+        getDoc(foodRef)
+      ]);
+
+      if (!regSnap.exists()) {
         throw new Error("No active registration record found.");
       }
 
-      const oldTotal = oldReg.totalParticipants;
-      const oldRevenue = oldReg.paymentAmount || 0;
+      const regData = regSnap.data();
 
+      // STEP 2: EVALUATE OWNERSHIP
+      const normUserEmail = (residentProfile.email || '').toLowerCase();
+      const normRegEmail = (regData?.primaryMemberEmail || '').toLowerCase();
+      const isOwner = (regData?.primaryMemberGmkId === residentProfile.gmkId) || (normRegEmail && normRegEmail === normUserEmail);
+
+      if (!isOwner) {
+        throw new Error("Access Denied: You do not have authorization to cancel a registration belonging to another resident.");
+      }
+
+      console.log(`[REGISTRATION CANCEL 03] Ownership verified for event ${eventId} (regId: ${regId})`);
+
+      const oldRevenue = regData?.paymentAmount || 0;
+
+      // STEP 3: CREATE BATCH & STAGE AUTHORIZED EXISTING DOCUMENT DELETES ONLY
+      console.log(`[REGISTRATION CANCEL 04] Preparing resident cleanup batch`);
       const batch = writeBatch(db);
-      
-      // A. Delete Registration Doc
-      batch.delete(doc(db, "event_registrations", regId));
 
-      // B. Delete Attendance Doc
-      batch.delete(doc(db, "eventAttendance", `att_${residentProfile.gmkId}_${eventId}`));
+      // A. Registration Doc (guaranteed to exist)
+      batch.delete(regRef);
 
-      // C. Delete Food Voucher Doc
-      batch.delete(doc(db, "eventFood", `food_${residentProfile.gmkId}_${eventId}`));
-
-      // D. Decrement Event Report Counters
-      const reportDocRef = doc(db, "eventReports", `rep_${eventId}`);
-      const reportSnap = await getDoc(reportDocRef);
-      if (reportSnap.exists()) {
-        const reportData = reportSnap.data();
-        batch.set(reportDocRef, {
-          ...reportData,
-          registrationsCount: Math.max(0, (reportData.registrationsCount || 0) - oldTotal),
-          totalRevenue: Math.max(0, (reportData.totalRevenue || 0) - oldRevenue),
-          lastUpdated: new Date().toISOString()
-        }, { merge: true });
+      // B. Attendance Doc (only if exists)
+      if (attSnap.exists()) {
+        batch.delete(attRef);
+        console.log(`[REGISTRATION CANCEL 05] Staged eventAttendance delete: ${attId}`);
+      } else {
+        console.log(`[REGISTRATION CANCEL 05] Skipped eventAttendance delete (document does not exist)`);
       }
 
-      // E. Decrement Event Finance Revenue
-      const finDocRef = doc(db, "eventFinance", `fin_${eventId}`);
-      const finSnap = await getDoc(finDocRef);
-      if (finSnap.exists()) {
-        const finData = finSnap.data();
-        const newRev = Math.max(0, (finData.totalRevenue || 0) - oldRevenue);
-        const netBal = newRev - (finData.totalExpenses || 0);
-        batch.set(finDocRef, {
-          ...finData,
-          totalRevenue: newRev,
-          netBalance: netBal,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+      // C. Food Voucher Doc (only if exists)
+      if (foodSnap.exists()) {
+        batch.delete(foodRef);
+        console.log(`[REGISTRATION CANCEL 06] Staged eventFood delete: ${foodId}`);
+      } else {
+        console.log(`[REGISTRATION CANCEL 06] Skipped eventFood delete (document does not exist)`);
       }
 
-      // F. Clean email reference from events list attendees array to keep compatibility
-      const targetEvent = events.find(e => e.id === eventId);
-      if (targetEvent) {
-        const remainingAttendees = (targetEvent.attendees || []).filter(email => email !== residentProfile.email);
-        batch.set(doc(db, "events", eventId), { attendees: remainingAttendees }, { merge: true });
-      }
-
-      console.log(`[CANCELLATION WRITTEN] Cancelling database records atomically: ${regId}`);
+      // STEP 4: COMMIT BATCH
       await batch.commit();
+
+      console.log(`[REGISTRATION CANCEL 07] Resident cleanup batch committed successfully for regId: ${regId}`);
+      console.log(`[REGISTRATION CANCEL 08] Aggregate event documents not modified by resident client`);
 
       // Write Cancel Audit Trail Entry (non-blocking)
       try {
@@ -753,7 +773,12 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       setViewingRegDetails(null);
     } catch (err: any) {
       console.error("❌ Cancel registration failed:", err);
-      setErrorMsg(err.message || "Failed to cancel registration safely. Please contact your administrator.");
+      const cleanError = err.message || "Failed to cancel registration safely. Please contact your administrator.";
+      if (cleanError.includes("Missing or insufficient permissions")) {
+        setErrorMsg("Access Denied: You do not have authorization to cancel this registration. Please contact your administrator.");
+      } else {
+        setErrorMsg(cleanError);
+      }
     } finally {
       setLoading(false);
     }

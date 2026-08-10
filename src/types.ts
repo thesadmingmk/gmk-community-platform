@@ -6,6 +6,7 @@ export interface UserProfile {
   createdAt: string;
   positions?: string[];
   fullName?: string;
+  gmkId?: string;
 }
 
 export interface ResidentProfile {

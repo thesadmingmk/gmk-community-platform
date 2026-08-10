@@ -24,6 +24,7 @@ export interface UserProfile {
   createdAt: string;
   positions?: string[];
   fullName?: string;
+  gmkId?: string;
 }
 
 interface AuthContextType {
@@ -222,13 +223,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               finalRoles.push('vice_president');
             }
             
+            const resolvedGmkId = (hasResidentDoc && residentData && residentData.gmkId) ? residentData.gmkId : (userProfile.gmkId || '');
+
             userProfile = {
               ...userProfile,
+              gmkId: resolvedGmkId,
+              email: normalizedEmail,
               roles: Array.from(new Set(finalRoles)),
               positions: Array.from(new Set(positions)),
               isActive: hasResidentDoc ? (residentData.status === 'active') : userProfile.isActive,
               fullName: hasResidentDoc && residentData ? residentData.fullName : userProfile.fullName
             };
+
+            // Sync gmkId & email to users document in Firestore
+            try {
+              await setDoc(userDocRef, {
+                gmkId: resolvedGmkId,
+                email: normalizedEmail,
+                roles: userProfile.roles,
+                isActive: userProfile.isActive
+              }, { merge: true });
+            } catch (syncErr) {
+              console.warn("[AUTH SYNC] Non-blocking user profile sync warning:", syncErr);
+            }
           }
         }
       }

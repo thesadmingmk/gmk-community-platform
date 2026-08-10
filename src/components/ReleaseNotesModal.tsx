@@ -19,6 +19,33 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.4.2",
+    title: "Production Registration & Archived Resident Lifecycle Forensic Fix (RTCO-023)",
+    releaseDate: "2026-08-10",
+    author: "Core Platform Team",
+    notes: [
+      "Fixed Firestore security rule permission failure during resident event registration (Part A) by adding email authorization fallbacks and null-safe rules for event_registrations, eventAttendance, and eventFood.",
+      "Restructured transaction read/write sequence in ResidentLifecycleService to resolve read-after-write transaction error during archived resident permanent deletion (Part B).",
+      "Ensured all transaction reads execute strictly before any transaction writes according to Firestore security & transaction requirements.",
+      "Preserved existing production registration workflows and atomic batch operations.",
+      "Preserved historical record retention and GEAS verification rules."
+    ]
+  },
+  {
+    version: "v1.4.1",
+    title: "Program Creation Firestore Payload Hotfix (RTCO-022)",
+    releaseDate: "2026-08-10",
+    author: "Event Management Team",
+    notes: [
+      "Fixed Program creation failure caused by undefined Firestore payload values (e.g. missing candidate gmkId or optional fields).",
+      "Added payload validation and recursive sanitization before Program creation.",
+      "Preserved existing Program Lead and Coordinator eligibility logic.",
+      "Preserved Adult/Kids/Mixed participant filtering and contact display.",
+      "Preserved contact information and Program workspace functionality.",
+      "No changes made to production registration functionality."
+    ]
+  },
+  {
     version: "v1.4.0",
     title: "Deployment Automation & Password Activation Release",
     releaseDate: "2026-06-25",
