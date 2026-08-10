@@ -96,8 +96,8 @@ export default function ProfessionalSearch() {
               company: f.spouseCompany || '',
               expertiseCategories: f.spouseExpertiseCategories || [],
               contactPreference: f.spouseContactPreference || f.contactPreference,
-              email: f.primaryMemberEmail || '',
-              phone: f.spousePhone || f.phone || '',
+              email: f.spouseEmail || f.primaryMemberEmail || '',
+              phone: f.spouseWhatsApp || f.spousePhone || f.phone || '',
               doctorConsent: f.spouseDoctorConsent || false
             });
           }

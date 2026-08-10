@@ -353,7 +353,11 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
   const [spouseName, setSpouseName] = useState('');
   const [spouseGender, setSpouseGender] = useState<'male' | 'female' | ''>('');
   const [spouseWhatsApp, setSpouseWhatsApp] = useState('');
-  const [spouseWhatsAppCode, setSpouseWhatsAppCode] = useState('');
+  const [spouseWhatsAppCode, setSpouseWhatsAppCode] = useState('+968');
+  const [spousePhoneCode, setSpousePhoneCode] = useState('+968');
+  const [spousePhone, setSpousePhone] = useState('');
+  const [spousePhoneSameAsWhatsApp, setSpousePhoneSameAsWhatsApp] = useState(true);
+  const [spouseEmail, setSpouseEmail] = useState('');
   const [spouseExistedInDb, setSpouseExistedInDb] = useState(false);
 
   // Children list accumulator
@@ -718,6 +722,30 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
       if (!spouseProfessionTitle.trim()) return "Spouse profession title is required.";
       if (!spouseCompany.trim()) return "Spouse company / organization is required.";
       if (!spouseContactPreference) return "Please choose Spouse contact preference.";
+
+      // Validate contact phone formats if entered
+      if (spouseWhatsApp.trim()) {
+        const waErr = validatePhoneNumber(spouseWhatsAppCode, spouseWhatsApp);
+        if (waErr) return `Spouse WhatsApp: ${waErr}`;
+      }
+      if (!spousePhoneSameAsWhatsApp && spousePhone.trim()) {
+        const phErr = validatePhoneNumber(spousePhoneCode, spousePhone);
+        if (phErr) return `Spouse Phone: ${phErr}`;
+      }
+
+      // Check contact preference vs supplied fields
+      if (spouseContactPreference === 'WhatsApp' && !spouseWhatsApp.trim()) {
+        return "Spouse WhatsApp Number is required when contact preference is WhatsApp.";
+      }
+      if (spouseContactPreference === 'Email' && !spouseEmail.trim()) {
+        return "Spouse Email Address is required when contact preference is Email.";
+      }
+      if (spouseContactPreference === 'Phone' && !spousePhoneSameAsWhatsApp && !spousePhone.trim() && !spouseWhatsApp.trim()) {
+        return "Spouse Voice Phone Number is required when contact preference is Voice Call.";
+      }
+      if (spouseContactPreference === 'Any' && !spouseWhatsApp.trim() && !spouseEmail.trim() && (!spousePhoneSameAsWhatsApp ? !spousePhone.trim() : !spouseWhatsApp.trim())) {
+        return "Please provide at least one contact detail (WhatsApp, Phone number, or Email) for Spouse.";
+      }
     }
 
     return null;
@@ -886,6 +914,12 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         ? ((dbSpouseProfessionTitle.toLowerCase().includes('doctor') || dbSpouseProfessionCategory === 'Healthcare') ? spouseDoctorConsent : false)
         : false;
 
+      const spouseWaNorm = spouseWhatsApp.trim() ? validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized : '';
+      const dbSpouseWhatsApp = spouseWaNorm ? `${spouseWhatsAppCode}${spouseWaNorm}` : '';
+      const spousePhNorm = (!spousePhoneSameAsWhatsApp && spousePhone.trim()) ? validateAndNormalizePhoneNumber(spousePhoneCode, spousePhone).normalized : '';
+      const dbSpousePhone = spousePhoneSameAsWhatsApp ? dbSpouseWhatsApp : (spousePhNorm ? `${spousePhoneCode}${spousePhNorm}` : '');
+      const dbSpouseEmail = spouseEmail.trim();
+
       const partialFamilyModel: Partial<Family> = {
         id: familyId,
         primaryMemberGmkId: residentProfile.gmkId,
@@ -913,7 +947,9 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         spouseContactPreference: (directoryOption === 'spouse' || directoryOption === 'both') ? spouseContactPreference : undefined,
         spouseDoctorConsent: dbSpouseDoctorConsent,
         spouseName: spouseName.trim(),
-        spousePhone: spouseWhatsApp.trim() ? `${spouseWhatsAppCode}${validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized}` : '',
+        spousePhone: dbSpousePhone,
+        spouseWhatsApp: dbSpouseWhatsApp,
+        spouseEmail: dbSpouseEmail,
         onboardingCompleted: false, // NOT finished yet
         updatedAt: new Date().toISOString()
       };
@@ -1060,6 +1096,12 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         ? ((dbSpouseProfessionTitle.toLowerCase().includes('doctor') || dbSpouseProfessionCategory === 'Healthcare') ? spouseDoctorConsent : false)
         : false;
 
+      const spouseWaNorm = spouseWhatsApp.trim() ? validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized : '';
+      const dbSpouseWhatsApp = spouseWaNorm ? `${spouseWhatsAppCode}${spouseWaNorm}` : '';
+      const spousePhNorm = (!spousePhoneSameAsWhatsApp && spousePhone.trim()) ? validateAndNormalizePhoneNumber(spousePhoneCode, spousePhone).normalized : '';
+      const dbSpousePhone = spousePhoneSameAsWhatsApp ? dbSpouseWhatsApp : (spousePhNorm ? `${spousePhoneCode}${spousePhNorm}` : '');
+      const dbSpouseEmail = spouseEmail.trim();
+
       // 1. Prepare decoupled family payloads
       const finalFamilyModel: Family = {
         id: familyId,
@@ -1088,7 +1130,9 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         spouseContactPreference: (directoryOption === 'spouse' || directoryOption === 'both') ? spouseContactPreference : undefined,
         spouseDoctorConsent: dbSpouseDoctorConsent,
         spouseName: spouseName.trim(),
-        spousePhone: spouseWhatsApp.trim() ? `${spouseWhatsAppCode}${validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized}` : '',
+        spousePhone: dbSpousePhone,
+        spouseWhatsApp: dbSpouseWhatsApp,
+        spouseEmail: dbSpouseEmail,
         onboardingCompleted: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -1099,14 +1143,15 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
       
       // Add spouse if field contains a name
       if (spouseEnabled && spouseName.trim()) {
-        const spouseWaNorm = spouseWhatsApp.trim() ? validateAndNormalizePhoneNumber(spouseWhatsAppCode, spouseWhatsApp).normalized : '';
         finalMembers.push({
           id: `mem_${residentProfile.gmkId}_spouse`,
           familyId,
           name: normalizeName(spouseName),
           relationship: 'spouse',
           gender: spouseGender,
-          whatsAppNumber: spouseWaNorm ? `${spouseWhatsAppCode}${spouseWaNorm}` : undefined,
+          whatsAppNumber: dbSpouseWhatsApp || undefined,
+          phone: dbSpousePhone || undefined,
+          email: dbSpouseEmail || undefined,
           createdAt: new Date().toISOString()
         });
       }
@@ -2189,6 +2234,92 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                           <option value="Email">Email Only</option>
                           <option value="Phone">Voice Call Only</option>
                         </select>
+                      </div>
+
+                      {/* Spouse Contact Details Inputs */}
+                      <div className="p-4 bg-white border border-stone-200 rounded-xl space-y-3">
+                        <div className="border-b border-stone-100 pb-1.5">
+                          <label className="block text-[10px] uppercase font-extrabold tracking-wider text-[#0f4c2a] font-heading">
+                            Spouse Contact Information
+                          </label>
+                          <p className="text-[10px] text-stone-500">Provide direct contact details so residents can contact your spouse regarding professional expertise.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Spouse WhatsApp */}
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-stone-800 mb-1">
+                              Spouse WhatsApp Number {spouseContactPreference === 'WhatsApp' ? '*' : ''}
+                            </label>
+                            <div className="flex space-x-1.5">
+                              <select
+                                value={spouseWhatsAppCode}
+                                onChange={(e) => setSpouseWhatsAppCode(e.target.value)}
+                                className="w-auto max-w-[110px] px-2 py-2 border border-stone-250 rounded-xl bg-stone-50 text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] cursor-pointer font-bold shrink-0"
+                              >
+                                {COUNTRY_CODES.map(c => <option key={`spouse-wa-${c.name}-${c.code}`} value={c.code}>{c.code} {c.name}</option>)}
+                              </select>
+                              <input
+                                type="text"
+                                value={spouseWhatsApp}
+                                placeholder="WhatsApp number"
+                                onChange={(e) => setSpouseWhatsApp(e.target.value.replace(/\D/g, ''))}
+                                className="block flex-1 min-w-0 px-3 py-2 border border-stone-250 rounded-xl text-xs text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a] bg-white"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Spouse Email */}
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-stone-800 mb-1">
+                              Spouse Email Address {spouseContactPreference === 'Email' ? '*' : ''}
+                            </label>
+                            <input
+                              type="email"
+                              value={spouseEmail}
+                              placeholder="spouse@example.com"
+                              onChange={(e) => setSpouseEmail(e.target.value)}
+                              className="block w-full px-3 py-2 border border-stone-250 rounded-xl text-xs text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a] bg-white"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Spouse Phone Option */}
+                        <div className="space-y-2 pt-1">
+                          <label className="flex items-center space-x-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={spousePhoneSameAsWhatsApp}
+                              onChange={(e) => setSpousePhoneSameAsWhatsApp(e.target.checked)}
+                              className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer"
+                            />
+                            <span className="text-xs text-stone-800 font-medium">Spouse voice phone number is same as WhatsApp number</span>
+                          </label>
+
+                          {!spousePhoneSameAsWhatsApp && (
+                            <div className="animate-fadeIn pl-6 pt-1">
+                              <label className="block text-[10px] uppercase font-bold text-stone-800 mb-1">
+                                Spouse Voice Phone Number {spouseContactPreference === 'Phone' ? '*' : ''}
+                              </label>
+                              <div className="flex space-x-1.5 max-w-sm">
+                                <select
+                                  value={spousePhoneCode}
+                                  onChange={(e) => setSpousePhoneCode(e.target.value)}
+                                  className="w-auto max-w-[110px] px-2 py-2 border border-stone-250 rounded-xl bg-stone-50 text-stone-900 text-xs focus:ring-1 focus:ring-[#0f4c2a] cursor-pointer font-bold shrink-0"
+                                >
+                                  {COUNTRY_CODES.map(c => <option key={`spouse-ph-${c.name}-${c.code}`} value={c.code}>{c.code} {c.name}</option>)}
+                                </select>
+                                <input
+                                  type="text"
+                                  value={spousePhone}
+                                  placeholder="Voice phone number"
+                                  onChange={(e) => setSpousePhone(e.target.value.replace(/\D/g, ''))}
+                                  className="block flex-1 min-w-0 px-3 py-2 border border-stone-250 rounded-xl text-xs text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a] bg-white"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {(spouseProfessionCategory === 'Healthcare' || spouseProfessionTitle.toLowerCase().includes('doctor')) && (

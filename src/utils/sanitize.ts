@@ -18,7 +18,7 @@ export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T):
     'primaryMemberEmail', 'fullName', 'salutation', 'phone', 'unitKey', 
     'displayUnitNumber', 'unitType', 'createdAt', 'updatedAt', 'email', 'gmkId', 
     'gatedCommunity', 'status', 'remarks', 'professionCategory', 'professionTitle', 
-    'spouseProfessionCategory', 'spouseProfessionTitle', 'spouseCompany', 'spouseContactPreference', 'spouseName', 'spousePhone', 'directoryOption',
+    'spouseProfessionCategory', 'spouseProfessionTitle', 'spouseCompany', 'spouseContactPreference', 'spouseName', 'spousePhone', 'spouseWhatsApp', 'spouseEmail', 'directoryOption',
     'uid', 'assignedBy', 'assignedAt', 'role', 'eventId', 'title', 'description', 
     'coordinatorEmail', 'coordinatorName', 'timestamp', 'action', 'actorEmail'
   ];

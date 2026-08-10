@@ -53,6 +53,8 @@ export interface Family {
   spouseDoctorConsent?: boolean;
   spouseName?: string;
   spousePhone?: string;
+  spouseWhatsApp?: string;
+  spouseEmail?: string;
   onboardingCompleted: boolean;
   createdAt: string;
   updatedAt: string;
@@ -66,7 +68,9 @@ export interface FamilyMember {
   gender: 'male' | 'female' | '';
   yearOfBirth?: string; // mandatory for children
   notes?: string; // for parent / dependent Optional Notes
-  whatsAppNumber?: string; // only for spouse
+  whatsAppNumber?: string; // for spouse
+  phone?: string;
+  email?: string;
   createdAt: string;
 }
 
