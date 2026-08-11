@@ -259,6 +259,8 @@ export interface EventPricingConfig {
   adultAge?: number;
   allowExternal?: boolean;
   externalRate?: number;
+  parentRate?: number;
+  otherRate?: number;
 }
 
 export interface EventTemplate {

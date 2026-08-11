@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth, useAuth } from '../../context/AuthContext';
-import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
 import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft } from 'lucide-react';
 import { createAuditLog } from '../../utils/audit';
@@ -145,9 +145,16 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     let kidsBelowFreeAge = 0;
     let kidsAboveFreeAge = 0;
     let parentsCount = 0;
+    let othersCount = 0;
 
     const includedMembers: string[] = [];
     const parentMembers: string[] = [];
+    const otherMembers: string[] = [];
+    const freeChildrenMembers: string[] = [];
+
+    const freeChildAge = pricing.freeChildAge ?? 5;
+    const parentRate = pricing.parentRate ?? 5;
+    const otherRate = pricing.otherRate ?? 5;
 
     if (hasResident) {
       includedMembers.push(residentProfile.fullName);
@@ -164,8 +171,9 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         } else if (mem.relationship === 'child') {
           if (mem.yearOfBirth) {
             const age = currentYear - parseInt(mem.yearOfBirth);
-            if (age < pricing.freeChildAge) {
+            if (age < freeChildAge) {
               kidsBelowFreeAge++;
+              freeChildrenMembers.push(`${mem.name} (Age ${age})`);
               includedMembers.push(`${mem.name} (Age ${age}, Free)`);
             } else {
               kidsAboveFreeAge++;
@@ -173,10 +181,12 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
             }
           } else {
             kidsAboveFreeAge++;
-            includedMembers.push(`${mem.name}`);
+            includedMembers.push(mem.name);
           }
         } else {
-          includedMembers.push(mem.name);
+          // dependent or other relationship
+          othersCount++;
+          otherMembers.push(mem.name);
         }
       }
     });
@@ -187,69 +197,84 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
     const spousesCount = (hasResident ? 1 : 0) + (hasSpouse ? 1 : 0);
 
+    const singleRate = pricing.singleRate ?? 10;
+    const coupleRate = pricing.coupleRate ?? 20;
+    const familyRate = pricing.familyRate ?? 25;
+
     if (spousesCount === 2) {
       // Both spouses attending
       if (kidsBelowFreeAge > 0 || kidsAboveFreeAge > 0) {
         registrationType = 'family';
-        baseRate = pricing.familyRate;
+        baseRate = familyRate;
       } else {
         registrationType = 'couple';
-        baseRate = pricing.coupleRate;
+        baseRate = coupleRate;
       }
     } else if (spousesCount === 1) {
       // Single adult (or resident only, or single parent)
       if (kidsAboveFreeAge > 0) {
-        // At least one child above Free Age attends -> Couple Rate (Single Parent Rule 4)
+        // At least one child above Free Age attends -> Couple Rate (Single Parent Rule)
         registrationType = 'couple';
-        baseRate = pricing.coupleRate;
+        baseRate = coupleRate;
       } else if (kidsBelowFreeAge > 0) {
-        // All children are below Free Age -> Individual Rate (Rule 3)
+        // All children are below Free Age -> Individual Rate
         registrationType = 'individual';
-        baseRate = pricing.singleRate;
+        baseRate = singleRate;
       } else {
-        // Just the resident/spouse alone -> Individual Rate (Rule 1)
+        // Just the resident/spouse alone -> Individual Rate
         registrationType = 'individual';
-        baseRate = pricing.singleRate;
+        baseRate = singleRate;
       }
     } else {
-      // spousesCount === 0 (e.g. only kids or parents are checked)
+      // spousesCount === 0 (e.g. only kids or parents checked without primary/spouse)
       if (kidsAboveFreeAge > 0) {
         registrationType = 'couple';
-        baseRate = pricing.coupleRate;
+        baseRate = coupleRate;
       } else {
         registrationType = 'individual';
-        baseRate = pricing.singleRate;
+        baseRate = singleRate;
       }
     }
 
-    // External participants
+    // Additional subtotals
+    const parentsSubtotal = parentsCount * parentRate;
+    const othersSubtotal = othersCount * otherRate;
+
+    // External participants (Guests)
     const allowExternal = pricing.allowExternal ?? false;
-    const externalRate = allowExternal ? (pricing.externalRate || 0) : 0;
+    const externalRate = allowExternal ? (pricing.externalRate ?? 10) : 0;
     const externalSubtotal = extCount * externalRate;
 
-    const totalAmount = baseRate + externalSubtotal;
+    const totalAmount = baseRate + parentsSubtotal + othersSubtotal + externalSubtotal;
 
-    // Craft a descriptive, detailed explanation of how it was computed
-    let detailsStr = "";
+    // Craft transparent breakdown details string
+    const detailsParts: string[] = [];
     if (registrationType === 'individual') {
-      detailsStr = `Individual Rate: OMR ${pricing.singleRate}`;
+      detailsParts.push(`Base Registration (Individual): OMR ${baseRate}`);
     } else if (registrationType === 'couple') {
       if (spousesCount === 1 && kidsAboveFreeAge > 0) {
-        detailsStr = `Couple Rate (OMR ${pricing.coupleRate}) applied via Single Parent Household Rule (Resident + child above Free Age).`;
+        detailsParts.push(`Base Registration (Couple - Single Parent Rule): OMR ${baseRate}`);
       } else {
-        detailsStr = `Couple Rate: OMR ${pricing.coupleRate}`;
+        detailsParts.push(`Base Registration (Couple): OMR ${baseRate}`);
       }
     } else {
-      detailsStr = `Family Rate: OMR ${pricing.familyRate}`;
+      detailsParts.push(`Base Registration (Family): OMR ${baseRate}`);
     }
 
     if (parentsCount > 0) {
-      detailsStr += ` | ${parentsCount} Parent(s) attending Free (OMR 0).`;
+      detailsParts.push(`Parents: ${parentsCount} × OMR ${parentRate} = OMR ${parentsSubtotal}`);
+    }
+    if (othersCount > 0) {
+      detailsParts.push(`Others: ${othersCount} × OMR ${otherRate} = OMR ${othersSubtotal}`);
+    }
+    if (extCount > 0 && allowExternal) {
+      detailsParts.push(`Guests: ${extCount} × OMR ${externalRate} = OMR ${externalSubtotal}`);
+    }
+    if (kidsBelowFreeAge > 0) {
+      detailsParts.push(`Children below ${freeChildAge} years: FREE`);
     }
 
-    if (extCount > 0 && allowExternal) {
-      detailsStr += ` | External Participants: ${extCount} × OMR ${externalRate} = OMR ${externalSubtotal}.`;
-    }
+    const detailsStr = detailsParts.join(' | ');
 
     return {
       registrationType,
@@ -262,11 +287,18 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       },
       baseRate,
       parentsCount,
+      parentRate,
+      parentsSubtotal,
+      othersCount,
+      otherRate,
+      othersSubtotal,
       externalCount: extCount,
       externalRate,
       externalSubtotal,
       includedMembers,
-      parentMembers
+      parentMembers,
+      otherMembers,
+      freeChildrenMembers
     };
   };
 
@@ -325,6 +357,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    console.log("[RTCO-024L STEP 01] Registration function entered");
     console.log(`[REGISTRATION STARTED] Commencing registration process for event: ${activeEventForReg.id}`);
 
     // Validation 1: Resident Status Inactive or Suspended
@@ -400,10 +433,26 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const familyId = `fam_${residentGmkId}`;
       const regId = `reg_${residentGmkId}_${activeEventForReg.id}`;
 
-      // Step A: READ PHASE (All Reads Before Write Batch Instantiation)
+      // Step A: READ PHASE
+      console.log("[RTCO-024L STEP 02] Family/profile loading");
       console.log(`[FAMILY LOADING] Fetching family document: ${familyId}`);
       const familyDocRef = doc(db, "families", familyId);
-      const familySnap = await getDoc(familyDocRef);
+      
+      let familySnap;
+      try {
+        familySnap = await getDoc(familyDocRef);
+      } catch (famErr: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 02",
+          operation: "READ",
+          path: `families/${familyId}`,
+          errorCode: famErr?.code,
+          errorMessage: famErr?.message,
+          errorName: famErr?.name
+        });
+        throw famErr;
+      }
+
       if (!familySnap.exists()) {
         throw new Error("Your registration could not be completed because your family profile is unavailable. Please contact a GMK Administrator.");
       }
@@ -413,6 +462,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         throw new Error("Your registration could not be completed because your family onboarding wizard is incomplete.");
       }
       console.log(`[FAMILY LOADED] Successfully loaded family data. Onboarding status: ${familyData.onboardingCompleted}`);
+      console.log("[RTCO-024L STEP 03] Family/profile validation passed");
 
       // Calculate final pricing
       console.log(`[PRICING CALCULATION] Calculating final cost structure...`);
@@ -421,6 +471,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         throw new Error("Billing system is temporarily offline. Please contact GMK support.");
       }
       console.log(`[PRICING CALCULATED] Final calculated fee: OMR ${pricingResult.totalAmount} (${pricingResult.registrationType})`);
+      console.log("[RTCO-024L STEP 04] Pricing calculation passed");
 
       // Sync state calculations
       const oldReg = registrations.find(r => r.eventId === activeEventForReg.id);
@@ -452,6 +503,11 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
           freeChildrenCount: pricingResult.breakdown.freeChildren,
           halfPriceChildrenCount: pricingResult.breakdown.halfPriceChildren,
           parentsCount: pricingResult.parentsCount,
+          parentRate: pricingResult.parentRate || 5,
+          parentsSubtotal: pricingResult.parentsSubtotal || 0,
+          othersCount: pricingResult.othersCount || 0,
+          otherRate: pricingResult.otherRate || 5,
+          othersSubtotal: pricingResult.othersSubtotal || 0,
           externalParticipantsCount: externalCount,
           externalParticipantRate: pricingResult.externalRate,
           externalSubtotal: pricingResult.externalSubtotal,
@@ -459,6 +515,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
           details: pricingResult.details,
           includedMembers: pricingResult.includedMembers || [],
           parentMembers: pricingResult.parentMembers || [],
+          otherMembers: pricingResult.otherMembers || [],
           timestamp: new Date().toISOString()
         },
         attendanceSummary: {
@@ -470,9 +527,12 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         }
       };
 
+      const currentUid = auth.currentUser?.uid || profile?.uid || "";
+
       const attPayload = {
         id: `att_${residentGmkId}_${activeEventForReg.id}`,
         eventId: activeEventForReg.id,
+        uid: currentUid,
         gmkId: residentGmkId,
         email: residentEmail,
         fullName: residentProfile.fullName,
@@ -484,8 +544,9 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const foodPayload = {
         id: `food_${residentGmkId}_${activeEventForReg.id}`,
         eventId: activeEventForReg.id,
+        uid: auth.currentUser?.uid || currentUid,
         gmkId: residentGmkId,
-        email: residentEmail,
+        email: auth.currentUser?.email || residentEmail,
         fullName: residentProfile.fullName,
         mealCouponStatus: 'issued',
         mealCount: { 'standard': participantsList.length + externalCount },
@@ -493,22 +554,34 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         updatedAt: new Date().toISOString()
       };
 
-      // Phase 1: Explicitly check current Firestore existence of the 3 core documents BEFORE staging writes
+      // Check current Firestore existence
       const regDocRef = doc(db, "event_registrations", regId);
       const attDocRef = doc(db, "eventAttendance", attPayload.id);
       const foodDocRef = doc(db, "eventFood", foodPayload.id);
 
-      const [regSnap, attSnap, foodSnap] = await Promise.all([
-        getDoc(regDocRef),
-        getDoc(attDocRef),
-        getDoc(foodDocRef)
-      ]);
+      let regSnap, attSnap, foodSnap;
+      try {
+        [regSnap, attSnap, foodSnap] = await Promise.all([
+          getDoc(regDocRef),
+          getDoc(attDocRef),
+          getDoc(foodDocRef)
+        ]);
+      } catch (checkErr: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 02 (PRE-CHECK DOCS)",
+          operation: "READ",
+          path: `event_registrations/${regId} | eventAttendance/${attPayload.id} | eventFood/${foodPayload.id}`,
+          errorCode: checkErr?.code,
+          errorMessage: checkErr?.message,
+          errorName: checkErr?.name
+        });
+        throw checkErr;
+      }
 
       const registrationExists = regSnap.exists();
       const attendanceExists = attSnap.exists();
       const foodExists = foodSnap.exists();
 
-      // Phase 2: Determine actual Firestore operation for each document
       const regOp = registrationExists ? "UPDATE" : "CREATE";
       const attOp = attendanceExists ? "UPDATE" : "CREATE";
       const foodOp = foodExists ? "UPDATE" : "CREATE";
@@ -519,7 +592,6 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const userEmail = profile?.email || residentEmail || authEmail;
       const roles = profile?.roles || userRoles;
 
-      // Phase 3: Print actual Firebase runtime configuration
       console.log("[FIREBASE RUNTIME CONFIG]", {
         firebaseProjectId: db.app.options.projectId,
         firebaseDatabaseId: (db.app.options as any).databaseId || '(default)',
@@ -549,38 +621,109 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         }
       }
 
-      // Step C: STAGE AUTHORIZED WRITES BATCH
-      console.log(`[REGISTRATION BATCH PREPARATION]\nStaging resident-owned writes - reg: ${regOp}, att: ${attOp}, food: ${foodOp}`);
+      // STEP 5: CREATE REGISTRATION
+      console.log("[RTCO-024L STEP 05] event_registrations setDoc START", `event_registrations/${regId}`);
+      try {
+        await setDoc(regDocRef, regPayload);
+        console.log("[RTCO-024L STEP 05] event_registrations setDoc SUCCESS");
+      } catch (step5Err: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 05",
+          operation: regOp,
+          path: `event_registrations/${regId}`,
+          errorCode: step5Err?.code,
+          errorMessage: step5Err?.message,
+          errorName: step5Err?.name
+        });
+        throw step5Err;
+      }
 
-      const batch = writeBatch(db);
+      // STEP 6: CREATE ATTENDANCE
+      console.log("[RTCO-024L STEP 06] eventAttendance setDoc START", `eventAttendance/${attPayload.id}`);
+      try {
+        console.log("[RTCO-024P ACTUAL ATTENDANCE PAYLOAD]", JSON.stringify(attPayload));
+        console.log("[RTCO-024P CLIENT AUTH UID]", auth.currentUser?.uid);
+        console.log("[RTCO-024P CLIENT AUTH EMAIL]", auth.currentUser?.email);
+        console.log("[RTCO-024P PAYLOAD UID]", attPayload.uid);
+        console.log("[RTCO-024P UID EQUALITY]", {
+          payloadUid: attPayload.uid,
+          authUid: auth.currentUser?.uid,
+          equal: attPayload.uid === auth.currentUser?.uid
+        });
 
-      console.log(`[REGISTRATION BATCH 01] event_registrations/${regId}`);
-      batch.set(regDocRef, regPayload);
+        const existingAtt = await getDoc(attDocRef);
+        console.log("[RTCO-024P ATTENDANCE EXISTENCE]", {
+          exists: existingAtt.exists(),
+          path: attDocRef.path
+        });
 
-      console.log(`[REGISTRATION BATCH 02] eventAttendance/${attPayload.id}`);
-      batch.set(attDocRef, attPayload);
+        console.log("[RTCO-024P FIREBASE TARGET]", {
+          projectId: db.app.options.projectId,
+          databaseId: (db.app.options as any).databaseId || '(default)',
+          firestoreInstance: "INITIALIZED"
+        });
 
-      console.log(`[REGISTRATION BATCH 03] eventFood/${foodPayload.id}`);
-      batch.set(foodDocRef, foodPayload);
+        await setDoc(attDocRef, attPayload);
+        console.log("[RTCO-024L STEP 06] eventAttendance setDoc SUCCESS");
+      } catch (step6Err: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 06",
+          operation: attOp,
+          path: `eventAttendance/${attPayload.id}`,
+          errorCode: step6Err?.code,
+          errorMessage: step6Err?.message,
+          errorName: step6Err?.name
+        });
+        // Compensation: rollback step 5 registration
+        try {
+          await deleteDoc(regDocRef);
+          console.log("[RTCO-024L ROLLBACK SUCCESS] deleted event_registrations doc");
+        } catch (rbErr: any) {
+          console.error("[RTCO-024L ROLLBACK FAILURE] event_registrations delete failed:", rbErr);
+        }
+        throw step6Err;
+      }
 
-      // Step D: COMMIT CORE ATOMIC RESIDENT BATCH
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] Committing Core Resident Batch...");
-      await batch.commit();
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] Core Batch Commit Successful");
+      // STEP 7: CREATE FOOD
+      console.log("[RTCO-024L STEP 07] eventFood setDoc START", `eventFood/${foodPayload.id}`);
+      try {
+        await setDoc(foodDocRef, foodPayload);
+        console.log("[RTCO-024L STEP 07] eventFood setDoc SUCCESS");
+      } catch (step7Err: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 07",
+          operation: foodOp,
+          path: `eventFood/${foodPayload.id}`,
+          errorCode: step7Err?.code,
+          errorMessage: step7Err?.message,
+          errorName: step7Err?.name
+        });
+        // Compensation: rollback step 6 attendance and step 5 registration
+        try {
+          await deleteDoc(attDocRef);
+          console.log("[RTCO-024L ROLLBACK SUCCESS] deleted eventAttendance doc");
+        } catch (rbErr: any) {
+          console.error("[RTCO-024L ROLLBACK FAILURE] eventAttendance delete failed:", rbErr);
+        }
+        try {
+          await deleteDoc(regDocRef);
+          console.log("[RTCO-024L ROLLBACK SUCCESS] deleted event_registrations doc");
+        } catch (rbErr: any) {
+          console.error("[RTCO-024L ROLLBACK FAILURE] event_registrations delete failed:", rbErr);
+        }
+        throw step7Err;
+      }
+
+      console.log("[RTCO-024L STEP 08] Registration core writes completed");
 
       // Save references for UI notification
       const savedEventTitle = activeEventForReg.title;
       const totalParticipantsCount = regPayload.totalParticipants;
       const paymentAmountVal = regPayload.paymentAmount;
-      
-      // Step E: CLOSE RSVP MODAL AND LOCK FORM IMMEDIATELY
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 3 - Closing RSVP Modal");
-      setActiveEventForReg(null);
-      setLivePricing(null);
 
-      // Step F: NON-BLOCKING POST-COMMIT METRICS & ATTENDEES UPDATES
+      // STEP 9: AGGREGATE / POST-REGISTRATION PROCESSING (NON-BLOCKING)
+      console.log("[RTCO-024L STEP 09] Aggregate/post-registration processing START");
       try {
-        console.log("[POST-REGISTRATION STATS] Attempting secondary non-blocking metrics updates...");
         const reportDocRef = doc(db, "eventReports", `rep_${activeEventForReg.id}`);
         const reportSnap = await getDoc(reportDocRef);
         let reportPayload;
@@ -647,13 +790,19 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         statsBatch.set(finDocRef, finPayload, { merge: true });
         statsBatch.set(eventRef, { attendees: updatedAttendees }, { merge: true });
         await statsBatch.commit();
-        console.log("[POST-REGISTRATION STATS] Secondary metrics/finance updated successfully.");
-      } catch (statsErr) {
-        console.warn("⚠️ Non-blocking stats, finance, or attendee updates skipped (handled gracefully):", statsErr);
+        console.log("[RTCO-024L STEP 09] Aggregate/post-registration processing SUCCESS");
+      } catch (statsErr: any) {
+        console.error("[RTCO-024L FAILURE - NON-BLOCKING POST-REGISTRATION]", {
+          step: "STEP 09",
+          operation: "AGGREGATE_UPDATE",
+          path: "eventReports / eventFinance / events",
+          errorCode: statsErr?.code,
+          errorMessage: statsErr?.message,
+          errorName: statsErr?.name
+        });
       }
 
-      // Step G: AUDIT LOG (NON-BLOCKING)
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 4 - Creating Audit Log...");
+      // Audit Log (Non-blocking)
       const actionType = oldReg ? 'EVENT_REGISTRATION_UPDATED' : 'EVENT_REGISTERED';
       try {
         await createAuditLog(
@@ -663,15 +812,37 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
           regId,
           `Resident unit registered ${totalParticipantsCount} participants for event '${savedEventTitle}' (Payment: OMR ${paymentAmountVal}).`
         );
-        console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 5 - Audit Log Created Successfully");
-      } catch (auditErr) {
-        console.error("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 5 ERROR - Audit log write failed:", auditErr);
+      } catch (auditErr: any) {
+        console.error("[RTCO-024L FAILURE - NON-BLOCKING AUDIT LOG]", {
+          step: "STEP 09 (AUDIT LOG)",
+          operation: "CREATE_AUDIT_LOG",
+          path: "audit_logs",
+          errorCode: auditErr?.code,
+          errorMessage: auditErr?.message,
+          errorName: auditErr?.name
+        });
       }
 
-      console.log("[POST-REGISTRATION SUCCESS FLOW DIAGNOSTIC] STEP 6 - Displaying Success Message");
-      setSuccessMsg(`✓ Successfully registered ${totalParticipantsCount} member(s) of your family for ${savedEventTitle}!`);
+      // STEP 10: UI STATE UPDATE
+      console.log("[RTCO-024L STEP 10] UI state update START");
+      try {
+        setActiveEventForReg(null);
+        setLivePricing(null);
+        setSuccessMsg(`✓ Successfully registered ${totalParticipantsCount} member(s) of your family for ${savedEventTitle}!`);
+        console.log("[RTCO-024L STEP 10] UI state update SUCCESS");
+        console.log("[RTCO-024L COMPLETE] REGISTRATION SUCCESS");
+      } catch (uiErr: any) {
+        console.error("[RTCO-024L FAILURE]", {
+          step: "STEP 10",
+          operation: "UI_STATE_UPDATE",
+          path: "UI",
+          errorCode: uiErr?.code,
+          errorMessage: uiErr?.message,
+          errorName: uiErr?.name
+        });
+      }
     } catch (err: any) {
-      console.error("❌ Event registration failed:", err);
+      console.error("❌ Core event registration failed:", err);
       const cleanError = err.message || "A verification error occurred during transaction processing. Please contact your GMK Administrator.";
       setErrorMsg(cleanError.includes("Missing or insufficient permissions") 
         ? "Access Denied: You do not have authorization to complete this event registration. Please contact your administrator."
@@ -1322,17 +1493,17 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                   
                   <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-stone-605 font-bold">Registration Type:</span>
+                      <span className="text-stone-600 font-bold">Registration Type:</span>
                       <span className="font-bold text-emerald-900 capitalize">{livePricing.registrationType}</span>
                     </div>
                     
                     {/* Included Members */}
                     {livePricing.includedMembers && livePricing.includedMembers.length > 0 && (
                       <div className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wider text-stone-505 font-bold block mt-1">Included Household Members</span>
+                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Included Household Members</span>
                         <div className="grid grid-cols-1 gap-1 pl-1">
                           {livePricing.includedMembers.map((m, idx) => (
-                            <div key={idx} className="flex items-center text-[11px] text-stone-705 font-medium">
+                            <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
                               <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
                               {m}
                             </div>
@@ -1344,12 +1515,27 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                     {/* Parents */}
                     {livePricing.parentMembers && livePricing.parentMembers.length > 0 && (
                       <div className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wider text-stone-505 font-bold block mt-1">Parents (Always Free)</span>
+                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5})</span>
                         <div className="grid grid-cols-1 gap-1 pl-1">
                           {livePricing.parentMembers.map((m, idx) => (
                             <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
                               <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
-                              {m} <span className="text-[9px] font-bold text-emerald-850 bg-emerald-50 border border-emerald-200/50 px-1.5 py-0.25 rounded ml-1">Free</span>
+                              {m} <span className="text-[9px] font-bold text-stone-700 bg-amber-50 border border-amber-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.parentRate || 5}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Others / Maids */}
+                    {livePricing.otherMembers && livePricing.otherMembers.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Others / Maids ({livePricing.othersCount} × OMR {livePricing.otherRate || 5})</span>
+                        <div className="grid grid-cols-1 gap-1 pl-1">
+                          {livePricing.otherMembers.map((m, idx) => (
+                            <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
+                              <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
+                              {m} <span className="text-[9px] font-bold text-stone-700 bg-blue-50 border border-blue-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.otherRate || 5}</span>
                             </div>
                           ))}
                         </div>
@@ -1358,35 +1544,50 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
                     {/* Guests */}
                     {externalCount > 0 && (
-                      <div className="flex justify-between items-center text-[11px] text-stone-705 pt-1">
-                        <span className="font-medium text-stone-605">Guests:</span>
-                        <span className="font-mono font-bold">{externalCount} × OMR {livePricing.externalRate}</span>
+                      <div className="flex justify-between items-center text-[11px] text-stone-700 pt-1">
+                        <span className="font-medium text-stone-600">Guests:</span>
+                        <span className="font-mono font-bold">{externalCount} × OMR {livePricing.externalRate || 10}</span>
                       </div>
                     )}
                   </div>
 
+                  {/* Fee Calculation Lines */}
                   <div className="border-t border-dashed border-emerald-200 pt-2.5 space-y-1.5 text-xs font-semibold">
-                    <div className="flex justify-between text-stone-705 font-medium text-[11px]">
-                      <span>Base {livePricing.registrationType === 'individual' ? 'Individual' : livePricing.registrationType === 'couple' ? 'Couple' : 'Family'} Rate:</span>
-                      <span className="font-mono">OMR {livePricing.baseRate || 0}</span>
+                    <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                      <span>Base Registration ({livePricing.registrationType === 'individual' ? 'Individual' : livePricing.registrationType === 'couple' ? 'Couple' : 'Family'}):</span>
+                      <span className="font-mono font-bold">OMR {livePricing.baseRate || 0}</span>
                     </div>
 
-                    {livePricing.parentMembers && livePricing.parentMembers.length > 0 && (
-                      <div className="flex justify-between text-stone-705 font-medium text-[11px]">
-                        <span>Parents Rate:</span>
-                        <span className="text-emerald-700 font-bold">Free</span>
+                    {(livePricing.parentsCount || 0) > 0 && (
+                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                        <span>Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5}):</span>
+                        <span className="font-mono font-bold">OMR {livePricing.parentsSubtotal || 0}</span>
+                      </div>
+                    )}
+
+                    {(livePricing.othersCount || 0) > 0 && (
+                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                        <span>Others ({livePricing.othersCount} × OMR {livePricing.otherRate || 5}):</span>
+                        <span className="font-mono font-bold">OMR {livePricing.othersSubtotal || 0}</span>
                       </div>
                     )}
 
                     {externalCount > 0 && (
-                      <div className="flex justify-between text-stone-705 font-medium text-[11px]">
-                        <span>Guest Subtotal:</span>
-                        <span className="font-mono">OMR {livePricing.externalSubtotal || 0}</span>
+                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                        <span>Guests ({externalCount} × OMR {livePricing.externalRate || 10}):</span>
+                        <span className="font-mono font-bold">OMR {livePricing.externalSubtotal || 0}</span>
+                      </div>
+                    )}
+
+                    {(livePricing.breakdown?.freeChildren || 0) > 0 && (
+                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                        <span>Children below {activeEventForReg?.pricing?.freeChildAge ?? 5} years:</span>
+                        <span className="text-emerald-700 font-extrabold uppercase">FREE</span>
                       </div>
                     )}
 
                     <div className="flex justify-between items-center text-xs font-black border-t border-dashed border-emerald-200 pt-2 text-[#0f4c2a] text-sm">
-                      <span>Total Payable amount:</span>
+                      <span>TOTAL:</span>
                       <span className="font-mono text-base font-black">OMR {livePricing.totalAmount}</span>
                     </div>
                   </div>
@@ -1549,6 +1750,18 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                 <div className="p-3 flex justify-between">
                   <span className="text-stone-700">Full Family Unit Cap</span>
                   <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.familyRate ?? 0).toFixed(3)}</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Parent Rate</span>
+                  <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.parentRate ?? 5).toFixed(3)} per parent</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Other Resident Rate (Maids/Dependents)</span>
+                  <span className="font-mono font-bold text-stone-900">OMR {(showingPricingModalEvent.pricing.otherRate ?? 5).toFixed(3)} per person</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-700">Free Children Age Limit</span>
+                  <span className="font-mono font-bold text-stone-900">Below {showingPricingModalEvent.pricing.freeChildAge ?? 5} years old</span>
                 </div>
                 {showingPricingModalEvent.pricing.allowExternal && (
                   <div className="p-3 bg-emerald-50/40 flex justify-between">

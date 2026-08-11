@@ -1478,7 +1478,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
               </div>
 
               <p className="text-xs text-stone-800 font-semibold">
-                Building a complete household list. Add immediate family members (spouse, children, parents, others) residing under this unit.
+                Building a complete household list. Add immediate family members (spouse, children, parents) and others (maids and other residents beyond family) residing under this unit.
               </p>
 
               {/* Added Members Table or List */}
@@ -1806,7 +1806,10 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                 {/* Dependent/Others Accumulator */}
                 <div className="p-4 border border-stone-200 rounded-2xl bg-stone-50/50 space-y-3">
                   <div className="flex items-center justify-between border-b border-stone-200 pb-1.5 font-heading">
-                    <span className="text-[10px] font-bold text-[#0f4c2a] uppercase tracking-wider block">Add Others?</span>
+                    <div>
+                      <span className="text-[10px] font-bold text-[#0f4c2a] uppercase tracking-wider block">Add Others?</span>
+                      <p className="text-[9px] text-stone-500 font-semibold font-sans mt-0.5">(Maid and other residents beyond family)</p>
+                    </div>
                     <div className="flex items-center space-x-3">
                       <label className={`inline-flex items-center text-[10px] cursor-pointer select-none transition-all ${
                         dependentsApplicable ? 'text-[#0f4c2a] font-black' : 'text-stone-400 font-medium'
@@ -1838,9 +1841,10 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                   {dependentsApplicable && (
                     <div className="space-y-3 animate-fadeIn">
                       <div>
-                        <label className="block text-[9px] uppercase font-bold text-stone-855 font-black mb-1">Name</label>
+                        <label className="block text-[9px] uppercase font-bold text-stone-855 font-black mb-1">Name (Maid / Driver / Other Resident)</label>
                         <input 
                           type="text" 
+                          placeholder=""
                           value={depFormName} 
                           onChange={e => setDepFormName(e.target.value)} 
                           className="block w-full px-2 py-1 border border-stone-250 rounded text-xs bg-white text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a]" 
@@ -1860,10 +1864,10 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                           </select>
                         </div>
                         <div>
-                          <label className="block text-[9px] uppercase font-bold text-stone-855 font-black mb-1">Optional notes</label>
+                          <label className="block text-[9px] uppercase font-bold text-stone-855 font-black mb-1">Optional notes / Relationship</label>
                           <input 
                             type="text" 
-                            placeholder="Add optional notes..."
+                            placeholder=""
                             value={depNotes} 
                             onChange={e => setDepNotes(e.target.value)} 
                             className="block w-full px-2 py-1 border border-stone-250 rounded text-xs bg-white text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a]" 
@@ -1876,7 +1880,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                         onClick={handleAddDependent} 
                         className="w-full py-1 px-3 bg-[#0f4c2a] text-white text-[10px] uppercase tracking-wider font-bold rounded hover:bg-[#125831] cursor-pointer disabled:bg-stone-300 disabled:text-stone-500 disabled:cursor-not-allowed shadow-sm"
                       >
-                        Add Other
+                        Add Other (Maid / Resident)
                       </button>
                     </div>
                   )}

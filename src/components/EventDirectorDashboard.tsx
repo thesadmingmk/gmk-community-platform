@@ -344,10 +344,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
   const [configStatus, setConfigStatus] = useState<'draft' | 'published' | 'completed'>('draft');
 
-  // Extended pricing engine states (Sprint 6)
+  // Extended pricing engine states (Sprint 6 & v1.1)
   const [configFreeChildAge, setConfigFreeChildAge] = useState<number>(5);
   const [configHalfChildAge, setConfigHalfChildAge] = useState<number>(12);
   const [configAdultAge, setConfigAdultAge] = useState<number>(18);
+  const [configParentFee, setConfigParentFee] = useState<number>(5);
+  const [configOtherFee, setConfigOtherFee] = useState<number>(5);
 
   // External participant states (Sprint GMK-ARCH-002)
   const [configAllowExternal, setConfigAllowExternal] = useState<boolean>(false);
@@ -658,6 +660,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       setConfigAdultAge(pricing?.adultAge ?? 18);
       setConfigAllowExternal(pricing?.allowExternal ?? false);
       setConfigExternalRate(pricing?.externalRate ?? 0);
+      setConfigParentFee(pricing?.parentRate ?? 5);
+      setConfigOtherFee(pricing?.otherRate ?? 5);
 
       // Sync Completion Checklist (Sprint 2)
       const checklist = activeEvent.completionChecklist || {};
@@ -1692,6 +1696,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       origEventEnd = activeEvent.date || '';
     }
 
+    let origParentFee = 5;
+    let origOtherFee = 5;
+
     const pricing = activeEvent.pricing;
     if (pricing) {
       origFreeChildAge = pricing.freeChildAge ?? 5;
@@ -1699,6 +1706,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       origAdultAge = pricing.adultAge ?? 18;
       origAllowExternal = pricing.allowExternal ?? false;
       origExternalRate = pricing.externalRate ?? 0;
+      origParentFee = pricing.parentRate ?? 5;
+      origOtherFee = pricing.otherRate ?? 5;
     }
 
     const checklist = activeEvent.completionChecklist || {};
@@ -1727,6 +1736,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       configAdultAge !== origAdultAge ||
       configAllowExternal !== origAllowExternal ||
       configExternalRate !== origExternalRate ||
+      configParentFee !== origParentFee ||
+      configOtherFee !== origOtherFee ||
       chkRegClosed !== origChkReg ||
       chkProgramFinalized !== origChkProg ||
       chkAttendanceClosed !== origChkAtt ||
@@ -1787,6 +1798,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           individualFee: configIndividualFee,
           coupleFee: configCoupleFee,
           familyFee: configFamilyFee,
+          parentFee: configParentFee,
+          otherFee: configOtherFee,
           registrationStart: configRegStart,
           registrationEnd: configRegEnd,
           eventStart: configEventStart,
@@ -1800,7 +1813,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           halfChildAge: configHalfChildAge,
           adultAge: configAdultAge,
           allowExternal: configAllowExternal,
-          externalRate: configExternalRate
+          externalRate: configExternalRate,
+          parentRate: configParentFee,
+          otherRate: configOtherFee
         },
         completionChecklist: {
           registrationClosed: chkRegClosed,
@@ -1861,6 +1876,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       setConfigAdultAge(pricing.adultAge ?? 18);
       setConfigAllowExternal(pricing.allowExternal ?? false);
       setConfigExternalRate(pricing.externalRate ?? 0);
+      setConfigParentFee(pricing.parentRate ?? regSettings.parentFee ?? 5);
+      setConfigOtherFee(pricing.otherRate ?? regSettings.otherFee ?? 5);
     }
     setIsPricingEditing(false);
   };
@@ -1897,7 +1914,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(15, 76, 42);
-    doc.text("FROZEN REGISTRATION PRICING SCHEDULE (v1.0)", 15, 78);
+    doc.text("FROZEN REGISTRATION PRICING SCHEDULE (v1.1)", 15, 78);
     
     doc.setLineWidth(0.2);
     doc.setDrawColor(200, 200, 200);
@@ -1920,6 +1937,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     addRow("Individual Rate:", `OMR ${configIndividualFee.toFixed(3)}`);
     addRow("Couple Rate:", `OMR ${configCoupleFee.toFixed(3)}`);
     addRow("Family Rate:", `OMR ${configFamilyFee.toFixed(3)}`);
+    addRow("Parent Rate:", `OMR ${configParentFee.toFixed(3)} per parent`);
+    addRow("Other Resident Rate:", `OMR ${configOtherFee.toFixed(3)} per person`);
     addRow("Free Children Age Limit:", `Below ${configFreeChildAge} years old`);
     addRow("Allow Guests (Non-Residents):", configAllowExternal ? "Yes" : "No");
     if (configAllowExternal) {
@@ -1951,7 +1970,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     addRuleRow("• Couple Rule (Primary Resident + Spouse):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
     addRuleRow("• Family Rule (Resident + Spouse + Children):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
     addRuleRow("• Single Parent Rule (Resident + Child above Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate applied)`);
-    addRuleRow("• Parent Rule (Spouse Parents / Own Parents):", `OMR 0.000 (Parents always attend free)`);
+    addRuleRow("• Parent Rule (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
+    addRuleRow("• Other Resident Rule (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
     if (configAllowExternal) {
       addRuleRow("• Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
     } else {
@@ -1964,7 +1984,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     doc.setTextColor(150, 150, 150);
     doc.text("Note: This document represents the official active pricing tariff approved by the GMK Executive Committee.", 15, y);
     y += 4;
-    doc.text("Pricing Engine v1.0 • All calculations are dynamically verified on commit.", 15, y);
+    doc.text("Pricing Engine v1.1 • All calculations are dynamically verified on commit.", 15, y);
     
     doc.save(`${activeEvent.eventName || activeEvent.title}_pricing_policy.pdf`);
   };
@@ -5137,7 +5157,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                     )}
 
                     <div className="space-y-4">
-                      <h5 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider font-heading">Registration Fees</h5>
+                      <h5 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider font-heading">Base Registration Fees & Additional Rates</h5>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-[10px] uppercase font-black text-stone-500 mb-1">Individual Rate (OMR)</label>
@@ -5174,6 +5194,32 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                             onChange={(e) => setConfigFamilyFee(Number(e.target.value))}
                             className="w-full font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:opacity-50"
                           />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-black text-stone-500 mb-1">Parent Rate (OMR / Parent)</label>
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            required
+                            disabled={!isPricingEditing || configStatus === 'completed'}
+                            value={configParentFee}
+                            onChange={(e) => setConfigParentFee(Number(e.target.value))}
+                            className="w-full font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:opacity-50"
+                          />
+                          <p className="text-[8px] text-stone-400 font-semibold mt-1">Charged per attending parent.</p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-black text-stone-500 mb-1">Other Resident Rate (OMR / Person)</label>
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            required
+                            disabled={!isPricingEditing || configStatus === 'completed'}
+                            value={configOtherFee}
+                            onChange={(e) => setConfigOtherFee(Number(e.target.value))}
+                            className="w-full font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:opacity-50"
+                          />
+                          <p className="text-[8px] text-stone-400 font-semibold mt-1">Charged per maid / other resident.</p>
                         </div>
                       </div>
                     </div>
@@ -5864,11 +5910,15 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                           </div>
                           <div className="p-3 flex justify-between">
                             <span className="text-stone-600 font-bold">6. Parents (Spouse Parents / Own Parents)</span>
-                            <span className="font-mono font-black text-emerald-700">Always OMR 0.000 <span className="text-[9px] text-stone-500">(Parents Free)</span></span>
+                            <span className="font-mono font-black text-stone-950">OMR {configParentFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Per Parent)</span></span>
+                          </div>
+                          <div className="p-3 flex justify-between">
+                            <span className="text-stone-600 font-bold">7. Other Resident (Maid / Other Dependents)</span>
+                            <span className="font-mono font-black text-stone-950">OMR {configOtherFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Per Person)</span></span>
                           </div>
                           {configAllowExternal && (
                             <div className="p-3 bg-emerald-50/50 flex justify-between">
-                              <span className="text-emerald-950 font-bold">7. Registered Guests (Non-Residents)</span>
+                              <span className="text-emerald-950 font-bold">8. Registered Guests (Non-Residents)</span>
                               <span className="font-mono font-black text-emerald-800">OMR {configExternalRate.toFixed(3)} <span className="text-[9px] text-emerald-600">(Per Guest)</span></span>
                             </div>
                           )}
