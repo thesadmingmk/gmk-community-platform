@@ -85,16 +85,36 @@ export default function IdentityGateway() {
   const [duplicatePhoneError, setDuplicatePhoneError] = useState<string | null>(null);
   const [duplicateUnitError, setDuplicateUnitError] = useState<string | null>(null);
   const [generalValidationMsg, setGeneralValidationMsg] = useState<string | null>(null);
-  const [registrationSubmitted, setRegistrationSubmitted] = useState(false);
+  const [registrationSubmitted, setRegistrationSubmitted] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gmk_registration_submitted') === 'true';
+    }
+    return false;
+  });
   const [activationSuccess, setActivationSuccess] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('gmk_activation_success') === 'true';
     }
     return false;
   });
-  const [submittedDisplayUnit, setSubmittedDisplayUnit] = useState('');
-  const [submittedFullName, setSubmittedFullName] = useState('');
-  const [submittedGmkId, setSubmittedGmkId] = useState('');
+  const [submittedDisplayUnit, setSubmittedDisplayUnit] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gmk_registration_display_unit') || '';
+    }
+    return '';
+  });
+  const [submittedFullName, setSubmittedFullName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gmk_registration_full_name') || '';
+    }
+    return '';
+  });
+  const [submittedGmkId, setSubmittedGmkId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gmk_registration_gmk_id') || '';
+    }
+    return '';
+  });
   const [unverifiedEmailUser, setUnverifiedEmailUser] = useState<any>(null);
 
   // Platform Version state
@@ -528,15 +548,24 @@ export default function IdentityGateway() {
             name.trim()
           );
 
-          // 8. Sign out unverified session so user must verify email before logging in
-          await signOut(auth);
+          // 8. Persist non-sensitive display values in localStorage so registration success screen survives auth state unmount/remount
+          const formattedFullName = `${salutation}. ${name.trim()}`;
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('gmk_registration_submitted', 'true');
+            localStorage.setItem('gmk_registration_display_unit', displayUnit);
+            localStorage.setItem('gmk_registration_full_name', formattedFullName);
+            localStorage.setItem('gmk_registration_gmk_id', generatedGmkId);
+          }
 
           setSubmittedDisplayUnit(displayUnit);
-          setSubmittedFullName(`${salutation}. ${name.trim()}`);
+          setSubmittedFullName(formattedFullName);
           setSubmittedGmkId(generatedGmkId);
           setRegistrationSubmitted(true);
           setAuthSuccess(null);
           setUnverifiedEmailUser(createdUser);
+
+          // 9. Sign out unverified session so user must verify email before logging in
+          await signOut(auth);
 
           // Reset inputs
           setFlatNo('');
@@ -796,7 +825,16 @@ export default function IdentityGateway() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      localStorage.removeItem('gmk_registration_submitted');
+                      localStorage.removeItem('gmk_registration_display_unit');
+                      localStorage.removeItem('gmk_registration_full_name');
+                      localStorage.removeItem('gmk_registration_gmk_id');
+                    }
                     setRegistrationSubmitted(false);
+                    setSubmittedDisplayUnit('');
+                    setSubmittedFullName('');
+                    setSubmittedGmkId('');
                     setIsSignUp(false); // Switch to Sign In page
                     setName('');
                     setFlatNo('');
