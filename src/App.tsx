@@ -1,13 +1,13 @@
 import React from 'react';
 import { useAuth } from './context/AuthContext';
-import { signOut } from 'firebase/auth';
+import { signOut, sendEmailVerification } from 'firebase/auth';
 import { auth } from './context/AuthContext';
 import IdentityGateway from './components/IdentityGateway';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import ResidentDashboard from './components/ResidentDashboard';
 import { GEASConfirmationProvider } from './components/gmk/GEASConfirmationDialog';
-import { RefreshCw, AlertTriangle, UserCheck, Clock } from 'lucide-react';
+import { RefreshCw, AlertTriangle, UserCheck, Clock, Mail } from 'lucide-react';
 
 export default function App() {
   const { user, profile, loading, error } = useAuth();
@@ -99,8 +99,15 @@ export default function App() {
     return <IdentityGateway />;
   }
 
-  // Check if user is pending or inactive (and not a system admin or authorized admin/super_admin)
+  // System admin override check
   const isSystemAdmin = (user.email?.toLowerCase().trim() === "thesadmingmk@gmail.com" || user.email?.toLowerCase().trim() === "theadmingmk@gmail.com" || profile?.roles.includes('super_admin') || profile?.roles.includes('admin'));
+
+  // Email verification check for non-system admin users
+  if (user && !user.emailVerified && !isSystemAdmin) {
+    return <EmailVerificationRequiredView user={user} onSignOut={handleForceExit} />;
+  }
+
+  // Check if user is pending or inactive
   if (profile && (!profile.isActive || profile.roles.includes('pending') || profile.roles.length === 0) && !isSystemAdmin) {
     return (
       <div className="min-h-screen bg-[#FFFDF6] flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
@@ -121,17 +128,6 @@ export default function App() {
               <div><span className="text-stone-705 font-bold font-sans">Account:</span> <span className="text-stone-900 font-extrabold">{user.email}</span></div>
               <div><span className="text-stone-705 font-bold font-sans">Status:</span> <span className="text-red-750 font-extrabold">Pending Admin Approval</span></div>
               <div><span className="text-stone-705 font-bold font-sans">Gated Community:</span> <span className="text-stone-900 font-extrabold font-heading">Al Hail Greens</span></div>
-            </div>
-            <div className="bg-[#FFFDF6] border border-[#D4AF37]/35 p-4 rounded-xl text-left space-y-1">
-              <h4 className="text-[11px] font-bold text-[#0F4C2A] uppercase font-mono tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]"></span>
-                Registration Review Process
-              </h4>
-              <p className="text-[11px] text-stone-600 leading-relaxed font-medium">
-                Your registration will be reviewed by the GMK Administration to verify your residency details.
-                Once approved, you will receive an email with instructions to activate your account by creating your password.
-                After creating your password, you can securely sign in to the GMK Resident Portal.
-              </p>
             </div>
           </div>
 
@@ -167,5 +163,100 @@ export default function App() {
         <ResidentDashboard activeEmail={profile?.email || user.email || ''} />
       </div>
     </GEASConfirmationProvider>
+  );
+}
+
+function EmailVerificationRequiredView({ user, onSignOut }: { user: any; onSignOut: () => void }) {
+  const [resendStatus, setResendStatus] = React.useState<string | null>(null);
+  const [resendLoading, setResendLoading] = React.useState(false);
+
+  const handleResend = async () => {
+    try {
+      setResendLoading(true);
+      setResendStatus(null);
+      await sendEmailVerification(user);
+      setResendStatus("Verification email resent successfully! Please check your inbox and spam folder.");
+    } catch (err: any) {
+      setResendStatus(`Failed to send verification email: ${err.message}`);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleCheckVerified = async () => {
+    try {
+      await user.reload();
+      if (user.emailVerified) {
+        window.location.reload();
+      } else {
+        setResendStatus("Email is not verified yet. Please check your inbox and click the verification link.");
+      }
+    } catch (err: any) {
+      setResendStatus(`Failed to refresh status: ${err.message}`);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FFFDF6] flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
+      <div className="bg-white p-8 max-w-md w-full border border-stone-200 rounded-2xl shadow-xl space-y-6 text-center animate-fadeIn">
+        <div className="flex justify-center">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-[#0F4C2A]">
+            <Mail className="w-8 h-8 stroke-[2.5]" />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <h2 className="text-2xl font-serif text-[#0F4C2A] font-bold">
+            Registration successful.
+          </h2>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#D4AF37]">
+            Email Verification Required
+          </p>
+        </div>
+
+        <div className="text-sm text-stone-850 font-semibold leading-relaxed space-y-4">
+          <p className="text-stone-700 text-xs">
+            Please check your email and verify your email address before logging in. If you don't see it, <strong>check your spam folder too for the email from theadmingmk@gmail.com</strong>.
+          </p>
+          <p className="text-stone-700 text-xs text-center font-normal">
+            For registration assistance, please <a href="https://wa.me/96898101240" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-bold text-[#0F4C2A] hover:text-[#072414] underline">WhatsApp 98101240</a>.
+          </p>
+          <div className="text-xs bg-[#FFFDF6] border border-stone-250 p-4 rounded-xl font-mono text-left space-y-1">
+            <div><span className="text-stone-500 font-sans">Account Email:</span> <span className="text-stone-900 font-extrabold">{user.email}</span></div>
+            <div><span className="text-stone-500 font-sans">Status:</span> <span className="text-amber-700 font-extrabold">Verification Pending</span></div>
+          </div>
+        </div>
+
+        {resendStatus && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-medium text-left">
+            {resendStatus}
+          </div>
+        )}
+
+        <div className="space-y-2.5 pt-2">
+          <button
+            onClick={handleCheckVerified}
+            className="w-full py-3 px-4 bg-[#0F4C2A] hover:bg-[#072414] text-white font-bold uppercase tracking-wider text-xs rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center gap-2"
+          >
+            <span>I've Verified My Email</span>
+          </button>
+
+          <button
+            onClick={handleResend}
+            disabled={resendLoading}
+            className="w-full py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold uppercase tracking-wider text-xs rounded-xl transition-all cursor-pointer shadow-sm disabled:opacity-50"
+          >
+            {resendLoading ? "Sending..." : "Resend Verification Email"}
+          </button>
+
+          <button
+            onClick={onSignOut}
+            className="w-full py-2 px-4 text-stone-500 hover:text-stone-800 font-bold uppercase tracking-wider text-xs transition-all cursor-pointer"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

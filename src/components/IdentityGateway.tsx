@@ -5,7 +5,8 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   signOut,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendEmailVerification
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { auth, db, functions } from '../context/AuthContext';
@@ -93,6 +94,8 @@ export default function IdentityGateway() {
   });
   const [submittedDisplayUnit, setSubmittedDisplayUnit] = useState('');
   const [submittedFullName, setSubmittedFullName] = useState('');
+  const [submittedGmkId, setSubmittedGmkId] = useState('');
+  const [unverifiedEmailUser, setUnverifiedEmailUser] = useState<any>(null);
 
   // Platform Version state
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
@@ -312,6 +315,21 @@ export default function IdentityGateway() {
     }
   };
 
+  const handleResendVerification = async () => {
+    if (!unverifiedEmailUser) return;
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+      await sendEmailVerification(unverifiedEmailUser);
+      setAuthSuccess("Verification email resent successfully! Please check your inbox and spam folder.");
+    } catch (err: any) {
+      console.error("Resend verification error:", err);
+      setErrorMsg(err.message || "Failed to resend verification email.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -330,6 +348,15 @@ export default function IdentityGateway() {
         if (!name.trim()) throw new Error("Full name is required.");
         if (phone.length !== 8) {
           throw new Error("Phone number must contain exactly 8 digits.");
+        }
+        if (!sanitizedEmail || !sanitizedEmail.includes('@')) {
+          throw new Error("Please enter a valid email address.");
+        }
+        if (password.length < 6) {
+          throw new Error("Password must be at least 6 characters long.");
+        }
+        if (password !== confirmPassword) {
+          throw new Error("Passwords do not match.");
         }
 
         const normResult = normalizeUnit(unitType, flatNo);
@@ -374,6 +401,7 @@ export default function IdentityGateway() {
           }
         }
 
+        // Duplicate checks
         const resEmailQ = query(collection(validationDb, "residents"), where("email", "==", sanitizedEmail));
         const resEmailSnap = await getDocs(resEmailQ);
         if (!resEmailSnap.empty) {
@@ -383,66 +411,136 @@ export default function IdentityGateway() {
         const resUnitQ = query(collection(validationDb, "residents"), where("unitKey", "==", normalizedUnit));
         const resUnitSnap = await getDocs(resUnitQ);
         if (!resUnitSnap.empty) {
-          throw new Error(`Unit '${displayUnit}' is already bound to an approved resident account.`);
+          throw new Error(`Unit '${displayUnit}' is already bound to an active resident account.`);
         }
 
-        const pendEmailQ = query(collection(validationDb, "pending_registrations"), where("email", "==", sanitizedEmail));
-        const pendEmailSnap = await getDocs(pendEmailQ);
-        if (!pendEmailSnap.empty) {
-          throw new Error("This email address is already awaiting approval in the verification queue.");
+        const resPhoneQ = query(collection(validationDb, "residents"), where("phone", "==", phone.trim()));
+        const resPhoneSnap = await getDocs(resPhoneQ);
+        if (!resPhoneSnap.empty) {
+          throw new Error("This mobile number is already associated with a registered resident.");
         }
 
-        const pendUnitQ = query(collection(validationDb, "pending_registrations"), where("unitKey", "==", normalizedUnit));
-        const pendUnitSnap = await getDocs(pendUnitQ);
-        if (!pendUnitSnap.empty) {
-          throw new Error(`Unit '${displayUnit}' is already awaiting approval in the verification queue.`);
+        let userCreated = false;
+        let createdUser: any = null;
+
+        try {
+          // 1. Create Firebase Authentication account
+          const userCred = await createUserWithEmailAndPassword(auth, sanitizedEmail, password);
+          createdUser = userCred.user;
+          userCreated = true;
+
+          // 2. Send Firebase email verification
+          try {
+            await sendEmailVerification(createdUser);
+          } catch (notifErr: any) {
+            console.warn("⚠️ Email verification sending warning:", notifErr);
+          }
+
+          // 3. Generate sequential GMK ID (GMK-XXXX)
+          const resSnap = await getDocs(collection(validationDb, "residents"));
+          const numericIds = resSnap.docs
+            .map(d => {
+              const data = d.data();
+              const match = (data.gmkId || d.id).match(/GMK-(\d+)/);
+              return match ? parseInt(match[1], 10) : null;
+            })
+            .filter((id): id is number => id !== null);
+          const maxId = numericIds.length > 0 ? Math.max(...numericIds) : 1000;
+          const generatedGmkId = `GMK-${String(maxId + 1).padStart(4, '0')}`;
+          const timestamp = new Date().toISOString();
+
+          // 4. Create user profile immediately with role 'resident'
+          const userPayload = {
+            uid: createdUser.uid,
+            email: sanitizedEmail,
+            gmkId: generatedGmkId,
+            fullName: name.trim(),
+            roles: ["resident"],
+            isActive: true,
+            createdAt: timestamp
+          };
+          await setDoc(doc(db, "users", createdUser.uid), sanitizeFirestorePayload(userPayload));
+
+          // 5. Create active resident record
+          const residentPayload = {
+            gmkId: generatedGmkId,
+            uid: createdUser.uid,
+            displayUnitNumber: displayUnit,
+            unitKey: normalizedUnit,
+            phone: phone.trim(),
+            email: sanitizedEmail,
+            fullName: name.trim(),
+            salutation: salutation,
+            unitType: unitType,
+            status: 'active',
+            gatedCommunity: gatedCommunity,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            remarks: 'Self-registered resident profile.'
+          };
+          await setDoc(doc(db, "residents", generatedGmkId), sanitizeFirestorePayload(residentPayload));
+
+          // 6. Create/link family record using existing GMK data model
+          const familyPayload = {
+            id: `fam_${generatedGmkId}`,
+            primaryMemberGmkId: generatedGmkId,
+            primaryMemberEmail: sanitizedEmail,
+            salutation: salutation as any,
+            fullName: name.trim(),
+            phone: phone.trim(),
+            whatsAppNumber: phone.trim(),
+            whatsAppSameAsMobile: true,
+            unitKey: normalizedUnit,
+            displayUnitNumber: displayUnit,
+            unitType: unitType,
+            professionCategory: 'None Specified',
+            professionTitle: 'Not disclosed',
+            company: 'Not disclosed',
+            onboardingCompleted: false,
+            directoryConsent: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          };
+          await setDoc(doc(db, "families", `fam_${generatedGmkId}`), sanitizeFirestorePayload(familyPayload));
+
+          // 7. Write audit log
+          await createAuditLog(
+            'RESIDENT_REGISTERED',
+            sanitizedEmail,
+            'resident',
+            generatedGmkId,
+            `Self-registered resident profile for ${name.trim()} (Unit: ${displayUnit}, ID: ${generatedGmkId})`,
+            name.trim()
+          );
+
+          // 8. Sign out unverified session so user must verify email before logging in
+          await signOut(auth);
+
+          setSubmittedDisplayUnit(displayUnit);
+          setSubmittedFullName(`${salutation}. ${name.trim()}`);
+          setSubmittedGmkId(generatedGmkId);
+          setRegistrationSubmitted(true);
+          setAuthSuccess(null);
+          setUnverifiedEmailUser(createdUser);
+
+          // Reset inputs
+          setFlatNo('');
+          setAptBuilding('');
+          setAptSection('');
+          setAptFlat('');
+          setPhone('');
+          setPassword('');
+          setConfirmPassword('');
+        } catch (err: any) {
+          if (userCreated && createdUser) {
+            try {
+              await createdUser.delete();
+            } catch (deleteErr) {
+              console.error("Cleanup deletion failed during registration rollback:", deleteErr);
+            }
+          }
+          throw err;
         }
-
-        const pendingRef = doc(collection(validationDb, "pending_registrations"));
-        const pendingId = pendingRef.id;
-
-        const pendingPayload = {
-          uid: pendingId,
-          salutation: salutation,
-          fullName: name.trim(),
-          email: sanitizedEmail,
-          phone: phone.trim(),
-          unitType: unitType,
-          displayUnitNumber: displayUnit,
-          unitKey: normalizedUnit,
-          gatedCommunity: gatedCommunity,
-          createdAt: new Date().toISOString(),
-          status: 'pending'
-        };
-
-        await setDoc(pendingRef, sanitizeFirestorePayload(pendingPayload));
-
-        // Create audit log using validationDb directly so we don't depend on the main db instance which might fail validation rules if unauthenticated
-        const logsRef = collection(validationDb, "auditLogs");
-        const logDoc = doc(logsRef);
-        await setDoc(logDoc, {
-          id: logDoc.id,
-          action: 'REGISTRATION_SUBMITTED',
-          actorEmail: sanitizedEmail,
-          entityType: 'registration',
-          entityId: pendingId,
-          details: `Submitted registration request for ${name.trim()} (Unit: ${displayUnit})`,
-          timestamp: new Date().toISOString(),
-          targetName: name.trim()
-        });
-
-        setSubmittedDisplayUnit(displayUnit);
-        setSubmittedFullName(`${salutation}. ${name.trim()}`);
-        setRegistrationSubmitted(true);
-        setAuthSuccess(null); // Clear auth success since we are rendering the custom success page
-        
-        setFlatNo('');
-        setAptBuilding('');
-        setAptSection('');
-        setAptFlat('');
-        setPhone('');
-        setPassword('');
-        setConfirmPassword('');
       } else if (isSetupPassword) {
         if (password.length < 6) {
           throw new Error("Password must be at least 6 characters long.");
@@ -510,8 +608,18 @@ export default function IdentityGateway() {
       } else {
         localStorage.removeItem('gmk_emergency_admin_mode');
         localStorage.removeItem('gmk_activation_success');
-        await signInWithEmailAndPassword(auth, sanitizedEmail, password);
-        setAuthSuccess(`Welcome back! Logged in successfully.`);
+        const userCred = await signInWithEmailAndPassword(auth, sanitizedEmail, password);
+        const signedInUser = userCred.user;
+
+        const isSysAdmin = (sanitizedEmail === "thesadmingmk@gmail.com" || sanitizedEmail === "theadmingmk@gmail.com");
+        if (!signedInUser.emailVerified && !isSysAdmin) {
+          setUnverifiedEmailUser(signedInUser);
+          await signOut(auth);
+          throw new Error("Registration successful. Please check your email and verify your email address before logging in.");
+        } else {
+          setUnverifiedEmailUser(null);
+          setAuthSuccess(`Welcome back! Logged in successfully.`);
+        }
       }
     } catch (err: any) {
       console.error("❌ Authentication error:", err);
@@ -519,7 +627,7 @@ export default function IdentityGateway() {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
         displayError = "Invalid email address or secure password combination. Please try again.";
       } else if (err.code === "auth/email-already-in-use") {
-        displayError = "This email address is already configured with a password. Try logging in instead.";
+        displayError = "This email address is already registered. Try logging in instead.";
       }
       setErrorMsg(displayError);
     } finally {
@@ -626,19 +734,27 @@ export default function IdentityGateway() {
               </div>
             </div>
           ) : registrationSubmitted ? (
-            <div className="space-y-6 text-center animate-fadeIn py-4 animate-fadeIn">
+            <div className="space-y-6 text-center animate-fadeIn py-4">
               <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mb-2 shadow-inner">
                 <Check className="w-8 h-8 stroke-[3]" />
               </div>
               <div className="space-y-2">
                 <h2 className="text-xl font-extrabold text-[#0f4c2a] tracking-tight">
-                  Registration Successful
+                  Registration successful.
                 </h2>
                 <div className="h-0.5 w-12 bg-[#d4af37] mx-auto rounded-full"></div>
               </div>
-              <p className="text-xs text-stone-750 leading-relaxed text-left bg-emerald-50/70 border border-emerald-150 p-3.5 rounded-2xl">
-                The registration is successful and will be reviewed and approved by the GMK Admin. For assistance email <a href="mailto:theadmingmk@gmail.com" className="text-[#0f4c2a] font-bold underline hover:text-[#125831]">theadmingmk@gmail.com</a>
-              </p>
+              <div className="text-xs text-stone-750 leading-relaxed text-left bg-emerald-50/70 border border-emerald-150 p-4 rounded-2xl space-y-2">
+                <p className="font-bold text-emerald-900 text-sm text-center">
+                  Email Verification Sent
+                </p>
+                <p className="font-semibold text-stone-700 text-center">
+                  Please check your email and verify your email address before logging in. If you don't see it, <strong>check your spam folder too for the email from theadmingmk@gmail.com</strong>.
+                </p>
+                <p className="text-stone-700 text-center text-xs pt-1">
+                  For registration assistance, please <a href="https://wa.me/96898101240" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-bold text-[#0f4c2a] hover:text-[#125831] underline">WhatsApp 98101240</a>.
+                </p>
+              </div>
               <div className="bg-stone-50 border border-stone-150 rounded-2xl p-4 text-left space-y-2 text-xs">
                 <div className="flex justify-between border-b border-stone-100 pb-1">
                   <span className="text-stone-450 font-mono text-[10px]">RESIDENT:</span>
@@ -648,28 +764,17 @@ export default function IdentityGateway() {
                   <span className="text-stone-450 font-mono text-[10px]">UNIT NUMBER:</span>
                   <span className="font-bold text-stone-850">{submittedDisplayUnit}</span>
                 </div>
+                {submittedGmkId && (
+                  <div className="flex justify-between border-b border-stone-100 pb-1">
+                    <span className="text-stone-450 font-mono text-[10px]">RESIDENT ID:</span>
+                    <span className="font-bold text-stone-850">{submittedGmkId}</span>
+                  </div>
+                )}
                 <div className="flex justify-between font-sans">
                   <span className="text-stone-450 font-mono text-[10px]">STATUS:</span>
-                  <span className="font-extrabold text-[#A28114] bg-amber-50/50 px-2 rounded border border-amber-200 animate-pulse text-[10.5px]">
-                    PENDING APPROVAL
+                  <span className="font-extrabold text-amber-800 bg-amber-50 px-2 rounded border border-amber-200 text-[10.5px]">
+                    VERIFICATION PENDING
                   </span>
-                </div>
-              </div>
-              <div className="bg-[#FFFDF6] border border-[#D4AF37]/35 rounded-2xl p-4 text-left">
-                <h4 className="text-[11px] font-bold text-[#0f4c2a] uppercase font-mono tracking-wider flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]"></span>
-                  Registration Review Process:
-                </h4>
-                <div className="text-[11px] text-stone-600 mt-2 space-y-2 leading-relaxed">
-                  <p>
-                    <strong>1. Residency Verification:</strong> Your registration will be reviewed by the GMK Administration to verify your residency details.
-                  </p>
-                  <p>
-                    <strong>2. Password Activation Link:</strong> Once your registration is approved, you will receive an email with instructions to activate your account by creating your password.
-                  </p>
-                  <p>
-                    <strong>3. Secure Portal Entry:</strong> After creating your password, you can securely sign in to the GMK Resident Portal.
-                  </p>
                 </div>
               </div>
               <div className="pt-2">
@@ -677,7 +782,7 @@ export default function IdentityGateway() {
                   type="button"
                   onClick={() => {
                     setRegistrationSubmitted(false);
-                    setIsSignUp(false); // Page behind it is the sign in page
+                    setIsSignUp(false); // Switch to Sign In page
                     setName('');
                     setFlatNo('');
                     setAptBuilding('');
@@ -692,7 +797,7 @@ export default function IdentityGateway() {
                   }}
                   className="w-full py-3 bg-[#0f4c2a] hover:bg-[#125831] text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-950/10 flex items-center justify-center space-x-1.5"
                 >
-                  <span>Close</span>
+                  <span>Proceed to Login</span>
                 </button>
               </div>
             </div>
@@ -741,16 +846,17 @@ export default function IdentityGateway() {
             {isSignUp && !isSetupPassword && (
               <div className="space-y-4 animate-fadeIn">
                 
-                {/* Registration Process Info Box */}
+                {/* Registration Info Box */}
                 <div className="bg-[#FFFDF6] border border-[#D4AF37]/35 p-3.5 rounded-2xl text-left space-y-1">
                   <h4 className="text-[11px] font-bold text-[#0F4C2A] uppercase font-mono tracking-wider flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]"></span>
-                    Registration Review Process
+                    Self-Service Registration
                   </h4>
                   <p className="text-[10.5px] text-stone-600 leading-relaxed">
-                    Your registration will be reviewed by the GMK Administration to verify your residency details. 
-                    Once approved, you will receive an email with instructions to activate your account by creating your password. 
-                    After creating your password, you can securely sign in to the GMK Resident Portal.
+                    Fill in your residency details and set your account password below. Upon registration, a verification link will be sent to your email address. Please verify your email address before signing in (<strong>check your spam folder too for the email from theadmingmk@gmail.com</strong>).
+                  </p>
+                  <p className="text-[10.5px] text-stone-700 leading-relaxed pt-0.5">
+                    For registration assistance, please <a href="https://wa.me/96898101240" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-bold text-[#0f4c2a] hover:text-[#125831] underline">WhatsApp 98101240</a>.
                   </p>
                 </div>
                 
@@ -844,67 +950,74 @@ export default function IdentityGateway() {
                 </div>
 
                 {/* Unit Number Input Segmented for Building & Floor Autocomplete */}
-                <div>
-                  <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-800 mb-1 font-heading">
-                    {unitType === 'Apartment' ? "Unit Segment Codes (Building - Section - Flat)" : `${unitType === 'Villa' ? 'Villa' : 'Townhouse'} Number`}
-                  </label>
-                  
-                  {unitType === 'Apartment' ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="relative flex-1">
-                        <input
-                          ref={buildingRef}
-                          type="text"
-                          required
-                          value={aptBuilding}
-                          onChange={(e) => handleBuildingChange(e.target.value)}
-                          className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
-                        />
-                      </div>
-                      <span className="text-stone-600 font-bold">-</span>
-                      <div className="relative flex-1">
-                        <input
-                          ref={sectionRef}
-                          type="text"
-                          required
-                          value={aptSection}
-                          onChange={(e) => handleSectionChange(e.target.value)}
-                          className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
-                        />
-                      </div>
-                      <span className="text-stone-600 font-bold">-</span>
-                      <div className="relative flex-1">
-                        <input
-                          ref={flatRef}
-                          type="text"
-                          required
-                          value={aptFlat}
-                          onChange={(e) => handleFlatChange(e.target.value)}
-                          className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-750 font-bold text-xs">
-                        {unitType === 'Villa' ? "Villa -" : "TH -"}
-                      </div>
-                      <input
-                        type="text"
-                        required
-                        value={flatNo}
-                        onChange={(e) => setFlatNo(e.target.value.replace(/\D/g, ''))}
-                        className="block w-full p-2.5 pl-16 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55 font-bold"
-                      />
-                    </div>
-                  )}
+                {unitType && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-800 mb-1 font-heading">
+                      {unitType === 'Apartment' && "Unit Segment Codes (Building - Section - Flat)"}
+                      {unitType === 'Villa' && "Villa Number"}
+                      {unitType === 'Townhouse' && "Townhouse Number"}
+                    </label>
 
-                  <p className="text-[10px] text-stone-655 font-semibold mt-1.5">
-                    {unitType === 'Apartment' && "Provide building name, section code, and flat number."}
-                    {unitType === 'Villa' && "Provide villa number."}
-                    {unitType === 'Townhouse' && "Provide townhouse numeric index."}
-                  </p>
-                </div>
+                    {unitType === 'Apartment' ? (
+                      <div className="flex items-center space-x-2">
+                        <div className="relative flex-1">
+                          <input
+                            ref={buildingRef}
+                            type="text"
+                            required
+                            placeholder="Building"
+                            value={aptBuilding}
+                            onChange={(e) => handleBuildingChange(e.target.value)}
+                            className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
+                          />
+                        </div>
+                        <span className="text-stone-600 font-bold">-</span>
+                        <div className="relative flex-1">
+                          <input
+                            ref={sectionRef}
+                            type="text"
+                            required
+                            placeholder="Section"
+                            value={aptSection}
+                            onChange={(e) => handleSectionChange(e.target.value)}
+                            className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
+                          />
+                        </div>
+                        <span className="text-stone-600 font-bold">-</span>
+                        <div className="relative flex-1">
+                          <input
+                            ref={flatRef}
+                            type="text"
+                            required
+                            placeholder="Flat"
+                            value={aptFlat}
+                            onChange={(e) => handleFlatChange(e.target.value)}
+                            className="block w-full px-3 py-2.5 text-center border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/50 font-bold"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-750 font-bold text-xs">
+                          {unitType === 'Villa' ? "Villa -" : "TH -"}
+                        </div>
+                        <input
+                          type="text"
+                          required
+                          value={flatNo}
+                          onChange={(e) => setFlatNo(e.target.value.replace(/\D/g, ''))}
+                          className="block w-full p-2.5 pl-16 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55 font-bold"
+                        />
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-stone-655 font-semibold mt-1.5">
+                      {unitType === 'Apartment' && "Provide building name, section code, and flat number."}
+                      {unitType === 'Villa' && "Provide villa number."}
+                      {unitType === 'Townhouse' && "Provide townhouse numeric index."}
+                    </p>
+                  </div>
+                )}
 
                 {/* Validation Info */}
                 {flatNo && (() => {
@@ -952,11 +1065,29 @@ export default function IdentityGateway() {
             </div>
 
             {/* Password Fields */}
-            {(!isSignUp || isSetupPassword) && (
-              <div className="space-y-4">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-800 mb-1 font-heading">
+                  {isSetupPassword ? "New Password" : "Password"}
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-600">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="block w-full pl-9 pr-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55"
+                  />
+                </div>
+              </div>
+
+              {(isSignUp || isSetupPassword) && (
                 <div>
                   <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-800 mb-1 font-heading">
-                    {isSetupPassword ? "New Password" : "Password"}
+                    Confirm Password
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-600">
@@ -965,63 +1096,54 @@ export default function IdentityGateway() {
                     <input
                       type={showPassword ? "text" : "password"}
                       required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
                       className="block w-full pl-9 pr-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55"
                     />
                   </div>
                 </div>
+              )}
 
-                {isSetupPassword && (
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-800 mb-1 font-heading">
-                      Confirm Password
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-600">
-                        <Lock className="h-4 w-4" />
-                      </div>
-                      <input
-                        type={showPassword ? "text" : "password"}
-                        required
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="block w-full pl-9 pr-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="show_password_checkbox"
-                      checked={showPassword}
-                      onChange={(e) => setShowPassword(e.target.checked)}
-                      className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer"
-                    />
-                    <label htmlFor="show_password_checkbox" className="text-xs text-stone-600 cursor-pointer select-none font-medium">
-                      Show Password
-                    </label>
-                  </div>
-                  {!isSignUp && !isSetupPassword && (
-                    <button
-                      type="button"
-                      onClick={handleForgotPassword}
-                      className="text-xs text-[#0f4c2a] hover:text-[#d4af37] transition-colors cursor-pointer font-extrabold hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
-                  )}
+              <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="show_password_checkbox"
+                    checked={showPassword}
+                    onChange={(e) => setShowPassword(e.target.checked)}
+                    className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer"
+                  />
+                  <label htmlFor="show_password_checkbox" className="text-xs text-stone-600 cursor-pointer select-none font-medium">
+                    Show Password
+                  </label>
                 </div>
+                {!isSignUp && !isSetupPassword && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    className="text-xs text-[#0f4c2a] hover:text-[#d4af37] transition-colors cursor-pointer font-extrabold hover:underline"
+                  >
+                    Forgot Password?
+                  </button>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Error and Success Alerts */}
             {errorMsg && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs leading-relaxed font-medium">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs leading-relaxed font-medium space-y-2">
                 <p>{errorMsg}</p>
+                {unverifiedEmailUser && (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={loading}
+                    className="mt-1 px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#125831] text-white text-[11px] font-bold rounded-lg transition-all cursor-pointer shadow-sm flex items-center gap-1"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Resend Verification Email</span>
+                  </button>
+                )}
               </div>
             )}
 
