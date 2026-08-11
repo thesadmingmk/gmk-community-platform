@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import React, { useState, useEffect } from 'react';
+import { useAuth, db } from '../../context/AuthContext';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../context/AuthContext';
 import { normalizeName } from '../../utils/nameNormalization';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { 
   Home, 
   Calendar, 
@@ -26,6 +27,55 @@ interface AppShellProps {
 export default function AppShell({ activeTab, setActiveTab, children, unitNumber }: AppShellProps) {
   const { user, profile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [hasUnseenEvents, setHasUnseenEvents] = useState<boolean>(false);
+  const [publishedEventIds, setPublishedEventIds] = useState<string[]>([]);
+
+  // Real-time listener to check for published / activated community events
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "events"), (snapshot) => {
+      const activeIds: string[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.status === 'published') {
+          activeIds.push(doc.id);
+        }
+      });
+      setPublishedEventIds(activeIds);
+
+      if (activeIds.length > 0) {
+        try {
+          const rawSeen = localStorage.getItem('gmk_events_seen_published');
+          const seenIds: string[] = rawSeen ? JSON.parse(rawSeen) : [];
+          const hasUnseen = activeIds.some(id => !seenIds.includes(id));
+          setHasUnseenEvents(hasUnseen);
+        } catch (e) {
+          setHasUnseenEvents(true);
+        }
+      } else {
+        setHasUnseenEvents(false);
+      }
+    }, (err) => {
+      console.warn("⚠️ AppShell events listener warning:", err.message);
+    });
+
+    return () => unsub();
+  }, []);
+
+  const markEventsSeen = (idsToMark?: string[]) => {
+    const targetIds = idsToMark || publishedEventIds;
+    try {
+      localStorage.setItem('gmk_events_seen_published', JSON.stringify(targetIds));
+    } catch (e) {
+      console.warn("localStorage error:", e);
+    }
+    setHasUnseenEvents(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'events' && hasUnseenEvents) {
+      markEventsSeen();
+    }
+  }, [activeTab, hasUnseenEvents, publishedEventIds]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -41,7 +91,7 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
     },
     {
       id: 'events',
-      label: 'Events Hub',
+      label: 'GMK Events',
       icon: Calendar,
       roles: ['resident', 'admin', 'super_admin'],
       accentColor: 'text-[#d4af37]',
@@ -122,10 +172,16 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
           {/* Mobile sidebar toggle trigger */}
           <button 
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-1 bg-stone-50 border border-stone-200 rounded-lg text-[#0f4c2a] hover:bg-stone-100 cursor-pointer mr-1"
+            className="md:hidden p-1 bg-stone-50 border border-stone-200 rounded-lg text-[#0f4c2a] hover:bg-stone-100 cursor-pointer mr-1 relative"
             title="Toggle Navigation Menu"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {hasUnseenEvents && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border-2 border-white"></span>
+              </span>
+            )}
           </button>
 
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#0f4c2a] to-[#125831] flex items-center justify-center text-[#d4af37] shadow">
@@ -169,19 +225,34 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isSelected = activeTab === item.id;
+            const isEventsItem = item.id === 'events';
+            const showBadge = isEventsItem && hasUnseenEvents;
             
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all duration-150 text-left flex items-center space-x-2.5 cursor-pointer border ${
+                onClick={() => {
+                  setActiveTab(item.id);
+                  if (isEventsItem) {
+                    markEventsSeen();
+                  }
+                }}
+                className={`w-full py-2.5 px-4 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all duration-150 text-left flex items-center justify-between cursor-pointer border ${
                   isSelected
                     ? 'bg-[#0f4c2a] text-white border-[#0f4c2a] shadow-md shadow-emerald-950/10'
                     : 'bg-white text-stone-750 border-stone-200/80 hover:bg-stone-50 hover:text-[#0f4c2a]'
                 }`}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isSelected ? '' : item.accentColor || ''}`} />
-                <span>{item.label}</span>
+                <div className="flex items-center space-x-2.5">
+                  <Icon className={`w-4 h-4 shrink-0 ${isSelected ? '' : item.accentColor || ''}`} />
+                  <span>{item.label}</span>
+                </div>
+                {showBadge && (
+                  <span className="relative flex h-2.5 w-2.5 shrink-0 ml-1">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500 border border-white"></span>
+                  </span>
+                )}
               </button>
             );
           })}
@@ -214,22 +285,35 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
                 {visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const isSelected = activeTab === item.id;
+                  const isEventsItem = item.id === 'events';
+                  const showBadge = isEventsItem && hasUnseenEvents;
                   
                   return (
                     <button
                       key={item.id}
                       onClick={() => {
                         setActiveTab(item.id);
+                        if (isEventsItem) {
+                          markEventsSeen();
+                        }
                         setMobileMenuOpen(false);
                       }}
-                      className={`w-full py-3 px-4 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all text-left flex items-center space-x-3 cursor-pointer border ${
+                      className={`w-full py-3 px-4 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all text-left flex items-center justify-between cursor-pointer border ${
                         isSelected
                           ? 'bg-[#0f4c2a] text-white border-[#0f4c2a]'
                           : 'bg-stone-50 text-stone-700 border-stone-150 hover:bg-stone-100'
                       }`}
                     >
-                      <Icon className={`w-4.5 h-4.5 shrink-0 ${isSelected ? '' : item.accentColor || ''}`} />
-                      <span>{item.label}</span>
+                      <div className="flex items-center space-x-3">
+                        <Icon className={`w-4.5 h-4.5 shrink-0 ${isSelected ? '' : item.accentColor || ''}`} />
+                        <span>{item.label}</span>
+                      </div>
+                      {showBadge && (
+                        <span className="flex items-center space-x-1 bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-widest animate-pulse">
+                          <span>Active Event</span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                        </span>
+                      )}
                     </button>
                   );
                 })}

@@ -23,6 +23,7 @@ import { normalizeUnit, normalizeGatedCommunity } from '../utils/unitNormalizati
 import { normalizeName } from '../utils/nameNormalization';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
 import { ResidentLifecycleService, VerificationReport } from '../services/ResidentLifecycleService';
+import { classifyResidentRoleAssignments } from '../utils/governanceLifecycle';
 import LogCenter from './LogCenter';
 import ReleaseNotesModal from './ReleaseNotesModal';
 import { 
@@ -1769,22 +1770,37 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         dependencies.push(`Has active Event Registration(s)`);
       }
 
-      // D. Check roleAssignments or governanceAssignments
+      // D. Check roleAssignments & governanceAssignments using GEAS Lifecycle Classification (RTCO-010)
       const rolesSnap = await getDocs(collection(db, "roleAssignments"));
-      rolesSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.gmkId === res.gmkId || (data.email && data.email.toLowerCase().trim() === normEmail)) {
-          dependencies.push(`Role Assignment: "${data.role || data.position}"`);
-        }
+      const govSnap = await getDocs(collection(db, "governanceAssignments"));
+
+      const rawRoleDocs = [
+        ...rolesSnap.docs.map(d => ({ id: d.id, data: d.data() })),
+        ...govSnap.docs.map(d => ({ id: d.id, data: d.data() }))
+      ];
+      const rawCommittees = committeesSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+      const rawPrograms = programsSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+
+      const classifiedRoles = classifyResidentRoleAssignments(
+        { gmkId: res.gmkId, email: normEmail },
+        rawRoleDocs,
+        rawCommittees,
+        rawPrograms
+      );
+
+      // ONLY ACTIVE governance assignments block resident purge!
+      const activeBlockingRoles = classifiedRoles.filter(r => r.lifecycleStatus === 'ACTIVE');
+      const nonActiveRoles = classifiedRoles.filter(r => r.lifecycleStatus !== 'ACTIVE');
+
+      activeBlockingRoles.forEach(r => {
+        dependencies.push(`Active Governance/Role Assignment: "${r.position}${r.committeeNormalized ? ` — ${r.committeeNormalized}` : ''}"`);
       });
 
-      const govSnap = await getDocs(collection(db, "governanceAssignments"));
-      govSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.gmkId === res.gmkId || (data.email && data.email.toLowerCase().trim() === normEmail)) {
-          dependencies.push(`Governance Assignment: "${data.role || data.position}"`);
-        }
-      });
+      if (nonActiveRoles.length > 0) {
+        console.log(`[PURGE PRE-CHECK] Safely ignored ${nonActiveRoles.length} historical/orphaned/duplicate/revoked role assignment(s) for resident ${res.gmkId}:`,
+          nonActiveRoles.map(r => `• ${r.position} / ${r.committeeStored || 'N/A'} [Status: ${r.lifecycleStatus}] (${r.reason})`)
+        );
+      }
 
       if (dependencies.length > 0) {
         setErrorMsg(`PURGE BLOCKED BY GOVERNANCE: Resident ${res.fullName} cannot be purged due to active dependencies:\n` + dependencies.map(d => `• ${d}`).join('\n') + `\n\nPlease prune or reassign these dependencies before attempting to purge.`);
@@ -3551,7 +3567,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           Resident Administration Portal • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.2 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.3 (Release Notes)</button>
         </div>
       </footer>
 

@@ -368,6 +368,7 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
         email: normEmail,
         position: 'event_director',
         role: 'event_director',
+        status: 'ACTIVE',
         assignedBy: activeEmail,
         assignedAt: new Date().toISOString()
       };
@@ -516,6 +517,7 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
         position: 'committee_lead',
         role: 'committee_lead',
         committee: selectedCommittee,
+        status: 'ACTIVE',
         assignedBy: activeEmail,
         assignedAt: new Date().toISOString()
       };

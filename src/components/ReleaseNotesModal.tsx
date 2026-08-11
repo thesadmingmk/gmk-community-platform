@@ -19,6 +19,17 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.4.3",
+    title: "Governance Role Lifecycle & Mobile Event Registration UX Release (RTCO-010 & RTCO-024)",
+    releaseDate: "2026-08-11",
+    author: "Core Platform Team",
+    notes: [
+      "Resolved resident purge governance false-blocking issue (RTCO-010) by classifying role and committee assignments into ACTIVE vs HISTORICAL/ORPHANED/DUPLICATE/REVOKED lifecycle states.",
+      "Optimized Event Registration modal UX for mobile screens (RTCO-024) by converting Pricing Breakdown into a collapsible summary view with dynamic total fee counters.",
+      "Restructured registration form buttons to remain sticky at the bottom, ensuring Cancel and Confirm Registration actions are always visible and immediately accessible regardless of household size."
+    ]
+  },
+  {
     version: "v1.4.2",
     title: "Production Registration & Archived Resident Lifecycle Forensic Fix (RTCO-023)",
     releaseDate: "2026-08-10",

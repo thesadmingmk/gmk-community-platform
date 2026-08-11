@@ -709,7 +709,7 @@ export default function IdentityGateway() {
             </div>
             <div className="p-4 bg-white border border-stone-250 rounded-2xl flex flex-col items-center md:items-start text-center md:text-left space-y-1">
               <Compass className="w-6 h-6 text-[#d4af37]" />
-              <h4 className="text-xs font-bold text-stone-900 font-heading">Events Hub</h4>
+              <h4 className="text-xs font-bold text-stone-900 font-heading">GMK Events</h4>
               <p className="text-[11px] text-stone-600 font-medium">Direct registration for cultural programs</p>
             </div>
             <div className="p-4 bg-white border border-stone-250 rounded-2xl flex flex-col items-center md:items-start text-center md:text-left space-y-1">
@@ -1276,7 +1276,7 @@ export default function IdentityGateway() {
           GMK Community Platform • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.2 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.3 (Release Notes)</button>
         </div>
       </footer>
 

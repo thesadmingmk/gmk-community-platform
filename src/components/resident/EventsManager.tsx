@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth, useAuth } from '../../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
-import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft } from 'lucide-react';
+import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { createAuditLog } from '../../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from '../gmk/GEASConfirmationDialog';
 import { getEventRegistrationStatus, getRegistrationStatusLabel } from '../../utils/eventLifecycle';
@@ -33,6 +33,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   // Registration form selections
   const [checkedFamilyMembers, setCheckedFamilyMembers] = useState<Record<string, boolean>>({});
   const [externalCount, setExternalCount] = useState<number>(0);
+  const [isPricingExpanded, setIsPricingExpanded] = useState<boolean>(false);
 
   // Real-time calculated pricing state
   const [livePricing, setLivePricing] = useState<{
@@ -306,6 +307,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     setActiveEventForReg(evt);
     setErrorMsg(null);
     setSuccessMsg(null);
+    setIsPricingExpanded(false);
 
     const existing = registrations.find(r => r.eventId === evt.id);
     const initialChecked: Record<string, boolean> = {};
@@ -1377,224 +1379,256 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
       {/* REGISTRATION MODAL FORM */}
       {activeEventForReg && (
-        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-stone-220 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp">
+        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-stone-220 rounded-3xl max-w-md w-full shadow-2xl p-4 sm:p-6 relative my-auto max-h-[92vh] flex flex-col animate-scaleUp text-left overflow-hidden">
             <button
               onClick={() => {
                 setActiveEventForReg(null);
                 setLivePricing(null);
               }}
-              className="absolute right-4 top-4 text-stone-705 hover:text-stone-900 transition-colors cursor-pointer font-black"
+              className="absolute right-4 top-4 text-stone-705 hover:text-stone-900 transition-colors cursor-pointer font-black z-20"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="font-sans text-left">
+            <div className="font-sans text-left shrink-0 pr-6">
               <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Select Attendees</span>
               <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEventForReg.title}</h3>
-              <p className="text-stone-805 text-[11px] leading-relaxed mt-1 font-semibold">
+              <p className="text-stone-805 text-[11px] leading-relaxed mt-0.5 font-semibold">
                 Select Attendees from your household for this gathering. Count limits sync in real-time.
               </p>
             </div>
 
-            <form onSubmit={handleSaveRegistration} className="space-y-4">
+            <form onSubmit={handleSaveRegistration} className="flex-1 flex flex-col min-h-0 overflow-hidden mt-3">
               
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1 border border-stone-200 p-3 rounded-2xl bg-stone-50/50">
-                <span className="text-[9px] font-bold text-stone-850 uppercase tracking-widest block mb-2 font-heading text-left">Household Checklist</span>
-                
-                {/* Primary head checkbox */}
-                <div 
-                  onClick={() => handleCheckboxToggle("primary")}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer bg-white ${
-                    checkedFamilyMembers["primary"] 
-                      ? 'border-[#0f4c2a] bg-emerald-50/20' 
-                      : 'border-stone-200 hover:border-stone-300'
-                  }`}
-                >
-                  <div className="space-y-0.5 text-left">
-                    <span className="text-xs font-bold text-stone-850 block">{residentProfile.fullName}</span>
-                    <span className="text-[9px] uppercase font-bold text-emerald-800">Primary Resident Head</span>
+              <div className="flex-1 overflow-y-auto pr-1 space-y-3 pb-2">
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1 border border-stone-200 p-3 rounded-2xl bg-stone-50/50">
+                  <span className="text-[9px] font-bold text-stone-850 uppercase tracking-widest block mb-2 font-heading text-left">Household Checklist</span>
+                  
+                  {/* Primary head checkbox */}
+                  <div 
+                    onClick={() => handleCheckboxToggle("primary")}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer bg-white ${
+                      checkedFamilyMembers["primary"] 
+                        ? 'border-[#0f4c2a] bg-emerald-50/20' 
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    <div className="space-y-0.5 text-left">
+                      <span className="text-xs font-bold text-stone-850 block">{residentProfile.fullName}</span>
+                      <span className="text-[9px] uppercase font-bold text-emerald-800">Primary Resident Head</span>
+                    </div>
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                      checkedFamilyMembers["primary"] ? 'bg-[#0f4c2a] border-[#0f4c2a] text-white' : 'border-stone-300'
+                    }`}>
+                      {checkedFamilyMembers["primary"] && <Check className="w-3 h-3" />}
+                    </div>
                   </div>
-                  <div className={`w-4 h-4 rounded border flex items-center justify-center ${
-                    checkedFamilyMembers["primary"] ? 'bg-[#0f4c2a] border-[#0f4c2a] text-white' : 'border-stone-300'
-                  }`}>
-                    {checkedFamilyMembers["primary"] && <Check className="w-3 h-3" />}
-                  </div>
+
+                  {/* Sub-members check list */}
+                  {familyMembers.map((mem) => {
+                    const isChecked = !!checkedFamilyMembers[mem.id];
+                    const currentYear = new Date().getFullYear();
+                    const age = mem.yearOfBirth ? (currentYear - parseInt(mem.yearOfBirth)) : null;
+                    const displayAge = age !== null ? `, Age: ${age}` : '';
+
+                    return (
+                      <div 
+                        key={mem.id}
+                        onClick={() => handleCheckboxToggle(mem.id)}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer bg-white ${
+                          isChecked 
+                            ? 'border-[#0f4c2a] bg-emerald-50/20' 
+                            : 'border-stone-200 hover:border-stone-300'
+                        }`}
+                      >
+                        <div className="text-left space-y-0.5">
+                          <span className="text-xs font-bold text-stone-800 block">{mem.name}</span>
+                          <span className="text-[9px] capitalize text-stone-705 block font-bold">
+                            {mem.relationship}{displayAge}
+                          </span>
+                        </div>
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                          isChecked ? 'bg-[#0f4c2a] border-[#0f4c2a] text-white' : 'border-stone-300'
+                        }`}>
+                          {isChecked && <Check className="w-3 h-3" />}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* Sub-members check list */}
-                {familyMembers.map((mem) => {
-                  const isChecked = !!checkedFamilyMembers[mem.id];
-                  const currentYear = new Date().getFullYear();
-                  const age = mem.yearOfBirth ? (currentYear - parseInt(mem.yearOfBirth)) : null;
-                  const displayAge = age !== null ? `, Age: ${age}` : '';
+                {/* Guests input section */}
+                {activeEventForReg.pricing?.allowExternal && (
+                  <div className="p-3 border border-stone-200 rounded-2xl bg-amber-50/20 space-y-2 text-left">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-xs font-bold text-stone-850 block">Register Guests</span>
+                        <span className="text-[10px] text-stone-605 block font-bold">Rate: OMR {activeEventForReg.pricing.externalRate} per guest</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => handleExternalCountChange(externalCount - 1)}
+                          className="w-7 h-7 rounded-lg border border-stone-300 flex items-center justify-center font-bold text-stone-705 hover:bg-stone-50 cursor-pointer text-sm"
+                        >
+                          -
+                        </button>
+                        <span className="font-mono text-sm font-black w-6 text-center">{externalCount}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleExternalCountChange(externalCount + 1)}
+                          className="w-7 h-7 rounded-lg border border-stone-300 flex items-center justify-center font-bold text-stone-705 hover:bg-stone-50 cursor-pointer text-sm"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                  return (
-                    <div 
-                      key={mem.id}
-                      onClick={() => handleCheckboxToggle(mem.id)}
-                      className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer bg-white ${
-                        isChecked 
-                          ? 'border-[#0f4c2a] bg-emerald-50/20' 
-                          : 'border-stone-200 hover:border-stone-300'
-                      }`}
+                {/* Dynamic billing & pricing details summary dropdown card */}
+                {livePricing && (
+                  <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl overflow-hidden text-left text-stone-800 transition-all shadow-xs">
+                    {/* Accordion / Dropdown Toggle Header */}
+                    <button
+                      type="button"
+                      onClick={() => setIsPricingExpanded(prev => !prev)}
+                      className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-emerald-100/50 transition-colors cursor-pointer"
                     >
-                      <div className="text-left space-y-0.5">
-                        <span className="text-xs font-bold text-stone-800 block">{mem.name}</span>
-                        <span className="text-[9px] capitalize text-stone-705 block font-bold">
-                          {mem.relationship}{displayAge}
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] font-extrabold text-emerald-900 uppercase tracking-wider font-heading">
+                          Pricing Breakdown
+                        </span>
+                        <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-full capitalize border border-emerald-200/50">
+                          {livePricing.registrationType}
                         </span>
                       </div>
-                      <div className={`w-4 h-4 rounded border flex items-center justify-center ${
-                        isChecked ? 'bg-[#0f4c2a] border-[#0f4c2a] text-white' : 'border-stone-300'
-                      }`}>
-                        {isChecked && <Check className="w-3 h-3" />}
+
+                      <div className="flex items-center space-x-2">
+                        <div className="text-right">
+                          <span className="text-[8px] text-stone-500 font-bold block uppercase leading-none">Total</span>
+                          <span className="font-mono text-sm font-black text-[#0f4c2a] leading-tight">
+                            OMR {livePricing.totalAmount}
+                          </span>
+                        </div>
+                        <div className="p-1 rounded-lg bg-emerald-100/80 text-emerald-900 shrink-0">
+                          {isPricingExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    </button>
+
+                    {/* Expandable Breakdown Content */}
+                    {isPricingExpanded && (
+                      <div className="p-3.5 border-t border-emerald-200/60 bg-emerald-50/40 space-y-3 animate-fadeIn text-xs">
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between">
+                            <span className="text-stone-600 font-bold">Registration Type:</span>
+                            <span className="font-bold text-emerald-900 capitalize">{livePricing.registrationType}</span>
+                          </div>
+                          
+                          {/* Included Members */}
+                          {livePricing.includedMembers && livePricing.includedMembers.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Included Household Members</span>
+                              <div className="grid grid-cols-1 gap-1 pl-1">
+                                {livePricing.includedMembers.map((m, idx) => (
+                                  <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
+                                    <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
+                                    {m}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Parents */}
+                          {livePricing.parentMembers && livePricing.parentMembers.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5})</span>
+                              <div className="grid grid-cols-1 gap-1 pl-1">
+                                {livePricing.parentMembers.map((m, idx) => (
+                                  <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
+                                    <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
+                                    {m} <span className="text-[9px] font-bold text-stone-700 bg-amber-50 border border-amber-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.parentRate || 5}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Others / Maids */}
+                          {livePricing.otherMembers && livePricing.otherMembers.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Others / Maids ({livePricing.othersCount} × OMR {livePricing.otherRate || 5})</span>
+                              <div className="grid grid-cols-1 gap-1 pl-1">
+                                {livePricing.otherMembers.map((m, idx) => (
+                                  <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
+                                    <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
+                                    {m} <span className="text-[9px] font-bold text-stone-700 bg-blue-50 border border-blue-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.otherRate || 5}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Guests */}
+                          {externalCount > 0 && (
+                            <div className="flex justify-between items-center text-[11px] text-stone-700 pt-1">
+                              <span className="font-medium text-stone-600">Guests:</span>
+                              <span className="font-mono font-bold">{externalCount} × OMR {livePricing.externalRate || 10}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Fee Calculation Lines */}
+                        <div className="border-t border-dashed border-emerald-200 pt-2.5 space-y-1.5 font-semibold text-xs">
+                          <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                            <span>Base Registration ({livePricing.registrationType === 'individual' ? 'Individual' : livePricing.registrationType === 'couple' ? 'Couple' : 'Family'}):</span>
+                            <span className="font-mono font-bold">OMR {livePricing.baseRate || 0}</span>
+                          </div>
+
+                          {(livePricing.parentsCount || 0) > 0 && (
+                            <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                              <span>Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5}):</span>
+                              <span className="font-mono font-bold">OMR {livePricing.parentsSubtotal || 0}</span>
+                            </div>
+                          )}
+
+                          {(livePricing.othersCount || 0) > 0 && (
+                            <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                              <span>Others ({livePricing.othersCount} × OMR {livePricing.otherRate || 5}):</span>
+                              <span className="font-mono font-bold">OMR {livePricing.othersSubtotal || 0}</span>
+                            </div>
+                          )}
+
+                          {externalCount > 0 && (
+                            <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                              <span>Guests ({externalCount} × OMR {livePricing.externalRate || 10}):</span>
+                              <span className="font-mono font-bold">OMR {livePricing.externalSubtotal || 0}</span>
+                            </div>
+                          )}
+
+                          {(livePricing.breakdown?.freeChildren || 0) > 0 && (
+                            <div className="flex justify-between text-stone-700 font-medium text-[11px]">
+                              <span>Children below {activeEventForReg?.pricing?.freeChildAge ?? 5} years:</span>
+                              <span className="text-emerald-700 font-extrabold uppercase">FREE</span>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between items-center text-xs font-black border-t border-dashed border-emerald-200 pt-2 text-[#0f4c2a]">
+                            <span>TOTAL:</span>
+                            <span className="font-mono text-base font-black">OMR {livePricing.totalAmount}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* Guests input section */}
-              {activeEventForReg.pricing?.allowExternal && (
-                <div className="p-3 border border-stone-200 rounded-2xl bg-amber-50/20 space-y-2 text-left">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <span className="text-xs font-bold text-stone-850 block">Register Guests</span>
-                      <span className="text-[10px] text-stone-605 block font-bold">Rate: OMR {activeEventForReg.pricing.externalRate} per guest</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        type="button"
-                        onClick={() => handleExternalCountChange(externalCount - 1)}
-                        className="w-7 h-7 rounded-lg border border-stone-300 flex items-center justify-center font-bold text-stone-705 hover:bg-stone-50 cursor-pointer text-sm"
-                      >
-                        -
-                      </button>
-                      <span className="font-mono text-sm font-black w-6 text-center">{externalCount}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleExternalCountChange(externalCount + 1)}
-                        className="w-7 h-7 rounded-lg border border-stone-300 flex items-center justify-center font-bold text-stone-705 hover:bg-stone-50 cursor-pointer text-sm"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Dynamic billing & pricing details summary box */}
-              {livePricing && (
-                <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl p-4 text-left space-y-3 animate-fadeIn text-stone-800">
-                  <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-widest block font-heading">
-                    Pricing Breakdown
-                  </span>
-                  
-                  <div className="space-y-1.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-stone-600 font-bold">Registration Type:</span>
-                      <span className="font-bold text-emerald-900 capitalize">{livePricing.registrationType}</span>
-                    </div>
-                    
-                    {/* Included Members */}
-                    {livePricing.includedMembers && livePricing.includedMembers.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Included Household Members</span>
-                        <div className="grid grid-cols-1 gap-1 pl-1">
-                          {livePricing.includedMembers.map((m, idx) => (
-                            <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
-                              <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
-                              {m}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Parents */}
-                    {livePricing.parentMembers && livePricing.parentMembers.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5})</span>
-                        <div className="grid grid-cols-1 gap-1 pl-1">
-                          {livePricing.parentMembers.map((m, idx) => (
-                            <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
-                              <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
-                              {m} <span className="text-[9px] font-bold text-stone-700 bg-amber-50 border border-amber-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.parentRate || 5}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Others / Maids */}
-                    {livePricing.otherMembers && livePricing.otherMembers.length > 0 && (
-                      <div className="space-y-1">
-                        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block mt-1">Others / Maids ({livePricing.othersCount} × OMR {livePricing.otherRate || 5})</span>
-                        <div className="grid grid-cols-1 gap-1 pl-1">
-                          {livePricing.otherMembers.map((m, idx) => (
-                            <div key={idx} className="flex items-center text-[11px] text-stone-700 font-medium">
-                              <span className="text-emerald-700 mr-1.5 font-bold">✓</span>
-                              {m} <span className="text-[9px] font-bold text-stone-700 bg-blue-50 border border-blue-200/60 px-1.5 py-0.25 rounded ml-1">OMR {livePricing.otherRate || 5}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Guests */}
-                    {externalCount > 0 && (
-                      <div className="flex justify-between items-center text-[11px] text-stone-700 pt-1">
-                        <span className="font-medium text-stone-600">Guests:</span>
-                        <span className="font-mono font-bold">{externalCount} × OMR {livePricing.externalRate || 10}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Fee Calculation Lines */}
-                  <div className="border-t border-dashed border-emerald-200 pt-2.5 space-y-1.5 text-xs font-semibold">
-                    <div className="flex justify-between text-stone-700 font-medium text-[11px]">
-                      <span>Base Registration ({livePricing.registrationType === 'individual' ? 'Individual' : livePricing.registrationType === 'couple' ? 'Couple' : 'Family'}):</span>
-                      <span className="font-mono font-bold">OMR {livePricing.baseRate || 0}</span>
-                    </div>
-
-                    {(livePricing.parentsCount || 0) > 0 && (
-                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
-                        <span>Parents ({livePricing.parentsCount} × OMR {livePricing.parentRate || 5}):</span>
-                        <span className="font-mono font-bold">OMR {livePricing.parentsSubtotal || 0}</span>
-                      </div>
-                    )}
-
-                    {(livePricing.othersCount || 0) > 0 && (
-                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
-                        <span>Others ({livePricing.othersCount} × OMR {livePricing.otherRate || 5}):</span>
-                        <span className="font-mono font-bold">OMR {livePricing.othersSubtotal || 0}</span>
-                      </div>
-                    )}
-
-                    {externalCount > 0 && (
-                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
-                        <span>Guests ({externalCount} × OMR {livePricing.externalRate || 10}):</span>
-                        <span className="font-mono font-bold">OMR {livePricing.externalSubtotal || 0}</span>
-                      </div>
-                    )}
-
-                    {(livePricing.breakdown?.freeChildren || 0) > 0 && (
-                      <div className="flex justify-between text-stone-700 font-medium text-[11px]">
-                        <span>Children below {activeEventForReg?.pricing?.freeChildAge ?? 5} years:</span>
-                        <span className="text-emerald-700 font-extrabold uppercase">FREE</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between items-center text-xs font-black border-t border-dashed border-emerald-200 pt-2 text-[#0f4c2a] text-sm">
-                      <span>TOTAL:</span>
-                      <span className="font-mono text-base font-black">OMR {livePricing.totalAmount}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-2 flex space-x-2">
+              {/* Sticky Footer with Action Buttons */}
+              <div className="pt-3 border-t border-stone-200 flex space-x-2 shrink-0 bg-white mt-auto z-10">
                 <button
                   type="button"
                   onClick={() => {

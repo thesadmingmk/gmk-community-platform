@@ -3306,6 +3306,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
             position: 'program_coordinator',
             role: 'program_coordinator',
             eventId: selectedEventId,
+            status: 'ACTIVE',
             assignedBy: profile?.email || 'event_director',
             assignedAt: new Date().toISOString()
           });
@@ -3737,6 +3738,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           position: 'program_coordinator',
           role: 'program_coordinator',
           eventId: selectedEventId,
+          status: 'ACTIVE',
           assignedBy: profile?.email || 'event_director',
           assignedAt: new Date().toISOString()
         });
@@ -5346,7 +5348,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                       <div>
                         <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Section 4: Payment Transfer Information</h4>
                         <p className="text-[10px] text-stone-500 font-bold mt-0.5">
-                          Specify bank transfer and mobile payment accounts displayed to registrants in the Events Hub.
+                          Specify bank transfer and mobile payment accounts displayed to registrants in GMK Events.
                         </p>
                       </div>
                       <button

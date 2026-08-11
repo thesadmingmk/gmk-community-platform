@@ -20,6 +20,7 @@ import { NotificationService } from '../services/NotificationService';
 import { sanitizeFirestorePayload } from '../utils/sanitize';
 import { normalizeUnit, normalizeGatedCommunity } from '../utils/unitNormalization';
 import { validateGovernanceAssignment } from '../utils/governanceExclusivity';
+import { classifyResidentRoleAssignments, normalizeCommitteeName, ClassifiedRoleDoc } from '../utils/governanceLifecycle';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
 import { ResidentLifecycleService, VerificationReport } from '../services/ResidentLifecycleService';
 import ReleaseNotesModal from './ReleaseNotesModal';
@@ -280,19 +281,42 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
         }
       });
 
-      // 7. Look for references in Role Assignments
-      const referencedInRoles: any[] = [];
+      // 7. Look for references in Role & Governance Assignments with GEAS Lifecycle Classification
+      const referencedInRoles: ClassifiedRoleDoc[] = [];
       const rolesSnap = await getDocs(collection(db, "roleAssignments"));
-      rolesSnap.forEach(d => {
-        const data = d.data();
-        const rEmail = (data.email || '').toLowerCase().trim();
-        const rGmkId = (data.gmkId || '').toUpperCase().trim();
-        const rName = (data.fullName || data.name || '').toLowerCase().trim();
+      const govSnap = await getDocs(collection(db, "governanceAssignments"));
 
-        if (matchesFootprint(rGmkId, rEmail, rName)) {
-          referencedInRoles.push({ docId: d.id, position: data.position || data.role, email: rEmail });
-        }
+      const allRoleDocs = [
+        ...rolesSnap.docs.map(d => ({ id: d.id, data: d.data() })),
+        ...govSnap.docs.map(d => ({ id: d.id, data: d.data() }))
+      ];
+      const allCommittees = commSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+      const allPrograms = progSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+
+      const footprintRoleDocs = allRoleDocs.filter(d => {
+        const rEmail = (d.data.email || '').toLowerCase().trim();
+        const rGmkId = (d.data.gmkId || '').toUpperCase().trim();
+        const rName = (d.data.fullName || d.data.name || '').toLowerCase().trim();
+        return matchesFootprint(rGmkId, rEmail, rName);
       });
+
+      const targetResIdents = matchingResidents.length > 0
+        ? matchingResidents.map(r => ({ gmkId: r.gmkId, email: r.email }))
+        : Array.from(targetEmails).map(e => ({ email: e }));
+
+      for (const resIdent of targetResIdents) {
+        const classified = classifyResidentRoleAssignments(
+          resIdent,
+          footprintRoleDocs,
+          allCommittees,
+          allPrograms
+        );
+        classified.forEach(item => {
+          if (!referencedInRoles.some(r => r.docId === item.docId)) {
+            referencedInRoles.push(item);
+          }
+        });
+      }
 
       // Identify anomalies and orphans by aligning on email
       const emailMap = new Map<string, { resident?: any; user?: any; pending?: any }>();
@@ -1498,6 +1522,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
           email: normEmail,
           position: roleKey,
           role: roleKey, // backward compatibility
+          status: 'ACTIVE',
           assignedBy: activeEmail,
           assignedAt: new Date().toISOString()
         };
@@ -1643,22 +1668,37 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
         dependencies.push(`Has active Event Registration(s)`);
       }
 
-      // D. Check roleAssignments or governanceAssignments
+      // D. Check roleAssignments & governanceAssignments using GEAS Lifecycle Classification (RTCO-010)
       const rolesSnap = await getDocs(collection(db, "roleAssignments"));
-      rolesSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.gmkId === activeRes.gmkId || (data.email && data.email.toLowerCase().trim() === normEmail)) {
-          dependencies.push(`Role Assignment: "${data.role || data.position}"`);
-        }
+      const govSnap = await getDocs(collection(db, "governanceAssignments"));
+
+      const rawRoleDocs = [
+        ...rolesSnap.docs.map(d => ({ id: d.id, data: d.data() })),
+        ...govSnap.docs.map(d => ({ id: d.id, data: d.data() }))
+      ];
+      const rawCommittees = committeesSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+      const rawPrograms = programsSnap.docs.map(d => ({ id: d.id, data: d.data() }));
+
+      const classifiedRoles = classifyResidentRoleAssignments(
+        { gmkId: activeRes.gmkId, email: normEmail },
+        rawRoleDocs,
+        rawCommittees,
+        rawPrograms
+      );
+
+      // ONLY ACTIVE governance assignments block resident purge!
+      const activeBlockingRoles = classifiedRoles.filter(r => r.lifecycleStatus === 'ACTIVE');
+      const nonActiveRoles = classifiedRoles.filter(r => r.lifecycleStatus !== 'ACTIVE');
+
+      activeBlockingRoles.forEach(r => {
+        dependencies.push(`Active Governance/Role Assignment: "${r.position}${r.committeeNormalized ? ` — ${r.committeeNormalized}` : ''}"`);
       });
 
-      const govSnap = await getDocs(collection(db, "governanceAssignments"));
-      govSnap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.gmkId === activeRes.gmkId || (data.email && data.email.toLowerCase().trim() === normEmail)) {
-          dependencies.push(`Governance Assignment: "${data.role || data.position}"`);
-        }
-      });
+      if (nonActiveRoles.length > 0) {
+        console.log(`[PURGE PRE-CHECK] Safely ignored ${nonActiveRoles.length} historical/orphaned/duplicate/revoked role assignment(s) for resident ${activeRes.gmkId}:`,
+          nonActiveRoles.map(r => `• ${r.position} / ${r.committeeStored || 'N/A'} [Status: ${r.lifecycleStatus}] (${r.reason})`)
+        );
+      }
 
       if (dependencies.length > 0) {
         setErrorMsg(`PURGE BLOCKED BY GOVERNANCE: Resident ${activeRes.fullName} cannot be purged due to active dependencies:\n` + dependencies.map(d => `• ${d}`).join('\n') + `\n\nPlease prune or reassign these dependencies before attempting to purge.`);
@@ -2730,11 +2770,24 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
                                 [Event RSVP] Referenced in Event {item.eventId} (Email: {item.email}, Name: {item.name}).
                               </div>
                             ))}
-                            {diagResult.referencedInRoles.map((item: any, idx: number) => (
-                              <div key={`ref-role-${idx}`} className="text-purple-700">
-                                [Role Assignment] Active as position '{item.position}' (Email: {item.email}).
-                              </div>
-                            ))}
+                              {diagResult.referencedInRoles.map((item: ClassifiedRoleDoc, idx: number) => {
+                                let badgeStyle = "text-stone-700 bg-stone-50 border-stone-200";
+                                if (item.lifecycleStatus === 'ACTIVE') badgeStyle = "text-[#0f4c2a] bg-emerald-50 border-emerald-200 font-bold";
+                                else if (item.lifecycleStatus === 'HISTORICAL') badgeStyle = "text-stone-700 bg-stone-100 border-stone-250";
+                                else if (item.lifecycleStatus === 'ORPHANED') badgeStyle = "text-orange-800 bg-orange-50 border-orange-200";
+                                else if (item.lifecycleStatus === 'DUPLICATE') badgeStyle = "text-purple-800 bg-purple-50 border-purple-200";
+                                else if (item.lifecycleStatus === 'REVOKED') badgeStyle = "text-red-800 bg-red-50 border-red-200";
+
+                                return (
+                                  <div key={`ref-role-${idx}`} className={`p-2 rounded-xl border my-1 text-[11px] font-sans ${badgeStyle}`}>
+                                    <div className="flex items-center justify-between font-bold">
+                                      <span>[{item.lifecycleStatus}] Position: <strong className="font-extrabold">{item.position}</strong> {item.committeeStored ? `(Committee: ${item.committeeStored})` : ''}</span>
+                                      <span className="font-mono text-[9px] opacity-70">{item.docId}</span>
+                                    </div>
+                                    <div className="text-[10px] opacity-80 font-normal mt-0.5">{item.reason}</div>
+                                  </div>
+                                );
+                              })}
                           </>
                         )}
                       </div>
@@ -2765,7 +2818,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
             GMK Governance Console • Developed by Elite IT
           </div>
           <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.2 (Release Notes)</button>
+            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.3 (Release Notes)</button>
           </div>
         </div>
       </div>

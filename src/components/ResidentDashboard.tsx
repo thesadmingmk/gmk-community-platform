@@ -564,7 +564,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                             onClick={() => setActiveTab('events')}
                             className="text-[10px] uppercase tracking-wider text-[#0f4c2a] hover:underline font-extrabold cursor-pointer animate-pulse-slow"
                           >
-                            Manage in Events Hub ➜
+                            Manage in GMK Events ➜
                           </button>
                         </div>
                       </div>
