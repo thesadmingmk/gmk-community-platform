@@ -300,16 +300,31 @@ export default function IdentityGateway() {
     }
 
     setLoading(true);
-    try {
-      // Call secure Cloud Function to generate reset link and enqueue branded notification
-      const requestPasswordResetFn = httpsCallable(functions, 'requestPasswordReset');
-      await requestPasswordResetFn({ email: sanitizedEmail });
+    console.log("[RTCO-PASSWORD-RESET] START");
+    console.log(`[RTCO-PASSWORD-RESET] EMAIL: ${sanitizedEmail}`);
+    console.log(`[RTCO-PASSWORD-RESET] AUTH PROJECT: ${firebaseConfig.projectId}`);
 
-      setAuthSuccess("If an account exists for this email address, a password reset email has been sent. Please check your inbox and spam folder.");
+    try {
+      await sendPasswordResetEmail(auth, sanitizedEmail);
+      console.log("[RTCO-PASSWORD-RESET] SUCCESS");
+      setAuthSuccess("Password reset email sent. Please check your inbox and Spam/Junk folder.");
     } catch (err: any) {
+      console.log("[RTCO-PASSWORD-RESET] FAILED");
+      console.log(`[RTCO-PASSWORD-RESET] ERROR CODE: ${err.code}`);
+      console.log(`[RTCO-PASSWORD-RESET] ERROR MESSAGE: ${err.message}`);
       console.error("❌ Forgot Password error:", err);
-      // Always show the same generic confirmation message to prevent account enumeration
-      setAuthSuccess("If an account exists for this email address, a password reset email has been sent. Please check your inbox and spam folder.");
+
+      let userFacingMessage = "Failed to send password reset email. Please try again.";
+      if (err.code === "auth/user-not-found") {
+        userFacingMessage = "No account was found with this email address.";
+      } else if (err.code === "auth/invalid-email") {
+        userFacingMessage = "Please enter a valid email address.";
+      } else if (err.code === "auth/too-many-requests") {
+        userFacingMessage = "Too many reset attempts. Please try again later.";
+      } else if (err.message) {
+        userFacingMessage = err.message;
+      }
+      setErrorMsg(userFacingMessage);
     } finally {
       setLoading(false);
     }
@@ -957,7 +972,7 @@ export default function IdentityGateway() {
                       {unitType === 'Villa' && "Villa Number"}
                       {unitType === 'Townhouse' && "Townhouse Number"}
                     </label>
-
+                    
                     {unitType === 'Apartment' ? (
                       <div className="flex items-center space-x-2">
                         <div className="relative flex-1">

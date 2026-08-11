@@ -52,6 +52,7 @@ interface GMKButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   onClick?: any;
   type?: any;
   disabled?: boolean;
+  title?: string;
 }
 export function GMKButton({ 
   variant = 'primary', 

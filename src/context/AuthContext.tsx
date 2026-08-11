@@ -74,12 +74,38 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [error, setError] = useState<string | null>(null);  
 
   const loadProfile = async (firebaseUser: User) => {
-    const normalizedEmail = firebaseUser.email?.toLowerCase().trim();
+    const normalizedEmail = firebaseUser.email?.toLowerCase().trim() || "";
     const userDocRef = doc(db, "users", firebaseUser.uid);
 
+    console.log("[RTCO-CONNECTION] PROFILE READ START", firebaseUser.uid);
+    console.log("[RTCO-TRANSLOG] OPERATION: loadProfile");
+    console.log(`[RTCO-TRANSLOG] PATH: users/${firebaseUser.uid}`);
+    console.log(`[RTCO-TRANSLOG] AUTH UID: ${firebaseUser.uid}`);
+    console.log(`[RTCO-TRANSLOG] EMAIL: ${normalizedEmail}`);
+    console.log(`[RTCO-TRANSLOG] EMAIL VERIFIED: ${firebaseUser.emailVerified}`);
+
+    // Pre-flight guard: Verify auth session is still valid for this specific user UID
+    if (!auth.currentUser || auth.currentUser.uid !== firebaseUser.uid) {
+      console.log("[RTCO-CONNECTION] AUTH TRANSITION IGNORED", {
+        reason: "USER_SIGNED_OUT_DURING_PROFILE_LOAD",
+        uid: firebaseUser.uid,
+        emailVerified: firebaseUser.emailVerified
+      });
+      return;
+    }
+
     try {
-      console.log(`🔍 Direct Firestore lookup on path: users/${firebaseUser.uid}`);
-      const userDocSnap = await getDoc(userDocRef);
+      console.log(`[RTCO-TRANSLOG] OPERATION: getDoc(users/${firebaseUser.uid})`);
+      let userDocSnap;
+      try {
+        userDocSnap = await getDoc(userDocRef);
+        console.log(`[RTCO-TRANSLOG] RESULT: SUCCESS (getDoc users/${firebaseUser.uid})`);
+      } catch (docErr: any) {
+        console.error(`[RTCO-TRANSLOG] RESULT: FAILED (getDoc users/${firebaseUser.uid})`);
+        console.error(`[RTCO-TRANSLOG] ERROR CODE: ${docErr.code}`);
+        console.error(`[RTCO-TRANSLOG] ERROR MESSAGE: ${docErr.message}`);
+        throw docErr;
+      }
       let userProfile: UserProfile | null = null;
 
       if (userDocSnap.exists()) {
@@ -134,10 +160,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             isActive: false,
             createdAt: new Date().toISOString()
           };
-          await setDoc(userDocRef, defaultResidentPayload);
+          try {
+            console.log(`[RTCO-TRANSLOG] OPERATION: setDoc(users/${firebaseUser.uid}) default payload`);
+            await setDoc(userDocRef, defaultResidentPayload);
+            console.log(`[RTCO-TRANSLOG] RESULT: SUCCESS (setDoc default payload)`);
+          } catch (setErr: any) {
+            console.error(`[RTCO-TRANSLOG] RESULT: FAILED (setDoc default payload)`);
+            console.error(`[RTCO-TRANSLOG] ERROR CODE: ${setErr.code}`);
+            console.error(`[RTCO-TRANSLOG] ERROR MESSAGE: ${setErr.message}`);
+            throw setErr;
+          }
           userProfile = defaultResidentPayload;
         }
       }
+
+      console.log(`[RTCO-TRANSLOG] USER ROLES: ${JSON.stringify(userProfile?.roles || [])}`);
 
       // POLYMORPHIC USER AUTHENTICATION HIERARCHY
       if (normalizedEmail) {
@@ -145,8 +182,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const positions: string[] = [];
         try {
           // 1. Query governanceAssignments collection
+          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
+          console.log(`[RTCO-CONNECTION] PATH: governanceAssignments where email == ${normalizedEmail}`);
+          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
           const govQuery = query(collection(db, "governanceAssignments"), where("email", "==", normalizedEmail));
           const govSnap = await getDocs(govQuery);
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (governanceAssignments)`);
           govSnap.forEach((govDoc) => {
             const data = govDoc.data();
             if (data) {
@@ -160,8 +201,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           });
 
           // 2. Query legacy roleAssignments for perfect backward-compatible fallback
+          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
+          console.log(`[RTCO-CONNECTION] PATH: roleAssignments where email == ${normalizedEmail}`);
+          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
           const rolesQuery = query(collection(db, "roleAssignments"), where("email", "==", normalizedEmail));
           const rolesSnap = await getDocs(rolesQuery);
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (roleAssignments)`);
           rolesSnap.forEach((roleDoc) => {
             const data = roleDoc.data();
             if (data) {
@@ -174,6 +219,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
           });
         } catch (err: any) {
+          console.error(`[RTCO-CONNECTION] RESULT: FAILED`);
+          console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
+          console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
           console.warn("⚠️ Non-blocking warning: governance role/position query failed", err.message);
         }
 
@@ -181,23 +229,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         let hasResidentDoc = false;
         let residentData: any = null;
         try {
+          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
+          console.log(`[RTCO-CONNECTION] PATH: residents where email == ${normalizedEmail}`);
+          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
           const resQuery = query(collection(db, "residents"), where("email", "==", normalizedEmail));
           const resSnap = await getDocs(resQuery);
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (residents)`);
           hasResidentDoc = !resSnap.empty;
           if (hasResidentDoc) {
             residentData = resSnap.docs[0].data();
           }
         } catch (err: any) {
+          console.error(`[RTCO-CONNECTION] RESULT: FAILED`);
+          console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
+          console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
           console.warn("⚠️ Non-blocking warning: residents query failed", err.message);
         }
 
         // Check if there is a pending registration
         let isPending = false;
         try {
+          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
+          console.log(`[RTCO-CONNECTION] PATH: pending_registrations where email == ${normalizedEmail}`);
+          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
           const pendingQuery = query(collection(db, "pending_registrations"), where("email", "==", normalizedEmail));
           const pendingSnap = await getDocs(pendingQuery);
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (pending_registrations)`);
           isPending = !pendingSnap.empty;
         } catch (err: any) {
+          console.error(`[RTCO-CONNECTION] RESULT: FAILED`);
+          console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
+          console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
           console.warn("⚠️ Non-blocking warning: pending_registrations query failed", err.message);
         }
 
@@ -250,11 +312,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       }
 
+      // Post-load guard: verify auth session is still valid for this UID before committing profile
+      if (!auth.currentUser || auth.currentUser.uid !== firebaseUser.uid) {
+        console.log("[RTCO-CONNECTION] AUTH TRANSITION IGNORED", {
+          reason: "USER_SIGNED_OUT_DURING_PROFILE_LOAD",
+          uid: firebaseUser.uid,
+          emailVerified: firebaseUser.emailVerified
+        });
+        setProfile(null);
+        return;
+      }
+
+      console.log("[RTCO-CONNECTION] PROFILE READ SUCCESS", firebaseUser.uid);
       setProfile(userProfile);
       if (userProfile && (userProfile.roles.includes("super_admin") || userProfile.roles.includes("admin"))) {
         seedDefaultTemplates();
       }
     } catch (err: any) {
+      const activeUid = auth.currentUser?.uid;
+      const isSignedOutOrChanged = !activeUid || activeUid !== firebaseUser.uid;
+      const isPermissionDeniedOnUnverifiedOrSignedOut =
+        (err.code === "permission-denied" || err.code === "permission_denied") &&
+        (!firebaseUser.emailVerified || isSignedOutOrChanged);
+
+      if (isSignedOutOrChanged || isPermissionDeniedOnUnverifiedOrSignedOut) {
+        console.log("[RTCO-CONNECTION] AUTH TRANSITION IGNORED", {
+          reason: "USER_SIGNED_OUT_DURING_PROFILE_LOAD",
+          uid: firebaseUser.uid,
+          emailVerified: firebaseUser.emailVerified,
+          errorCode: err.code
+        });
+        console.log("[RTCO-CONNECTION] PROFILE READ FAILED (IGNORED AUTH TRANSITION)");
+        setProfile(null);
+        return;
+      }
+
+      console.log("[RTCO-CONNECTION] PROFILE READ FAILED", firebaseUser.uid, err);
+      console.error("[RTCO-TRANSLOG] RESULT: FAILED");
+      console.error(`[RTCO-TRANSLOG] ERROR CODE: ${err.code}`);
+      console.error(`[RTCO-TRANSLOG] ERROR MESSAGE: ${err.message}`);
       console.error("❌ CRITICAL DATABASE TRANS-LOG EXCEPTION:", err);
       console.error(`Error Code: ${err.code} | Message string: ${err.message}`);
       setError(`${err.code}: ${err.message}`);
@@ -277,6 +373,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(null);
       
       if (firebaseUser) {
+        console.log("[RTCO-CONNECTION] AUTH STATE READY", firebaseUser.uid);
         console.log("🔑 Authentication event detected. User email:", firebaseUser.email);
         setUser(firebaseUser);
         await loadProfile(firebaseUser);

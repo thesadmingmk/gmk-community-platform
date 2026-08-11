@@ -40,7 +40,8 @@ import {
   MapPin,
   Clock,
   X,
-  Check
+  Check,
+  Edit
 } from 'lucide-react';
 
 export default function ResidentDashboard({ activeEmail }: { activeEmail: string }) {
@@ -581,12 +582,16 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                 <Users className="w-4 h-4 text-[#d4af37]" />
                 <span>My Family Summary</span>
               </h4>
-              <button
+              <GMKButton
+                variant="primary"
+                size="md"
                 onClick={() => { setForceEditingOnboarding(true); }}
-                className="text-[#0f4c2a] hover:underline text-[10px] font-bold uppercase tracking-wider block cursor-pointer transition-colors"
+                className="flex items-center space-x-2 font-bold shadow-sm px-4 py-2 text-xs rounded-xl"
+                title="Edit Family & Household Profile"
               >
-                Manage Family & Household ➜
-              </button>
+                <Edit className="w-3.5 h-3.5 text-[#d4af37]" />
+                <span>Edit</span>
+              </GMKButton>
             </div>
 
             <div className="flex flex-wrap gap-4">
