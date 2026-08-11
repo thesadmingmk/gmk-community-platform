@@ -7,6 +7,7 @@ import SuperAdminDashboard from './components/SuperAdminDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import ResidentDashboard from './components/ResidentDashboard';
 import { GEASConfirmationProvider } from './components/gmk/GEASConfirmationDialog';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { RefreshCw, AlertTriangle, UserCheck, Clock, Mail } from 'lucide-react';
 
 export default function App() {
@@ -96,7 +97,12 @@ export default function App() {
   );
 
   if (!user || isActivationFlow) {
-    return <IdentityGateway />;
+    return (
+      <>
+        <IdentityGateway />
+        <PWAInstallPrompt />
+      </>
+    );
   }
 
   // System admin override check
@@ -151,6 +157,7 @@ export default function App() {
       <GEASConfirmationProvider>
         <div className="bg-[#FFFDF6] min-h-screen w-full text-stone-800">
           <SuperAdminDashboard activeEmail={profile?.email || user.email || ''} />
+          <PWAInstallPrompt />
         </div>
       </GEASConfirmationProvider>
     );
@@ -161,6 +168,7 @@ export default function App() {
     <GEASConfirmationProvider>
       <div className="bg-[#FFFDF6] min-h-screen w-full">
         <ResidentDashboard activeEmail={profile?.email || user.email || ''} />
+        <PWAInstallPrompt />
       </div>
     </GEASConfirmationProvider>
   );

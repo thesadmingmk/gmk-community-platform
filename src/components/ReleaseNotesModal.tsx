@@ -19,6 +19,18 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.4.4",
+    title: "Emergency Registration Cancellation Containment & Decoupled Cleanup Release (RTCO-033)",
+    releaseDate: "2026-08-11",
+    author: "Core Platform Team",
+    notes: [
+      "Decoupled primary event registration cancellation from secondary collection cleanup operations (RTCO-033).",
+      "Ensured resident registration cancellation completes reliably upon primary registration document deletion.",
+      "Isolated attendance, food voucher, and certificate cleanups into independent, non-blocking execution blocks.",
+      "Upgraded Service Worker cache version to ensure immediate delivery of updated client bundles."
+    ]
+  },
+  {
     version: "v1.4.3",
     title: "Governance Role Lifecycle & Mobile Event Registration UX Release (RTCO-010 & RTCO-024)",
     releaseDate: "2026-08-11",

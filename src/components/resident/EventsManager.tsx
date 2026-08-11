@@ -492,6 +492,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         primaryMemberEmail: residentEmail,
         participants: participantsList,
         totalParticipants: participantsList.length + externalCount,
+        mealCount: { 'standard': participantsList.length + externalCount },
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         registrationType: pricingResult.registrationType,
@@ -543,36 +544,21 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         updatedAt: new Date().toISOString()
       };
 
-      const foodPayload = {
-        id: `food_${residentGmkId}_${activeEventForReg.id}`,
-        eventId: activeEventForReg.id,
-        uid: auth.currentUser?.uid || currentUid,
-        gmkId: residentGmkId,
-        email: auth.currentUser?.email || residentEmail,
-        fullName: residentProfile.fullName,
-        mealCouponStatus: 'issued',
-        mealCount: { 'standard': participantsList.length + externalCount },
-        createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
       // Check current Firestore existence
       const regDocRef = doc(db, "event_registrations", regId);
       const attDocRef = doc(db, "eventAttendance", attPayload.id);
-      const foodDocRef = doc(db, "eventFood", foodPayload.id);
 
-      let regSnap, attSnap, foodSnap;
+      let regSnap, attSnap;
       try {
-        [regSnap, attSnap, foodSnap] = await Promise.all([
+        [regSnap, attSnap] = await Promise.all([
           getDoc(regDocRef),
-          getDoc(attDocRef),
-          getDoc(foodDocRef)
+          getDoc(attDocRef)
         ]);
       } catch (checkErr: any) {
         console.error("[RTCO-024L FAILURE]", {
           step: "STEP 02 (PRE-CHECK DOCS)",
           operation: "READ",
-          path: `event_registrations/${regId} | eventAttendance/${attPayload.id} | eventFood/${foodPayload.id}`,
+          path: `event_registrations/${regId} | eventAttendance/${attPayload.id}`,
           errorCode: checkErr?.code,
           errorMessage: checkErr?.message,
           errorName: checkErr?.name
@@ -582,11 +568,9 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
       const registrationExists = regSnap.exists();
       const attendanceExists = attSnap.exists();
-      const foodExists = foodSnap.exists();
 
       const regOp = registrationExists ? "UPDATE" : "CREATE";
       const attOp = attendanceExists ? "UPDATE" : "CREATE";
-      const foodOp = foodExists ? "UPDATE" : "CREATE";
 
       // Identity & Ownership Diagnostic Logging
       const authUid = currentUser.uid;
@@ -686,35 +670,9 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         throw step6Err;
       }
 
-      // STEP 7: CREATE FOOD
-      console.log("[RTCO-024L STEP 07] eventFood setDoc START", `eventFood/${foodPayload.id}`);
-      try {
-        await setDoc(foodDocRef, foodPayload);
-        console.log("[RTCO-024L STEP 07] eventFood setDoc SUCCESS");
-      } catch (step7Err: any) {
-        console.error("[RTCO-024L FAILURE]", {
-          step: "STEP 07",
-          operation: foodOp,
-          path: `eventFood/${foodPayload.id}`,
-          errorCode: step7Err?.code,
-          errorMessage: step7Err?.message,
-          errorName: step7Err?.name
-        });
-        // Compensation: rollback step 6 attendance and step 5 registration
-        try {
-          await deleteDoc(attDocRef);
-          console.log("[RTCO-024L ROLLBACK SUCCESS] deleted eventAttendance doc");
-        } catch (rbErr: any) {
-          console.error("[RTCO-024L ROLLBACK FAILURE] eventAttendance delete failed:", rbErr);
-        }
-        try {
-          await deleteDoc(regDocRef);
-          console.log("[RTCO-024L ROLLBACK SUCCESS] deleted event_registrations doc");
-        } catch (rbErr: any) {
-          console.error("[RTCO-024L ROLLBACK FAILURE] event_registrations delete failed:", rbErr);
-        }
-        throw step7Err;
-      }
+      // Defer direct eventFood creation by resident client
+      console.log("[RTCO-EMERGENCY-015] FOOD RECORD DEFERRED");
+      console.log("[RTCO-EMERGENCY-015] EVENT REGISTRATION SUCCESS");
 
       console.log("[RTCO-024L STEP 08] Registration core writes completed");
 
@@ -896,6 +854,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
       const regData = regSnap.data();
 
+      console.log(`[RTCO-CANCEL-FORENSIC] REGISTRATION REF: ${regRef.path}`);
+      console.log(`[RTCO-CANCEL-FORENSIC] REGISTRATION EXISTS: ${regSnap.exists()}`);
+      console.log(`[RTCO-CANCEL-FORENSIC] ATTENDANCE EXISTS: ${attSnap.exists()}`);
+
       // STEP 2: EVALUATE OWNERSHIP
       const normUserEmail = (residentProfile.email || '').toLowerCase();
       const normRegEmail = (regData?.primaryMemberEmail || '').toLowerCase();
@@ -909,50 +871,98 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
       const oldRevenue = regData?.paymentAmount || 0;
 
-      // STEP 3: CREATE BATCH & STAGE AUTHORIZED EXISTING DOCUMENT DELETES ONLY
-      console.log(`[REGISTRATION CANCEL 04] Preparing resident cleanup batch`);
-      const batch = writeBatch(db);
+      // STEP 3: EXECUTE PRIMARY CANCELLATION (CRITICAL OPERATION)
+      console.log(`[PRIMARY CANCELLATION] Deleting event_registrations/${regId}`);
+      await deleteDoc(regRef);
+      console.log(`[PRIMARY CANCELLATION SUCCESS] Registration ${regId} deleted.`);
 
-      // A. Registration Doc (guaranteed to exist)
-      batch.delete(regRef);
+      // Primary operation succeeded — user registration is cancelled!
+      setSuccessMsg(`✓ Successfully cancelled your household registration for ${title}.`);
+      setViewingRegDetails(null);
 
-      // B. Attendance Doc (only if exists)
+      // STEP 4: SECONDARY CLEANUP OPERATIONS (INDEPENDENT, NON-BLOCKING)
+      let attCleanupStatus = 'SKIPPED';
+      let foodCleanupStatus = 'SKIPPED';
+      let certCleanupStatus = 'SKIPPED';
+
+      // 4A: Secondary Attendance Cleanup
       if (attSnap.exists()) {
-        batch.delete(attRef);
-        console.log(`[REGISTRATION CANCEL 05] Staged eventAttendance delete: ${attId}`);
-      } else {
-        console.log(`[REGISTRATION CANCEL 05] Skipped eventAttendance delete (document does not exist)`);
+        try {
+          await deleteDoc(attRef);
+          attCleanupStatus = 'SUCCESS';
+          console.log(`[RTCO-CLEANUP] ATTENDANCE SUCCESS (${attId})`);
+        } catch (attErr: any) {
+          attCleanupStatus = 'PENDING';
+          console.warn(`[RTCO-CLEANUP] ATTENDANCE PENDING`, {
+            eventId,
+            registrationId: regId,
+            attendanceId: attId,
+            code: attErr?.code,
+            message: attErr?.message
+          });
+        }
       }
 
-      // C. Food Voucher Doc (only if exists)
+      // 4B: Secondary Food Cleanup
       if (foodSnap.exists()) {
-        batch.delete(foodRef);
-        console.log(`[REGISTRATION CANCEL 06] Staged eventFood delete: ${foodId}`);
-      } else {
-        console.log(`[REGISTRATION CANCEL 06] Skipped eventFood delete (document does not exist)`);
+        try {
+          await deleteDoc(foodRef);
+          foodCleanupStatus = 'SUCCESS';
+          console.log(`[RTCO-CLEANUP] FOOD SUCCESS (${foodId})`);
+        } catch (foodErr: any) {
+          foodCleanupStatus = 'PENDING';
+          console.warn(`[RTCO-CLEANUP] FOOD PENDING`, {
+            eventId,
+            registrationId: regId,
+            foodId,
+            code: foodErr?.code,
+            message: foodErr?.message
+          });
+        }
       }
 
-      // STEP 4: COMMIT BATCH
-      await batch.commit();
+      // 4C: Secondary Certificate Cleanup
+      const certRef = doc(db, "eventCertificates", `cert_${residentProfile.gmkId}_${eventId}`);
+      try {
+        const certSnap = await getDoc(certRef);
+        if (certSnap.exists()) {
+          await deleteDoc(certRef);
+          certCleanupStatus = 'SUCCESS';
+          console.log(`[RTCO-CLEANUP] CERTIFICATE SUCCESS (${certRef.id})`);
+        }
+      } catch (certErr: any) {
+        certCleanupStatus = 'PENDING';
+        console.warn(`[RTCO-CLEANUP] CERTIFICATE PENDING`, {
+          eventId,
+          registrationId: regId,
+          certId: certRef.id,
+          code: certErr?.code,
+          message: certErr?.message
+        });
+      }
 
-      console.log(`[REGISTRATION CANCEL 07] Resident cleanup batch committed successfully for regId: ${regId}`);
-      console.log(`[REGISTRATION CANCEL 08] Aggregate event documents not modified by resident client`);
-
-      // Write Cancel Audit Trail Entry (non-blocking)
+      // 4D: Write Cancel Audit Trail Entry with detailed cleanup statuses
       try {
         await createAuditLog(
           'EVENT_REGISTRATION_CANCELLED',
           residentProfile.email,
           'registration',
           regId,
-          `Cancelled resident unit registration for event '${title}' (Refunded: OMR ${oldRevenue}).`
+          JSON.stringify({
+            eventId,
+            registrationId: regId,
+            gmkId: residentProfile.gmkId,
+            email: residentProfile.email,
+            cancellationSource: 'resident',
+            attendanceCleanupStatus: attCleanupStatus,
+            foodCleanupStatus: foodCleanupStatus,
+            certificateCleanupStatus: certCleanupStatus,
+            timestamp: new Date().toISOString()
+          })
         );
       } catch (auditErr) {
         console.warn("⚠️ Non-blocking Cancel Audit log failed:", auditErr);
       }
-
-      setSuccessMsg(`✓ Successfully cancelled your household registration for ${title}.`);
-      setViewingRegDetails(null);
     } catch (err: any) {
       console.error("❌ Cancel registration failed:", err);
       const cleanError = err.message || "Failed to cancel registration safely. Please contact your administrator.";

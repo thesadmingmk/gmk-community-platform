@@ -1240,19 +1240,6 @@ export default function IdentityGateway() {
             </div>
           </form>
 
-          {/* Setup Password Switcher */}
-          {!isSignUp && !isSetupPassword && (
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={() => { setIsSetupPassword(true); setErrorMsg(null); setAuthSuccess(null); }}
-                className="text-xs text-[#0f4c2a] hover:text-[#d4af37] transition-colors cursor-pointer font-bold underline underline-offset-4"
-              >
-                Approved Resident? Setup Password →
-              </button>
-            </div>
-          )}
-
           {isSetupPassword && (
             <div className="text-center pt-2">
               <button
@@ -1276,7 +1263,7 @@ export default function IdentityGateway() {
           GMK Community Platform • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.3 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.4 (Release Notes)</button>
         </div>
       </footer>
 

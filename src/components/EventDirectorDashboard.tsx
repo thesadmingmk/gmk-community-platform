@@ -954,76 +954,125 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       const finRef = doc(db, "eventFinance", `fin_${eventId}`);
       const eventRef = doc(db, "events", eventId);
 
-      // Stage 4: Execute Atomic Batch
-      console.log("[DELETE 4] Starting batch");
-      const batch = writeBatch(db);
+      const [attSnap, foodSnap, certSnap] = await Promise.all([
+        getDoc(attRef),
+        getDoc(foodRef),
+        getDoc(certRef)
+      ]);
 
-      // A. Delete Registration Doc
-      console.log("[DELETE 5] Deleting event_registrations", regId);
-      batch.delete(regRef);
+      // Stage 4: Primary Registration Deletion (Critical Operation)
+      console.log("[DELETE PRIMARY] Deleting event_registrations", regId);
+      await deleteDoc(regRef);
+      console.log("[DELETE PRIMARY SUCCESS] Registration deleted:", regId);
 
-      // B. Delete Attendance Doc
-      console.log("[DELETE 6] Deleting eventAttendance", attRef.id);
-      batch.delete(attRef);
+      // Stage 5: Secondary Cleanups & Administrative Updates (Independent, Non-blocking)
+      let attStatus = 'SKIPPED';
+      let foodStatus = 'SKIPPED';
+      let certStatus = 'SKIPPED';
 
-      // C. Delete Food Coupon Doc
-      console.log("[DELETE 7] Deleting eventFood", foodRef.id);
-      batch.delete(foodRef);
-
-      // D. Delete Certificate Doc
-      batch.delete(certRef);
-
-      // E. Recalculate Report Summary
-      console.log("[DELETE 8] Updating reports");
-      const reportSnap = await getDoc(reportRef);
-      if (reportSnap.exists()) {
-        const reportData = reportSnap.data();
-        batch.update(reportRef, {
-          registrationsCount: Math.max(0, (reportData.registrationsCount || 0) - count),
-          totalRevenue: Math.max(0, (reportData.totalRevenue || 0) - payment),
-          lastUpdated: new Date().toISOString()
-        });
+      // 5A. Delete Attendance Doc
+      if (attSnap.exists()) {
+        try {
+          await deleteDoc(attRef);
+          attStatus = 'SUCCESS';
+          console.log("[DELETE CLEANUP] Attendance deleted:", attRef.id);
+        } catch (attErr: any) {
+          attStatus = 'PENDING';
+          console.warn("[DELETE CLEANUP] Attendance delete failed:", attErr);
+        }
       }
 
-      // F. Recalculate Finance Summary
-      const finSnap = await getDoc(finRef);
-      if (finSnap.exists()) {
-        const finData = finSnap.data();
-        const newRev = Math.max(0, (finData.totalRevenue || 0) - payment);
-        const netBal = newRev - (finData.totalExpenses || 0);
-        batch.update(finRef, {
-          totalRevenue: newRev,
-          netBalance: netBal,
-          updatedAt: new Date().toISOString()
-        });
+      // 5B. Delete Food Coupon Doc
+      if (foodSnap.exists()) {
+        try {
+          await deleteDoc(foodRef);
+          foodStatus = 'SUCCESS';
+          console.log("[DELETE CLEANUP] Food deleted:", foodRef.id);
+        } catch (foodErr: any) {
+          foodStatus = 'PENDING';
+          console.warn("[DELETE CLEANUP] Food delete failed:", foodErr);
+        }
       }
 
-      // G. Remove attendee email from Event Master attendees array
-      const remainingRegs = registrations.filter(r => r.id !== regId && r.primaryMemberEmail === reg.primaryMemberEmail);
-      if (remainingRegs.length === 0 && activeEvent.attendees) {
-        const updatedAttendees = (activeEvent.attendees || []).filter(e => e !== reg.primaryMemberEmail);
-        batch.update(eventRef, { attendees: updatedAttendees });
+      // 5C. Delete Certificate Doc
+      if (certSnap.exists()) {
+        try {
+          await deleteDoc(certRef);
+          certStatus = 'SUCCESS';
+          console.log("[DELETE CLEANUP] Certificate deleted:", certRef.id);
+        } catch (certErr: any) {
+          certStatus = 'PENDING';
+          console.warn("[DELETE CLEANUP] Certificate delete failed:", certErr);
+        }
       }
 
-      console.log("[DELETE 9] Commit");
-      await batch.commit();
-
-      // Stage 5: Verify
-      const verifySnap = await getDoc(regRef);
-      if (verifySnap.exists()) {
-        throw new Error("Verification failed: Registration document was not removed from Firestore.");
+      // 5D. Recalculate Report Summary
+      try {
+        const reportSnap = await getDoc(reportRef);
+        if (reportSnap.exists()) {
+          const reportData = reportSnap.data();
+          const batchReports = writeBatch(db);
+          batchReports.update(reportRef, {
+            registrationsCount: Math.max(0, (reportData.registrationsCount || 0) - count),
+            totalRevenue: Math.max(0, (reportData.totalRevenue || 0) - payment),
+            lastUpdated: new Date().toISOString()
+          });
+          await batchReports.commit();
+          console.log("[DELETE CLEANUP] Reports updated");
+        }
+      } catch (repErr) {
+        console.warn("[DELETE CLEANUP] Reports update failed:", repErr);
       }
 
-      console.log("[DELETE 10] Success");
+      // 5E. Recalculate Finance Summary
+      try {
+        const finSnap = await getDoc(finRef);
+        if (finSnap.exists()) {
+          const finData = finSnap.data();
+          const newRev = Math.max(0, (finData.totalRevenue || 0) - payment);
+          const netBal = newRev - (finData.totalExpenses || 0);
+          const batchFin = writeBatch(db);
+          batchFin.update(finRef, {
+            totalRevenue: newRev,
+            netBalance: netBal,
+            updatedAt: new Date().toISOString()
+          });
+          await batchFin.commit();
+          console.log("[DELETE CLEANUP] Finance updated");
+        }
+      } catch (finErr) {
+        console.warn("[DELETE CLEANUP] Finance update failed:", finErr);
+      }
+
+      // 5F. Remove attendee email from Event Master attendees array
+      try {
+        const remainingRegs = registrations.filter(r => r.id !== regId && r.primaryMemberEmail === reg.primaryMemberEmail);
+        if (remainingRegs.length === 0 && activeEvent.attendees) {
+          const eventSnap = await getDoc(eventRef);
+          if (eventSnap.exists()) {
+            const updatedAttendees = (activeEvent.attendees || []).filter(e => e !== reg.primaryMemberEmail);
+            const batchEvent = writeBatch(db);
+            batchEvent.update(eventRef, { attendees: updatedAttendees });
+            await batchEvent.commit();
+            console.log("[DELETE CLEANUP] Event master attendees updated");
+          }
+        }
+      } catch (evtErr) {
+        console.warn("[DELETE CLEANUP] Event master update failed:", evtErr);
+      }
 
       // Stage 6: Audit
-      await createAuditLog(
-        'DELETE_REGISTRATION',
-        profile?.email || 'event_director',
-        'registration',
-        regId,
-        `Event Director deleted registration for email '${reg.primaryMemberEmail}' (Count: ${count}, Payment: OMR ${payment}).`
-      );
+      try {
+        await createAuditLog(
+          'DELETE_REGISTRATION',
+          profile?.email || 'event_director',
+          'registration',
+          regId,
+          `Event Director deleted registration for email '${reg.primaryMemberEmail}' (Count: ${count}, Payment: OMR ${payment}). Attendance Cleanup: ${attStatus}, Food Cleanup: ${foodStatus}, Cert Cleanup: ${certStatus}.`
+        );
+      } catch (auditErr) {
+        console.warn("⚠️ Non-blocking ED Audit log failed:", auditErr);
+      }
 
       setSuccessMsg(`✓ Registration for ${reg.primaryMemberEmail} was deleted successfully.`);
     } catch (err: any) {
