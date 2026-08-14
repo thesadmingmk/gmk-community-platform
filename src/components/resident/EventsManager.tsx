@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { db, auth, useAuth } from '../../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
-import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft, ChevronDown, ChevronUp, QrCode } from 'lucide-react';
 import { createAuditLog } from '../../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from '../gmk/GEASConfirmationDialog';
 import { getEventRegistrationStatus, getRegistrationStatusLabel } from '../../utils/eventLifecycle';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreError';
+import QRCode from 'qrcode';
 
 interface EventsManagerProps {
   residentProfile: ResidentProfile;
@@ -27,7 +28,27 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   // Active dialogue controls
   const [activeEventForReg, setActiveEventForReg] = useState<CommunityEvent | null>(null);
   const [viewingRegDetails, setViewingRegDetails] = useState<EventRegistration | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [showingPaymentModalEvent, setShowingPaymentModalEvent] = useState<{ evt: CommunityEvent; reg?: EventRegistration } | null>(null);
+
+  useEffect(() => {
+    if (viewingRegDetails) {
+      const passNo = viewingRegDetails.entryPassNumber || `PASS-${viewingRegDetails.eventId.slice(-6).toUpperCase()}-${viewingRegDetails.primaryMemberGmkId || viewingRegDetails.id.slice(-6).toUpperCase()}`;
+      const payload = JSON.stringify({
+        eventId: viewingRegDetails.eventId,
+        registrationId: viewingRegDetails.id,
+        entryPassNumber: passNo,
+        gmkId: viewingRegDetails.primaryMemberGmkId,
+        email: viewingRegDetails.primaryMemberEmail,
+        totalParticipants: viewingRegDetails.totalParticipants
+      });
+      QRCode.toDataURL(payload, { margin: 1, width: 220, color: { dark: '#0f4c2a', light: '#ffffff' } })
+        .then(url => setQrDataUrl(url))
+        .catch(err => console.error("QR Code Error:", err));
+    } else {
+      setQrDataUrl('');
+    }
+  }, [viewingRegDetails]);
   const [showingPricingModalEvent, setShowingPricingModalEvent] = useState<CommunityEvent | null>(null);
   
   // Registration form selections
@@ -1264,98 +1285,156 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       {viewingRegDetails && (() => {
         const evt = events.find(e => e.id === viewingRegDetails.eventId);
         if (!evt) return null;
+
+        const pStatus = viewingRegDetails.paymentStatus || 'pending';
+        const amtDue = viewingRegDetails.amountDue ?? viewingRegDetails.paymentAmount ?? viewingRegDetails.paymentSummary?.totalAmount ?? 0;
+        const amtRec = viewingRegDetails.amountReceived ?? (pStatus === 'paid' ? amtDue : 0);
+        const balDue = viewingRegDetails.balanceDue ?? Math.max(0, amtDue - amtRec);
+        const refDue = viewingRegDetails.refundDue ?? Math.max(0, amtRec - amtDue);
+        const entryPassNo = viewingRegDetails.entryPassNumber || `PASS-${evt.id.slice(-6).toUpperCase()}-${viewingRegDetails.primaryMemberGmkId || viewingRegDetails.id.slice(-6).toUpperCase()}`;
+
         return (
-          <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white border border-stone-220 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-5 animate-scaleUp text-stone-800">
+          <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full shadow-2xl p-5 sm:p-6 relative space-y-4 animate-scaleUp text-stone-800 my-auto max-h-[92vh] flex flex-col">
               <button
                 onClick={() => setViewingRegDetails(null)}
-                className="absolute right-4 top-4 text-stone-705 hover:text-stone-900 transition-colors cursor-pointer font-black"
+                className="absolute right-4 top-4 text-stone-400 hover:text-stone-800 transition-colors cursor-pointer font-black z-10"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="border-b border-stone-200 pb-3 text-left">
-                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">RSVP Registration Receipt</span>
-                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{evt.title}</h3>
-                <p className="text-stone-500 text-[10px] mt-1">Confirmed details for household GMK ID: {viewingRegDetails.primaryMemberGmkId}</p>
+              <div className="border-b border-stone-150 pb-3 text-left pr-6">
+                <div className="flex items-center space-x-2">
+                  <span className="text-[10px] font-black font-mono text-[#d4af37] uppercase tracking-wider">
+                    Official Event Entry Pass & Receipt
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-[#0f4c2a] font-heading mt-0.5">{evt.title}</h3>
+                <p className="text-stone-500 text-[11px] mt-0.5 font-medium">
+                  Household GMK ID: <span className="font-mono font-bold text-stone-800">{viewingRegDetails.primaryMemberGmkId}</span> • Reg ID: <span className="font-mono text-stone-700">{viewingRegDetails.id}</span>
+                </p>
               </div>
 
-              <div className="space-y-4 text-left">
-                {viewingRegDetails.paymentSummary ? (
-                  <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl p-4 text-left space-y-2.5 text-xs text-stone-800">
-                    <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-widest block font-heading">
-                      Registration Pricing Snapshot
-                    </span>
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between">
-                        <span className="text-stone-605 font-bold">Base Rate Applied:</span>
-                        <span className="font-bold text-emerald-900 capitalize">{viewingRegDetails.paymentSummary.baseRateApplied}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-stone-605 font-bold">Base Rate Cost:</span>
-                        <span className="font-mono">OMR {viewingRegDetails.paymentSummary.baseRate}</span>
-                      </div>
-                      {viewingRegDetails.paymentSummary.parentsCount !== undefined && viewingRegDetails.paymentSummary.parentsCount > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-stone-605">Parents ({viewingRegDetails.paymentSummary.parentsCount}):</span>
-                          <span className="text-emerald-700 font-bold">Free</span>
-                        </div>
-                      )}
-                      {viewingRegDetails.paymentSummary.externalParticipantsCount !== undefined && viewingRegDetails.paymentSummary.externalParticipantsCount > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-stone-605">Guests ({viewingRegDetails.paymentSummary.externalParticipantsCount}):</span>
-                          <span className="font-mono">OMR {viewingRegDetails.paymentSummary.externalSubtotal}</span>
-                        </div>
-                      )}
-                      
-                      {viewingRegDetails.paymentSummary.details && (
-                        <p className="text-[10px] text-stone-700 italic border-t border-dashed border-emerald-200 pt-2 leading-relaxed">
-                          {viewingRegDetails.paymentSummary.details}
-                        </p>
-                      )}
-
-                      <div className="border-t border-dashed border-emerald-200 pt-2 flex justify-between items-center text-xs font-black text-[#0f4c2a] text-sm">
-                        <span>Total Paid RSVP:</span>
-                        <span className="font-mono text-base font-black">OMR {viewingRegDetails.paymentSummary.totalAmount}</span>
-                      </div>
+              {/* CONFIRMATION / PAYMENT STATUS BANNER */}
+              <div className="text-left">
+                {(pStatus === 'paid' || pStatus === 'approved') && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl flex items-start space-x-2.5 text-xs font-bold">
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-emerald-950">Registration Confirmed</p>
+                      <p className="text-[11px] text-emerald-800 mt-0.5">Payment received. Thank you. Your registration is confirmed.</p>
                     </div>
-                  </div>
-                ) : (
-                  <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-2">
-                    <div className="flex justify-between items-center text-xs font-extrabold border-b border-stone-200 pb-2">
-                      <span className="text-stone-900">Registration Type:</span>
-                      <span className="capitalize text-[#0f4c2a] bg-emerald-100 px-2.5 py-0.5 rounded-full text-[10px] font-black">
-                        {viewingRegDetails.registrationType || 'family'}
-                      </span>
-                    </div>
-                    
-                    <div className="flex justify-between items-center text-xs font-extrabold pt-1">
-                      <span className="text-stone-900">Total Charged:</span>
-                      <span className="text-[#0f4c2a] font-mono text-sm font-black">
-                        OMR {viewingRegDetails.paymentAmount || 0}
-                      </span>
-                    </div>
-
-                    {viewingRegDetails.paymentSummary?.details && (
-                      <p className="text-[10px] text-stone-700 italic border-t border-dashed border-stone-200 pt-2 leading-relaxed">
-                        {viewingRegDetails.paymentSummary.details}
-                      </p>
-                    )}
                   </div>
                 )}
 
+                {pStatus === 'partially_paid' && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl flex items-start space-x-2.5 text-xs font-bold">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-amber-950">Partial Payment Received</p>
+                      <p className="text-[11px] text-amber-850 mt-0.5">
+                        Balance Due: <span className="font-mono font-black text-amber-950">OMR {balDue.toFixed(3)}</span>. Please pay the outstanding balance to complete your payment.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {(pStatus === 'overpaid' || pStatus === 'refund_due') && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-2xl flex items-start space-x-2.5 text-xs font-bold">
+                    <Check className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-blue-950">Payment Verified — Overpayment Logged</p>
+                      <p className="text-[11px] text-blue-850 mt-0.5">
+                        Refund Due: <span className="font-mono font-black text-blue-950">OMR {refDue.toFixed(3)}</span>. Our Finance Committee will process the refund.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {pStatus === 'waived' && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-2xl flex items-start space-x-2.5 text-xs font-bold">
+                    <Check className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-blue-950">Payment Waived</p>
+                      <p className="text-[11px] text-blue-850 mt-0.5">Payment Waived — Registration Confirmed.</p>
+                    </div>
+                  </div>
+                )}
+
+                {pStatus === 'pending' && (
+                  <div className="p-3 bg-stone-100 border border-stone-200 text-stone-800 rounded-2xl flex items-start space-x-2.5 text-xs font-bold">
+                    <Clock className="w-4 h-4 text-stone-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-stone-900">Payment Pending Verification</p>
+                      <p className="text-[11px] text-stone-600 mt-0.5">Registration Pending Payment Verification with the Finance Committee.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="overflow-y-auto pr-1 space-y-4 text-left flex-1 min-h-0">
+                {/* PASS & QR CODE CARD */}
+                <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1.5 text-center sm:text-left">
+                    <span className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Gate Entry Pass</span>
+                    <span className="text-xs font-mono font-black text-[#0f4c2a] bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-xl block w-fit mx-auto sm:mx-0">
+                      {entryPassNo}
+                    </span>
+                    {viewingRegDetails.receiptNumber && (
+                      <div className="text-[10px] text-stone-600 font-medium">
+                        Receipt #: <span className="font-mono font-bold text-stone-900">{viewingRegDetails.receiptNumber}</span>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-stone-500 font-medium max-w-xs">
+                      Present this QR code or Entry Pass number at the event gate for instant check-in.
+                    </p>
+                  </div>
+                  {qrDataUrl ? (
+                    <div className="bg-white p-2 border border-stone-200 rounded-2xl shadow-xs shrink-0 text-center">
+                      <img src={qrDataUrl} alt="Entry Pass QR Code" className="w-28 h-28 mx-auto rounded-lg" />
+                      <span className="text-[8px] font-mono text-stone-400 block mt-1 uppercase">Scan at Gate</span>
+                    </div>
+                  ) : (
+                    <div className="w-28 h-28 bg-stone-100 rounded-2xl flex items-center justify-center shrink-0 text-stone-400 text-xs font-mono">
+                      Generating...
+                    </div>
+                  )}
+                </div>
+
+                {/* FINANCIAL SNAPSHOT */}
+                <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 space-y-2 text-xs">
+                  <span className="text-[9px] font-black text-[#0f4c2a] uppercase tracking-wider block">Financial Summary</span>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
+                    <div className="p-2 bg-white rounded-xl border border-stone-150">
+                      <span className="text-[9px] text-stone-500 uppercase block">Amount Due</span>
+                      <span className="text-sm font-mono font-black text-stone-900">OMR {amtDue.toFixed(3)}</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-xl border border-stone-150">
+                      <span className="text-[9px] text-stone-500 uppercase block">Amount Received</span>
+                      <span className="text-sm font-mono font-black text-[#0f4c2a]">OMR {amtRec.toFixed(3)}</span>
+                    </div>
+                  </div>
+                  {viewingRegDetails.financeRemarks && (
+                    <div className="p-2 bg-stone-100/80 rounded-xl text-[10px] text-stone-700 italic border border-stone-200">
+                      <strong className="not-italic text-stone-900">Finance Remarks: </strong>
+                      {viewingRegDetails.financeRemarks}
+                    </div>
+                  )}
+                </div>
+
+                {/* PARTICIPANTS BREAKDOWN */}
                 <div className="space-y-2">
-                  <span className="text-[9px] font-bold text-stone-850 uppercase tracking-widest block font-heading">
-                    Registered household members ({viewingRegDetails.totalParticipants})
+                  <span className="text-[9px] font-black text-stone-600 uppercase tracking-wider block font-heading">
+                    Registered Household Attendees ({viewingRegDetails.totalParticipants})
                   </span>
-                  <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 gap-1.5 max-h-36 overflow-y-auto pr-1">
                     {viewingRegDetails.participants.map((name, index) => {
                       const member = familyMembers.find(m => m.name === name);
                       const relation = name === residentProfile.fullName ? 'Primary Head' : (member?.relationship || 'dependent');
                       return (
-                        <div key={index} className="flex justify-between items-center p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                          <span className="font-bold text-stone-850 text-xs">{name}</span>
-                          <span className="text-[9px] capitalize text-emerald-800 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md font-extrabold">
+                        <div key={index} className="flex justify-between items-center p-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold">
+                          <span className="text-stone-900 truncate">{name}</span>
+                          <span className="text-[9px] capitalize text-[#0f4c2a] bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md font-extrabold shrink-0">
                             {relation}
                           </span>
                         </div>
@@ -1367,17 +1446,19 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
               <div className="pt-3 border-t border-stone-150 flex space-x-2">
                 <button
+                  type="button"
                   onClick={() => setViewingRegDetails(null)}
-                  className="flex-1 py-2.5 border border-stone-300 text-stone-800 font-bold uppercase tracking-wider text-[10px] rounded-xl hover:bg-stone-50 cursor-pointer"
+                  className="flex-1 py-2.5 border border-stone-300 text-stone-800 font-bold uppercase tracking-wider text-[10px] rounded-xl hover:bg-stone-50 transition-colors cursor-pointer"
                 >
-                  Close Receipt
+                  Close Pass
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setViewingRegDetails(null);
                     handleOpenRegistration(evt);
                   }}
-                  className="flex-1 py-2.5 bg-[#0f4c2a] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl hover:bg-[#125831] cursor-pointer"
+                  className="flex-1 py-2.5 bg-[#0f4c2a] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl hover:bg-[#0c3e22] transition-colors cursor-pointer"
                 >
                   Modify Configuration
                 </button>

@@ -1,3 +1,6 @@
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import React, { useState, useEffect } from 'react';
 import { db, auth, useAuth } from '../context/AuthContext';
 import { 
@@ -50,7 +53,10 @@ import {
   Plus,
   Trash2,
   Wrench,
-  ShieldAlert
+  ShieldAlert,
+  FileSpreadsheet,
+  FileText,
+  Download
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -1815,7 +1821,76 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
     }
   };
 
+
+  const exportExpertiseExcel = () => {
+    const data: any[] = [];
+    residents.filter(r => r.status === 'active').forEach(r => {
+      if (r.professionCategory || r.professionTitle) {
+        data.push({
+          Name: r.primaryMemberName || r.fullName || 'N/A',
+          Profession: `${r.professionTitle || ''} ${r.professionCategory ? '(' + r.professionCategory + ')' : ''}`.trim(),
+          "Contact Mode": `${r.primaryMemberPhone || r.whatsappNumber || ''} / ${r.primaryMemberEmail || r.email || ''}`
+        });
+      }
+      if (r.spouseProfessionCategory || r.spouseProfessionTitle) {
+        data.push({
+          Name: r.spouseName || 'Spouse',
+          Profession: `${r.spouseProfessionTitle || ''} ${r.spouseProfessionCategory ? '(' + r.spouseProfessionCategory + ')' : ''}`.trim(),
+          "Contact Mode": `${r.spousePhone || r.spouseWhatsApp || ''} / ${r.spouseEmail || ''}`
+        });
+      }
+    });
+
+    if (data.length === 0) {
+      alert("No registered expertise services found.");
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Expertise");
+    XLSX.writeFile(wb, "Expertise_Services_Report.xlsx");
+  };
+
+  const exportExpertisePDF = () => {
+    const data: any[] = [];
+    residents.filter(r => r.status === 'active').forEach(r => {
+      if (r.professionCategory || r.professionTitle) {
+        data.push([
+          r.primaryMemberName || r.fullName || 'N/A',
+          `${r.professionTitle || ''} ${r.professionCategory ? '(' + r.professionCategory + ')' : ''}`.trim(),
+          `${r.primaryMemberPhone || r.whatsappNumber || ''}\n${r.primaryMemberEmail || r.email || ''}`
+        ]);
+      }
+      if (r.spouseProfessionCategory || r.spouseProfessionTitle) {
+        data.push([
+          r.spouseName || 'Spouse',
+          `${r.spouseProfessionTitle || ''} ${r.spouseProfessionCategory ? '(' + r.spouseProfessionCategory + ')' : ''}`.trim(),
+          `${r.spousePhone || r.spouseWhatsApp || ''}\n${r.spouseEmail || ''}`
+        ]);
+      }
+    });
+
+    if (data.length === 0) {
+      alert("No registered expertise services found.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    doc.text("Expertise Services Report", 14, 15);
+    autoTable(doc, {
+      startY: 20,
+      head: [['Name', 'Profession', 'Contact Mode']],
+      body: data,
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [15, 76, 42] } // Emerald GMK color
+    });
+    doc.save("Expertise_Services_Report.pdf");
+  };
+
   // Helper selectors and lists
+
   const activeResidents = residents.filter(r => r.status === 'active');
   const archivedResidents = residents.filter(r => r.status === 'archived');
 
@@ -2052,6 +2127,23 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 Add Resident
               </button>
+
+              <div className="relative group z-40">
+                <button
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Expertise Report
+                </button>
+                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
+                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
+                  </button>
+                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Compact Autocomplete/Autosuggest Predictive Search */}
@@ -2871,6 +2963,23 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 [Cancel]
               </button>
+
+              <div className="relative group z-40">
+                <button
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Expertise Report
+                </button>
+                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
+                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
+                  </button>
+                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                  </button>
+                </div>
+              </div>
             </div>
 
             <form onSubmit={handleCreateResidentFromScratch} className="space-y-4 text-xs font-semibold">
@@ -3501,6 +3610,23 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 Cancel
               </button>
+
+              <div className="relative group z-40">
+                <button
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Expertise Report
+                </button>
+                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
+                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
+                  </button>
+                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3556,6 +3682,23 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 Cancel
               </button>
+
+              <div className="relative group z-40">
+                <button
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Expertise Report
+                </button>
+                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
+                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
+                  </button>
+                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

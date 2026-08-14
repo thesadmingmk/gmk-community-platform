@@ -164,6 +164,16 @@ export interface EventRegistration {
   updatedAt: string;
   registrationType?: 'individual' | 'couple' | 'family';
   paymentAmount?: number;
+  paymentStatus?: 'pending' | 'paid' | 'partially_paid' | 'overpaid' | 'refund_due' | 'waived' | 'approved';
+  amountReceived?: number;
+  amountDue?: number;
+  balanceDue?: number;
+  refundDue?: number;
+  financeRemarks?: string;
+  paymentProcessedAt?: string;
+  paymentProcessedBy?: string;
+  receiptNumber?: string;
+  entryPassNumber?: string;
   paymentSummary?: {
     baseRate: number;
     baseRateApplied: string;
@@ -322,6 +332,7 @@ export interface EventCommittee {
   id: string; // ${eventId}_${committeeName}
   eventId: string;
   name: string; // e.g., 'Program' | 'Finance' | 'Food' | 'Attendance' | 'Sponsorship' | 'Sourcing'
+  type?: 'finance' | 'food' | 'attendance' | 'program' | 'sourcing' | 'sponsorship' | 'general';
   members: EventCommitteeMember[];
   isStandard?: boolean;
   requiresCoordinators?: boolean;
@@ -354,9 +365,14 @@ export interface EventAttendance {
   eventId: string;
   gmkId: string;
   fullName: string;
-  status: 'registered' | 'checked_in' | 'completed';
+  registrationId?: string;
+  status: 'registered' | 'checked_in' | 'completed' | 'attended';
   checkedInBy?: string;
   checkedInAt?: string;
+  scannedBy?: string;
+  adultsAttended?: number;
+  childrenAttended?: number;
+  totalAttended?: number;
   createdAt: string;
   updatedAt: string;
 }

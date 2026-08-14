@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
-import { db, useAuth, storage, auth } from '../context/AuthContext';
+import { db, useAuth, storage, auth, functions } from '../context/AuthContext';
+import { httpsCallable } from 'firebase/functions';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { 
   collection, 
@@ -26,6 +27,7 @@ import {
   EventCommitteeExpense,
   EventProgram, 
   EventRegistration,
+  EventAttendance,
   Family,
   FamilyMember,
   PaymentAccount
@@ -58,7 +60,14 @@ import {
   MinusCircle,
   Archive,
   RotateCcw,
-  Edit3
+  Edit3,
+  QrCode,
+  Receipt,
+  CreditCard,
+  Printer,
+  DollarSign,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { GMKCard, GMKBadge } from './gmk/DesignSystem';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
@@ -285,6 +294,24 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
   const [activeCommittees, setActiveCommittees] = useState<EventCommittee[]>([]);
   const [activePrograms, setActivePrograms] = useState<EventProgram[]>([]);
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
+  const [activeAttendances, setActiveAttendances] = useState<EventAttendance[]>([]);
+
+  // Finance Committee Workspace & Payment Processing States
+  const [financeTab, setFinanceTab] = useState<'registrations' | 'expenses' | 'reports'>('registrations');
+  const [financeLeadsExpanded, setFinanceLeadsExpanded] = useState<boolean>(false);
+  const [finEventFilter, setFinEventFilter] = useState<string>('all');
+  const [finStatusFilter, setFinStatusFilter] = useState<string>('all');
+  const [finSearchQuery, setFinSearchQuery] = useState<string>('');
+
+  // Record / Process Payment Modal State
+  const [paymentModalReg, setPaymentModalReg] = useState<EventRegistration | null>(null);
+  const [paymentModalAmtRec, setPaymentModalAmtRec] = useState<string>('');
+  const [paymentModalRemarks, setPaymentModalRemarks] = useState<string>('');
+
+  // Attendance Gate Check-In & Scanner States
+  const [attendanceScanInput, setAttendanceScanInput] = useState<string>('');
+  const [attendanceScannedReg, setAttendanceScannedReg] = useState<EventRegistration | null>(null);
+  const [attendanceScanFilter, setAttendanceScanFilter] = useState<'all' | 'attended' | 'pending'>('all');
 
   // Local navigation & sub-state
   const [showNewEventForm, setShowNewEventForm] = useState(false);
@@ -610,7 +637,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     const qRegs = query(collection(db, "event_registrations"), where("eventId", "==", selectedEventId));
     const unsubRegs = onSnapshot(qRegs, (snap) => {
       const list: EventRegistration[] = [];
-      snap.forEach(d => list.push(d.data() as EventRegistration));
+      snap.forEach(d => list.push({ id: d.id, ...d.data() } as EventRegistration));
       setRegistrations(list);
       setLastFirestoreReadStatus('OK');
     }, (err) => {
@@ -618,10 +645,20 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
+    const qAtts = query(collection(db, "eventAttendance"), where("eventId", "==", selectedEventId));
+    const unsubAtts = onSnapshot(qAtts, (snap) => {
+      const list: EventAttendance[] = [];
+      snap.forEach(d => list.push(d.data() as EventAttendance));
+      setActiveAttendances(list);
+    }, (err) => {
+      console.warn("⚠️ [EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
+    });
+
     return () => {
       unsubCommittees();
       unsubPrograms();
       unsubRegs();
+      unsubAtts();
     };
   }, [selectedEventId, events]);
 
@@ -751,10 +788,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       const defaultCommittees = ['Attendance', 'Finance', 'Food', 'Program', 'Sponsorship', 'Sourcing'];
       for (const commName of defaultCommittees) {
         const commDocId = `${eventId}_${commName.replace(/\s+/g, '_')}`;
+        const canonicalType = commName.toLowerCase() as 'finance' | 'food' | 'attendance' | 'program' | 'sourcing' | 'sponsorship';
         const committeePayload: EventCommittee = {
           id: commDocId,
           eventId: eventId,
           name: commName,
+          type: canonicalType,
           members: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -2641,6 +2680,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
         id: commDocId,
         eventId: selectedEventId,
         name: nameTrimmed,
+        type: 'general',
         members: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -2869,8 +2909,23 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       const userSnap = await getDocs(userQ);
       const userDocRefs = userSnap.docs.map(d => doc(db, "users", d.id));
 
-      const isProgramsCommittee = committee.name.toLowerCase() === 'programs' || committee.name.toLowerCase() === 'program';
+      // Compute canonical committee type for role generation
+      let committeeType = committee.type;
+      if (!committeeType) {
+        const n = committee.name.toLowerCase();
+        if (n.includes('finance')) committeeType = 'finance';
+        else if (n.includes('food')) committeeType = 'food';
+        else if (n.includes('attendance')) committeeType = 'attendance';
+        else if (n.includes('program')) committeeType = 'program';
+        else if (n.includes('sourcing')) committeeType = 'sourcing';
+        else if (n.includes('sponsorship')) committeeType = 'sponsorship';
+        else committeeType = 'general';
+      }
+
+      const isProgramsCommittee = committeeType === 'program';
       const roleToAssign = isProgramsCommittee ? 'program_lead' : 'committee_lead';
+      const specificRoleToAssign = isProgramsCommittee ? 'program_lead' : `committee_lead_${committeeType}`;
+      const eventScopedRoleToAssign = isProgramsCommittee ? `program_lead_${selectedEventId}` : `committee_lead_${committeeType}_${selectedEventId}`;
 
       // 3. Execute Firestore Transaction
       await runTransaction(db, async (transaction) => {
@@ -2903,7 +2958,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           const uDoc = await transaction.get(userDocRef);
           if (uDoc.exists()) {
             const currentRoles: string[] = uDoc.data().roles || [];
-            const updatedRoles = Array.from(new Set([...currentRoles, roleToAssign]));
+            const updatedRoles = Array.from(new Set([...currentRoles, roleToAssign, specificRoleToAssign, eventScopedRoleToAssign]));
             userRolesUpdates.push({ ref: userDocRef, roles: updatedRoles });
           }
         }
@@ -3017,8 +3072,23 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
       const userSnap = await getDocs(userQ);
       const userDocRefs = userSnap.docs.map(d => doc(db, "users", d.id));
 
-      const isProgramsCommittee = committee.name.toLowerCase() === 'programs' || committee.name.toLowerCase() === 'program';
+      // Compute canonical committee type for role generation
+      let committeeType = committee.type;
+      if (!committeeType) {
+        const n = committee.name.toLowerCase();
+        if (n.includes('finance')) committeeType = 'finance';
+        else if (n.includes('food')) committeeType = 'food';
+        else if (n.includes('attendance')) committeeType = 'attendance';
+        else if (n.includes('program')) committeeType = 'program';
+        else if (n.includes('sourcing')) committeeType = 'sourcing';
+        else if (n.includes('sponsorship')) committeeType = 'sponsorship';
+        else committeeType = 'general';
+      }
+
+      const isProgramsCommittee = committeeType === 'program';
       const roleToAssign = isProgramsCommittee ? 'program_lead' : 'committee_lead';
+      const specificRoleToAssign = isProgramsCommittee ? 'program_lead' : `committee_lead_${committeeType}`;
+      const eventScopedRoleToAssign = isProgramsCommittee ? `program_lead_${selectedEventId}` : `committee_lead_${committeeType}_${selectedEventId}`;
 
       // 3. Execute Firestore Transaction
       await runTransaction(db, async (transaction) => {
@@ -3051,7 +3121,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           const uDoc = await transaction.get(userDocRef);
           if (uDoc.exists()) {
             const currentRoles: string[] = uDoc.data().roles || [];
-            const updatedRoles = Array.from(new Set([...currentRoles, roleToAssign]));
+            const updatedRoles = Array.from(new Set([...currentRoles, roleToAssign, specificRoleToAssign, eventScopedRoleToAssign]));
             userRolesUpdates.push({ ref: userDocRef, roles: updatedRoles });
           }
         }
@@ -3137,9 +3207,24 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     setLastErrorMessage('None');
 
     try {
-      const safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
-      const isProgramsCommittee = committee.name.toLowerCase() === 'programs' || committee.name.toLowerCase() === 'program';
+      // Compute canonical committee type for role generation
+      let committeeType = committee.type;
+      if (!committeeType) {
+        const n = committee.name.toLowerCase();
+        if (n.includes('finance')) committeeType = 'finance';
+        else if (n.includes('food')) committeeType = 'food';
+        else if (n.includes('attendance')) committeeType = 'attendance';
+        else if (n.includes('program')) committeeType = 'program';
+        else if (n.includes('sourcing')) committeeType = 'sourcing';
+        else if (n.includes('sponsorship')) committeeType = 'sponsorship';
+        else committeeType = 'general';
+      }
+
+      const safeCommitteeKey = committeeType;
+      const isProgramsCommittee = committeeType === 'program';
       const roleToRemove = isProgramsCommittee ? 'program_lead' : 'committee_lead';
+      const specificRoleToRemove = isProgramsCommittee ? 'program_lead' : `committee_lead_${committeeType}`;
+      const eventScopedRoleToRemove = isProgramsCommittee ? `program_lead_${selectedEventId}` : `committee_lead_${committeeType}_${selectedEventId}`;
 
       // 1. Fetch relevant user documents before the transaction
       const qOthers = query(
@@ -3170,14 +3255,18 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
 
         // Prepare user roles updates inside transaction to avoid race conditions
         const userRolesUpdates: Array<{ ref: any; roles: string[] }> = [];
-        if (otherAssignments.length === 0) {
-          for (const userDocRef of userDocRefs) {
-            const uDoc = await transaction.get(userDocRef);
-            if (uDoc.exists()) {
-              const currentRoles: string[] = uDoc.data().roles || [];
-              const updatedRoles = currentRoles.filter(r => r !== roleToRemove);
-              userRolesUpdates.push({ ref: userDocRef, roles: updatedRoles });
+        
+        for (const userDocRef of userDocRefs) {
+          const uDoc = await transaction.get(userDocRef);
+          if (uDoc.exists()) {
+            const currentRoles: string[] = uDoc.data().roles || [];
+            let updatedRoles = currentRoles.filter(r => r !== eventScopedRoleToRemove); // Always remove event-scoped
+            
+            if (otherAssignments.length === 0) {
+              updatedRoles = updatedRoles.filter(r => r !== roleToRemove && r !== specificRoleToRemove);
             }
+            
+            userRolesUpdates.push({ ref: userDocRef, roles: updatedRoles });
           }
         }
 
@@ -4529,6 +4618,181 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Record / Process Payment Submission (Direct Offline Payment Confirmation)
+  const handleRecordPaymentSubmit = async () => {
+    if (!paymentModalReg || !selectedEventId) return;
+
+    const amtRec = parseFloat(paymentModalAmtRec) || 0;
+    const remarksTrimmed = paymentModalRemarks.trim();
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      if (!paymentModalReg.id) {
+        setErrorMsg("Registration document ID is missing. Payment was not recorded.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log("[PAYMENT-DEBUG] registrationId:", paymentModalReg.id);
+      console.log("[PAYMENT-DEBUG] eventId:", paymentModalReg.eventId || selectedEventId);
+      console.log("[PAYMENT-DEBUG] target:", `event_registrations/${paymentModalReg.id}`);
+      console.log("[PAYMENT-DEBUG] operation: Callable Function (processEventPayment)");
+
+      const processPaymentFn = httpsCallable(functions, 'processEventPayment');
+      
+      const response = await processPaymentFn({
+        registrationId: paymentModalReg.id,
+        amountReceived: amtRec,
+        financeRemarks: remarksTrimmed
+      });
+
+      const data = response.data as any;
+
+      if (data && data.success) {
+        setSuccessMsg(`Payment recorded successfully for ${paymentModalReg.primaryMemberGmkId || paymentModalReg.primaryMemberEmail}. Receipt #${data.receiptNumber || 'generated'}.`);
+        setPaymentModalReg(null);
+        setPaymentModalAmtRec('');
+        setPaymentModalRemarks('');
+      } else {
+        throw new Error("Invalid response from payment service.");
+      }
+    } catch (err: any) {
+      console.error("Failed to record payment:", err);
+      setErrorMsg(`Failed to record payment: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Gate Check-In & Entry Pass Verification
+  const handleGateCheckInSubmit = async (reg: EventRegistration) => {
+    if (!reg || !selectedEventId) return;
+
+    const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1];
+    if (!gmkId) {
+      setErrorMsg("Cannot process check-in: Missing GMK ID on registration.");
+      return;
+    }
+
+    const attRef = doc(db, "eventAttendance", `att_${gmkId}_${selectedEventId}`);
+    
+    // Check if already attended
+    const existing = activeAttendances.find(a => a.primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${selectedEventId}`);
+    if (existing && existing.status === 'attended') {
+      setErrorMsg(`Household ${gmkId} is ALREADY CHECKED IN (Recorded at ${existing.attendedAt || 'earlier'}).`);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+
+    try {
+      const nowStr = new Date().toISOString();
+      const adminEmail = auth.currentUser?.email || 'Gate Attendance Officer';
+
+      await setDoc(attRef, {
+        id: `att_${gmkId}_${selectedEventId}`,
+        eventId: selectedEventId,
+        primaryMemberGmkId: gmkId,
+        status: 'attended',
+        attendedAt: nowStr,
+        scannedBy: adminEmail,
+        totalParticipants: reg.totalParticipants || 1,
+        entryPassNumber: reg.entryPassNumber || `PASS-${selectedEventId.slice(-6).toUpperCase()}-${gmkId}`
+      }, { merge: true });
+
+      setSuccessMsg(`Gate check-in CONFIRMED for ${gmkId} (${reg.primaryMemberEmail}). Gate entry granted.`);
+      setAttendanceScannedReg(null);
+      setAttendanceScanInput('');
+    } catch (err: any) {
+      console.error("Gate check-in error:", err);
+      setErrorMsg(`Gate check-in failed: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Print Financial & Registration Report
+  const handlePrintFinancialReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const filteredRegs = registrations.filter(reg => {
+      if (finStatusFilter !== 'all' && reg.paymentStatus !== finStatusFilter) return false;
+      if (finSearchQuery) {
+        const q = finSearchQuery.toLowerCase();
+        return (
+          reg.primaryMemberGmkId?.toLowerCase().includes(q) ||
+          reg.primaryMemberEmail?.toLowerCase().includes(q) ||
+          reg.id.toLowerCase().includes(q) ||
+          reg.entryPassNumber?.toLowerCase().includes(q) ||
+          reg.receiptNumber?.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    const rowsHtml = filteredRegs.map(r => {
+      const amtDue = r.amountDue ?? r.paymentAmount ?? r.paymentSummary?.totalAmount ?? 0;
+      const amtRec = r.amountReceived ?? (r.paymentStatus === 'paid' ? amtDue : 0);
+      const bal = r.balanceDue ?? Math.max(0, amtDue - amtRec);
+      return `
+        <tr>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; font-family: monospace;">${r.primaryMemberGmkId || 'N/A'}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd;">${r.primaryMemberEmail}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: center;">${r.totalParticipants || 1}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-family: monospace;">OMR ${amtDue.toFixed(3)}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-family: monospace;">OMR ${amtRec.toFixed(3)}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right; font-family: monospace;">OMR ${bal.toFixed(3)}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: center; font-weight: bold;">${(r.paymentStatus || 'pending').toUpperCase()}</td>
+        </tr>
+      `;
+    }).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>GMK Event Financial Registration Report - ${activeEvent?.title || ''}</title>
+          <style>
+            body { font-family: sans-serif; font-size: 12px; margin: 20px; color: #111; }
+            h2 { color: #0f4c2a; margin-bottom: 5px; }
+            p { margin-top: 0; color: #555; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th { background: #f2f4f3; text-align: left; padding: 8px; border-bottom: 2px solid #0f4c2a; font-size: 11px; text-transform: uppercase; }
+          </style>
+        </head>
+        <body>
+          <h2>Greens Malayalee Kootayama (GMK) - Financial Report</h2>
+          <p><strong>Event:</strong> ${activeEvent?.title || 'Community Event'} | <strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>GMK ID</th>
+                <th>Registrant Email</th>
+                <th style="text-align: center;">Count</th>
+                <th style="text-align: right;">Amount Due</th>
+                <th style="text-align: right;">Amount Rec.</th>
+                <th style="text-align: right;">Balance</th>
+                <th style="text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   return (
@@ -7510,325 +7774,956 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
                       );
                     }
 
-                    // 2. STANDARD OPERATIONAL COMMITTEE WORKSPACE (View assigned leads, Remove leads, Assign new lead, Search residents. Nothing else.)
-                    return (
-                      <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn">
-                        {/* HEADER */}
-                        <div className="flex items-center justify-between border-b border-stone-150 pb-3">
-                          <div>
-                            <h4 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading">{activeCommitteeToConfigure} Workspace</h4>
-                            <p className="text-[10px] text-stone-500 font-bold mt-0.5">Appoint, view, or revoke committee leads for operational tasks.</p>
-                          </div>
-                          <span className="px-2 py-1 bg-emerald-50 border border-emerald-100 text-[#0f4c2a] text-xs font-black rounded-lg font-mono">
-                            {leadCount} Leads
-                          </span>
-                        </div>
+                    // 2. ENHANCED OPERATIONAL COMMITTEE WORKSPACES
+                    const isFinanceComm = activeCommitteeToConfigure.toLowerCase().includes('finance');
+                    const isFoodComm = activeCommitteeToConfigure.toLowerCase().includes('food');
+                    const isAttendanceComm = activeCommitteeToConfigure.toLowerCase().includes('attendance');
 
-                        {/* VIEW ASSIGNED LEADS & REMOVE LEADS */}
-                        <div className="space-y-3">
-                          <h5 className="text-[10px] uppercase font-black text-stone-550 tracking-wider">Current Committee Leads</h5>
-                          {commLeads.length === 0 ? (
-                            <p className="text-xs text-stone-500 italic font-bold p-4 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
-                              No Committee Leads assigned. Use the search tool below to appoint leads immediately.
-                            </p>
-                          ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {commLeads.map(lead => (
-                                <div key={lead.residentId} className="flex items-center justify-between p-3 bg-emerald-50/25 border border-emerald-100 rounded-xl">
-                                  <div>
-                                    <span className="text-xs font-black text-stone-850 block">{lead.fullName}</span>
-                                    <span className="text-[9px] text-stone-500 font-bold block mt-0.5">{lead.email}</span>
+                    return (
+                      <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-6 animate-fadeIn">
+                        {/* HEADER WITH COLLAPSIBLE LEADS */}
+                        <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-base">
+                                {isFinanceComm ? '💰' : isFoodComm ? '🍱' : isAttendanceComm ? '🎟️' : '👥'}
+                              </span>
+                              <div>
+                                <h4 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading">
+                                  {activeCommitteeToConfigure} Committee Workspace
+                                </h4>
+                                <p className="text-[10px] text-stone-500 font-bold">
+                                  {isFinanceComm 
+                                    ? 'Event registration payment verification, receipts & financial audit reports' 
+                                    : isFoodComm 
+                                    ? 'Financially approved meal distribution & food coupon management' 
+                                    : isAttendanceComm 
+                                    ? 'Gate QR entry pass verification & real-time event attendance tracking' 
+                                    : 'Committee leadership assignment & operational expense logging'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className="px-2.5 py-1 bg-emerald-100 border border-emerald-200 text-[#0f4c2a] text-xs font-black rounded-xl font-mono">
+                                {leadCount} Leads
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setFinanceLeadsExpanded(!financeLeadsExpanded)}
+                                className="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-250 text-stone-700 text-[10px] font-bold uppercase rounded-xl transition-all flex items-center space-x-1 cursor-pointer"
+                              >
+                                <span>{financeLeadsExpanded ? 'Hide Leads' : 'Manage Leads'}</span>
+                                {financeLeadsExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* COLLAPSIBLE LEADS MANAGEMENT PANEL */}
+                          {financeLeadsExpanded && (
+                            <div className="pt-3 border-t border-stone-200 space-y-4 animate-fadeIn">
+                              <div className="space-y-2">
+                                <h5 className="text-[10px] uppercase font-black text-stone-600 tracking-wider">Assigned Committee Leads</h5>
+                                {commLeads.length === 0 ? (
+                                  <p className="text-xs text-stone-500 italic font-bold p-3 bg-white border border-dashed border-stone-200 rounded-xl text-center">
+                                    No leads assigned yet. Use search below to appoint leads.
+                                  </p>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {commLeads.map(lead => (
+                                      <div key={lead.residentId} className="flex items-center justify-between p-2.5 bg-white border border-stone-200 rounded-xl">
+                                        <div>
+                                          <span className="text-xs font-black text-stone-850 block">{lead.fullName}</span>
+                                          <span className="text-[9px] text-stone-500 font-bold block">{lead.email}</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          disabled={isSubmitting}
+                                          onClick={() => handleRemoveCommitteeLead(lead.residentId, lead.email, activeCommitteeToConfigure)}
+                                          className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                                          title="Remove Lead"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    ))}
                                   </div>
-                                  <button
-                                    type="button"
-                                    disabled={isSubmitting}
-                                    onClick={() => handleRemoveCommitteeLead(lead.residentId, lead.email, activeCommitteeToConfigure)}
-                                    className="p-1.5 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
-                                    title="Remove Lead"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
+                                )}
+                              </div>
+
+                              <div className="space-y-2 pt-2 border-t border-dashed border-stone-200">
+                                <h5 className="text-[10px] uppercase font-black text-stone-600 tracking-wider">Assign New Committee Lead</h5>
+                                <div className="relative">
+                                  <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#0f4c2a]" />
+                                  <input
+                                    type="text"
+                                    value={workspaceSearchQuery}
+                                    onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                                    placeholder="Search resident name or flat number..."
+                                    className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                  />
                                 </div>
-                              ))}
+                                {workspaceSearchQuery && (
+                                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto">
+                                    {residents.filter(r => {
+                                      if (r.status !== 'active') return false;
+                                      if (commLeads.some(l => l.residentId === r.gmkId)) return false;
+                                      const query = workspaceSearchQuery.toLowerCase().trim();
+                                      return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
+                                    }).map(res => (
+                                      <div key={res.gmkId} className="bg-white border border-stone-200 rounded-xl p-2.5 flex items-center justify-between">
+                                        <div className="min-w-0">
+                                          <span className="font-bold text-stone-900 text-xs block truncate">{res.fullName}</span>
+                                          <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          disabled={isSubmitting}
+                                          onClick={() => {
+                                            handleAssignLeadDirectly(res, activeCommitteeToConfigure);
+                                            setWorkspaceSearchQuery('');
+                                          }}
+                                          className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shrink-0"
+                                        >
+                                          Assign
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
 
-                        {/* SEARCH RESIDENTS & ASSIGN NEW LEAD */}
-                        <div className="space-y-3 pt-3 border-t border-stone-100">
-                          <h5 className="text-[10px] uppercase font-black text-stone-550 tracking-wider">Assign New Lead</h5>
-                          
-                          <div className="space-y-4">
-                            <div className="relative">
-                              <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#0f4c2a]" />
-                              <input
-                                type="text"
-                                value={workspaceSearchQuery}
-                                onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
-                                placeholder="Search members by name or flat number to assign..."
-                                className="w-full pl-10 pr-4 py-2.5 font-bold bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-200 hover:border-stone-450 focus:border-[#0f4c2a] rounded-xl text-xs text-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                              />
+                        {/* ----------------- FINANCE COMMITTEE WORKSPACE ----------------- */}
+                        {isFinanceComm && (
+                          <div className="space-y-5">
+                            {/* FINANCE TABS */}
+                            <div className="flex border-b border-stone-200 space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => setFinanceTab('registrations')}
+                                className={`px-4 py-2.5 font-black text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center space-x-2 ${
+                                  financeTab === 'registrations' 
+                                    ? 'border-[#0f4c2a] text-[#0f4c2a] bg-emerald-50/50 rounded-t-xl' 
+                                    : 'border-transparent text-stone-500 hover:text-stone-800'
+                                }`}
+                              >
+                                <Receipt className="w-4 h-4" />
+                                <span>Event Registrations & Payments</span>
+                                <span className="ml-1 px-2 py-0.5 bg-emerald-100 text-[#0f4c2a] text-[10px] rounded-full font-mono font-bold">
+                                  {registrations.length}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setFinanceTab('expenses')}
+                                className={`px-4 py-2.5 font-black text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center space-x-2 ${
+                                  financeTab === 'expenses' 
+                                    ? 'border-[#0f4c2a] text-[#0f4c2a] bg-emerald-50/50 rounded-t-xl' 
+                                    : 'border-transparent text-stone-500 hover:text-stone-800'
+                                }`}
+                              >
+                                <CreditCard className="w-4 h-4" />
+                                <span>Committee Expense Sheet</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setFinanceTab('reports')}
+                                className={`px-4 py-2.5 font-black text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center space-x-2 ${
+                                  financeTab === 'reports' 
+                                    ? 'border-[#0f4c2a] text-[#0f4c2a] bg-emerald-50/50 rounded-t-xl' 
+                                    : 'border-transparent text-stone-500 hover:text-stone-800'
+                                }`}
+                              >
+                                <FileText className="w-4 h-4" />
+                                <span>Financial Audit Reports</span>
+                              </button>
                             </div>
 
-                            {workspaceSearchQuery && (
-                              <div className="grid grid-cols-1 gap-2.5 max-h-72 overflow-y-auto animate-fadeIn">
-                                {residents.filter(r => {
-                                  if (r.status !== 'active') return false;
-                                  if (commLeads.some(l => l.residentId === r.gmkId)) return false;
-                                  const query = workspaceSearchQuery.toLowerCase().trim();
-                                  return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                }).length === 0 ? (
-                                  <div className="text-center p-4 text-stone-450 italic text-xs font-bold bg-stone-50 rounded-xl border border-dashed border-stone-200">
-                                    No matching active residents found.
-                                  </div>
-                                ) : (
-                                  residents.filter(r => {
-                                    if (r.status !== 'active') return false;
-                                    if (commLeads.some(l => l.residentId === r.gmkId)) return false;
-                                    const query = workspaceSearchQuery.toLowerCase().trim();
-                                    return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                  }).map(res => (
-                                    <div key={res.gmkId} className="bg-stone-50 hover:bg-stone-100/70 border border-stone-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 transition-colors">
-                                      <div className="min-w-0 flex-1">
-                                        <span className="font-extrabold text-stone-900 text-xs block truncate">{res.fullName}</span>
-                                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1 text-[9px] text-stone-500 font-bold uppercase tracking-wider">
-                                          <span>Flat: {res.displayUnitNumber}</span>
-                                          <span>•</span>
-                                          <span className="truncate">{res.phone}</span>
-                                          <span>•</span>
-                                          <span className="truncate lowercase">{res.email}</span>
-                                        </div>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        disabled={isSubmitting}
-                                        onClick={() => {
-                                          handleAssignLeadDirectly(res, activeCommitteeToConfigure);
-                                          setWorkspaceSearchQuery('');
-                                        }}
-                                        className="w-full sm:w-auto px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs active:scale-95 flex items-center justify-center space-x-1 shrink-0 mt-1 sm:mt-0"
-                                      >
-                                        <UserCheck className="w-3.5 h-3.5 text-[#d4af37]" />
-                                        <span>Assign Lead</span>
-                                      </button>
+                            {/* TAB 1: REGISTRATIONS & PAYMENT PROCESSING */}
+                            {financeTab === 'registrations' && (
+                              <div className="space-y-4 animate-fadeIn">
+                                {/* FILTERS & ACTIONS */}
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center bg-stone-50 p-3 rounded-2xl border border-stone-200">
+                                  <div className="md:col-span-4">
+                                    <div className="relative">
+                                      <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-stone-400" />
+                                      <input
+                                        type="text"
+                                        value={finSearchQuery}
+                                        onChange={(e) => setFinSearchQuery(e.target.value)}
+                                        placeholder="Search GMK ID, Name, Flat, Email..."
+                                        className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:border-[#0f4c2a]"
+                                      />
                                     </div>
-                                  ))
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* COMMITTEE EXPENSE SHEET (OMR, 3 DECIMAL PLACES) */}
-                        <div className="pt-4 border-t border-stone-100 space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
-                                {activeCommitteeToConfigure} Expense Sheet
-                              </h5>
-                              <p className="text-[10px] text-stone-500 font-bold mt-0.5">
-                                Log operational expenses in OMR with 3 decimal places precision (e.g. 0.001 OMR).
-                              </p>
-                            </div>
-                            <span className="text-xs font-mono font-extrabold text-[#0f4c2a] bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl">
-                              Total: OMR {((currentComm?.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0)).toFixed(3)}
-                            </span>
-                          </div>
-
-                          {(currentComm?.expenses || []).length === 0 ? (
-                            <p className="text-xs text-stone-500 italic font-bold p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
-                              No expenses recorded for this committee yet. Use the form below to log an expense.
-                            </p>
-                          ) : (
-                            <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150">
-                              <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
-                                <div className="col-span-3">Date</div>
-                                <div className="col-span-5">Description</div>
-                                <div className="col-span-3 text-right">Amount (OMR)</div>
-                                <div className="col-span-1 text-center">Action</div>
-                              </div>
-                              {(currentComm?.expenses || []).map(exp => (
-                                <div key={exp.id} className="p-2.5 grid grid-cols-12 items-center text-xs font-bold text-stone-850 hover:bg-stone-50/50">
-                                  <div className="col-span-3 font-mono text-[11px] text-stone-600">{exp.date}</div>
-                                  <div className="col-span-5 font-semibold text-stone-900 truncate">{exp.description}</div>
-                                  <div className="col-span-3 text-right font-mono font-extrabold text-[#0f4c2a]">
-                                    OMR {(exp.amount || 0).toFixed(3)}
                                   </div>
-                                  <div className="col-span-1 text-center">
+
+                                  <div className="md:col-span-3">
+                                    <select
+                                      value={finStatusFilter}
+                                      onChange={(e) => setFinStatusFilter(e.target.value)}
+                                      className="w-full px-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:border-[#0f4c2a]"
+                                    >
+                                      <option value="all">All Payment Statuses</option>
+                                      <option value="pending">Pending Payment Verification</option>
+                                      <option value="paid">Fully Paid</option>
+                                      <option value="partially_paid">Partially Paid (Balance Due)</option>
+                                      <option value="overpaid">Overpaid (Refund Due)</option>
+                                      <option value="waived">Payment Waived</option>
+                                    </select>
+                                  </div>
+
+                                  <div className="md:col-span-5 flex items-center justify-end space-x-2">
                                     <button
                                       type="button"
-                                      disabled={isSubmitting}
-                                      onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
-                                      className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
-                                      title="Delete Expense"
+                                      onClick={handleExportCSV}
+                                      className="px-3 py-1.5 bg-white border border-stone-300 hover:bg-stone-100 text-stone-800 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center space-x-1 cursor-pointer"
                                     >
-                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <Download className="w-3.5 h-3.5 text-[#0f4c2a]" />
+                                      <span>Export Excel CSV</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handlePrintFinancialReport}
+                                      className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center space-x-1 cursor-pointer"
+                                    >
+                                      <Printer className="w-3.5 h-3.5 text-[#d4af37]" />
+                                      <span>Print PDF Report</span>
                                     </button>
                                   </div>
                                 </div>
-                              ))}
-                            </div>
-                          )}
 
-                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-stone-50/50 p-3 rounded-xl border border-stone-150">
-                            <div className="sm:col-span-3 space-y-1">
-                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
-                              <input
-                                type="date"
-                                value={commExpenseDate}
-                                onChange={(e) => setCommExpenseDate(e.target.value)}
-                                className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                              />
-                            </div>
-                            <div className="sm:col-span-4 space-y-1">
-                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
-                              <input
-                                type="text"
-                                value={commExpenseDesc}
-                                onChange={(e) => setCommExpenseDesc(e.target.value)}
-                                placeholder="Expense description..."
-                                className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                              />
-                            </div>
-                            <div className="sm:col-span-3 space-y-1">
-                              <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
-                              <input
-                                type="number"
-                                step="0.001"
-                                value={commExpenseAmount}
-                                onChange={(e) => setCommExpenseAmount(e.target.value)}
-                                placeholder="0.000"
-                                className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <button
-                                type="button"
-                                disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim()}
-                                onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
-                                className="w-full py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:opacity-50"
-                              >
-                                <Plus className="w-3.5 h-3.5 text-[#d4af37]" />
-                                <span>Add</span>
-                              </button>
-                            </div>
+                                {/* REGISTRATIONS TABLE */}
+                                {registrations.length === 0 ? (
+                                  <div className="p-8 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl">
+                                    No registrations recorded for this event yet.
+                                  </div>
+                                ) : (
+                                  <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white shadow-xs">
+                                    <table className="w-full text-left border-collapse">
+                                      <thead>
+                                        <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
+                                          <th className="p-3">GMK / Reg ID</th>
+                                          <th className="p-3">Registrant & Unit</th>
+                                          <th className="p-3 text-center">Attendees</th>
+                                          <th className="p-3 text-right">Amount Due</th>
+                                          <th className="p-3 text-right">Amount Rec.</th>
+                                          <th className="p-3 text-right">Balance / Refund</th>
+                                          <th className="p-3 text-center">Status</th>
+                                          <th className="p-3 text-center">Action</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-stone-150 text-stone-800 font-bold font-sans text-xs">
+                                        {registrations
+                                          .filter(reg => {
+                                            if (finStatusFilter !== 'all' && (reg.paymentStatus || 'pending') !== finStatusFilter) return false;
+                                            if (finSearchQuery) {
+                                              const q = finSearchQuery.toLowerCase();
+                                              const fam = families.find(f => f.id === reg.familyId);
+                                              const pName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : '');
+                                              return (
+                                                reg.primaryMemberGmkId?.toLowerCase().includes(q) ||
+                                                pName.toLowerCase().includes(q) ||
+                                                reg.primaryMemberEmail?.toLowerCase().includes(q) ||
+                                                reg.id.toLowerCase().includes(q)
+                                              );
+                                            }
+                                            return true;
+                                          })
+                                          .map(reg => {
+                                            const fam = families.find(f => f.id === reg.familyId);
+                                            const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
+                                            const unit = fam ? fam.displayUnitNumber : 'Unknown';
+
+                                            const amtDue = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+                                            const amtRec = reg.amountReceived ?? (reg.paymentStatus === 'paid' ? amtDue : 0);
+                                            const bal = reg.balanceDue ?? Math.max(0, amtDue - amtRec);
+                                            const ref = reg.refundDue ?? Math.max(0, amtRec - amtDue);
+                                            const pStatus = reg.paymentStatus || (amtDue === 0 ? 'waived' : 'pending');
+
+                                            return (
+                                              <tr key={reg.id} className="hover:bg-stone-50/60 transition-colors">
+                                                <td className="p-3 font-mono text-[10px] text-stone-600 uppercase">
+                                                  {reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A'}
+                                                </td>
+                                                <td className="p-3">
+                                                  <span className="text-stone-900 font-black block">{primaryName}</span>
+                                                  <span className="text-[10px] text-stone-500 font-medium font-mono">Flat {unit} • {reg.primaryMemberEmail}</span>
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                  <span className="px-2 py-0.5 bg-stone-100 text-stone-800 border border-stone-200 rounded-md font-mono text-[10px] font-bold">
+                                                    {reg.totalParticipants || 1}
+                                                  </span>
+                                                </td>
+                                                <td className="p-3 text-right font-mono font-black text-stone-900">
+                                                  OMR {amtDue.toFixed(3)}
+                                                </td>
+                                                <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">
+                                                  OMR {amtRec.toFixed(3)}
+                                                </td>
+                                                <td className="p-3 text-right font-mono font-bold">
+                                                  {bal > 0 ? (
+                                                    <span className="text-amber-800 font-black">OMR {bal.toFixed(3)}</span>
+                                                  ) : ref > 0 ? (
+                                                    <span className="text-blue-800 font-black">OMR {ref.toFixed(3)} (Refund)</span>
+                                                  ) : (
+                                                    <span className="text-stone-400">0.000</span>
+                                                  )}
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                                                    pStatus === 'paid' || pStatus === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                                    pStatus === 'partially_paid' ? 'bg-amber-50 text-amber-900 border-amber-300' :
+                                                    pStatus === 'overpaid' ? 'bg-blue-50 text-blue-900 border-blue-200' :
+                                                    pStatus === 'waived' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                                    'bg-stone-100 text-stone-700 border-stone-200'
+                                                  }`}>
+                                                    {pStatus.replace('_', ' ')}
+                                                  </span>
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setPaymentModalReg(reg);
+                                                      setPaymentModalAmtRec(amtRec > 0 ? amtRec.toString() : amtDue.toString());
+                                                      setPaymentModalRemarks(reg.financeRemarks || '');
+                                                    }}
+                                                    className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1 mx-auto"
+                                                  >
+                                                    <CreditCard className="w-3.5 h-3.5 text-[#d4af37]" />
+                                                    <span>Record Payment</span>
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* TAB 2: COMMITTEE EXPENSE SHEET */}
+                            {financeTab === 'expenses' && (
+                              <div className="space-y-4 animate-fadeIn">
+                                <div className="flex items-center justify-between border-b border-stone-200 pb-2">
+                                  <div>
+                                    <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
+                                      Operational Expense Log
+                                    </h5>
+                                    <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                                      Record committee expenses in OMR formatted to 3 decimal places (e.g. 0.001 OMR).
+                                    </p>
+                                  </div>
+                                  <span className="text-xs font-mono font-extrabold text-[#0f4c2a] bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+                                    Total Expense: OMR {((currentComm?.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0)).toFixed(3)}
+                                  </span>
+                                </div>
+
+                                {(currentComm?.expenses || []).length === 0 ? (
+                                  <p className="text-xs text-stone-500 italic font-bold p-4 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
+                                    No expenses recorded for this committee yet. Log new expenses using the form below.
+                                  </p>
+                                ) : (
+                                  <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150 bg-white shadow-xs">
+                                    <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
+                                      <div className="col-span-3">Date</div>
+                                      <div className="col-span-5">Description</div>
+                                      <div className="col-span-3 text-right">Amount (OMR)</div>
+                                      <div className="col-span-1 text-center">Action</div>
+                                    </div>
+                                    {(currentComm?.expenses || []).map(exp => (
+                                      <div key={exp.id} className="p-2.5 grid grid-cols-12 items-center text-xs font-bold text-stone-850 hover:bg-stone-50/50">
+                                        <div className="col-span-3 font-mono text-[11px] text-stone-600">{exp.date}</div>
+                                        <div className="col-span-5 font-semibold text-stone-900 truncate">{exp.description}</div>
+                                        <div className="col-span-3 text-right font-mono font-extrabold text-[#0f4c2a]">
+                                          OMR {(exp.amount || 0).toFixed(3)}
+                                        </div>
+                                        <div className="col-span-1 text-center">
+                                          <button
+                                            type="button"
+                                            disabled={isSubmitting}
+                                            onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
+                                            className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                                            title="Delete Expense"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
+                                  <div className="sm:col-span-3 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
+                                    <input
+                                      type="date"
+                                      value={commExpenseDate}
+                                      onChange={(e) => setCommExpenseDate(e.target.value)}
+                                      className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-4 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
+                                    <input
+                                      type="text"
+                                      value={commExpenseDesc}
+                                      onChange={(e) => setCommExpenseDesc(e.target.value)}
+                                      placeholder="Expense description..."
+                                      className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-3 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      value={commExpenseAmount}
+                                      onChange={(e) => setCommExpenseAmount(e.target.value)}
+                                      placeholder="0.000"
+                                      className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <button
+                                      type="button"
+                                      disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim()}
+                                      onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
+                                      className="w-full py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:opacity-50"
+                                    >
+                                      <Plus className="w-3.5 h-3.5 text-[#d4af37]" />
+                                      <span>Add Log</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* TAB 3: FINANCIAL AUDIT REPORTS */}
+                            {financeTab === 'reports' && (() => {
+                              let totalDue = 0;
+                              let totalRec = 0;
+                              let countPaid = 0;
+                              let countPending = 0;
+                              let countPart = 0;
+                              let countOver = 0;
+                              let countWaived = 0;
+
+                              registrations.forEach(r => {
+                                const due = r.amountDue ?? r.paymentAmount ?? r.paymentSummary?.totalAmount ?? 0;
+                                const rec = r.amountReceived ?? (r.paymentStatus === 'paid' ? due : 0);
+                                totalDue += due;
+                                totalRec += rec;
+                                const st = r.paymentStatus || 'pending';
+                                if (st === 'paid' || st === 'approved') countPaid++;
+                                else if (st === 'pending') countPending++;
+                                else if (st === 'partially_paid') countPart++;
+                                else if (st === 'overpaid') countOver++;
+                                else if (st === 'waived') countWaived++;
+                              });
+
+                              return (
+                                <div className="space-y-4 animate-fadeIn">
+                                  {/* KPI CARDS */}
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-2xl text-left">
+                                      <span className="text-[9px] uppercase font-bold text-stone-500 block">Total Due</span>
+                                      <span className="text-base font-black font-mono text-stone-900 mt-1 block">OMR {totalDue.toFixed(3)}</span>
+                                      <span className="text-[10px] text-stone-500 font-bold">{registrations.length} Total Registrations</span>
+                                    </div>
+
+                                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-left">
+                                      <span className="text-[9px] uppercase font-bold text-emerald-800 block">Total Received</span>
+                                      <span className="text-base font-black font-mono text-[#0f4c2a] mt-1 block">OMR {totalRec.toFixed(3)}</span>
+                                      <span className="text-[10px] text-emerald-800 font-bold">{countPaid} Fully Paid</span>
+                                    </div>
+
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-left">
+                                      <span className="text-[9px] uppercase font-bold text-amber-800 block">Pending / Balances</span>
+                                      <span className="text-base font-black font-mono text-amber-950 mt-1 block">OMR {Math.max(0, totalDue - totalRec).toFixed(3)}</span>
+                                      <span className="text-[10px] text-amber-850 font-bold">{countPending} Pending • {countPart} Partial</span>
+                                    </div>
+
+                                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-left">
+                                      <span className="text-[9px] uppercase font-bold text-blue-800 block">Special Statuses</span>
+                                      <span className="text-base font-black font-mono text-blue-950 mt-1 block">{countWaived + countOver} Registrations</span>
+                                      <span className="text-[10px] text-blue-850 font-bold">{countWaived} Waived • {countOver} Refunds Due</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                                    <div className="text-left">
+                                      <h6 className="font-black text-stone-900 text-xs">Print Official Finance Committee Audit Sheet</h6>
+                                      <p className="text-[10px] text-stone-500 font-medium">Generates a formatted, printable PDF document of all registrations and payment logs.</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={handlePrintFinancialReport}
+                                      className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1.5 shrink-0"
+                                    >
+                                      <Printer className="w-4 h-4 text-[#d4af37]" />
+                                      <span>Print PDF Report</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
-                        </div>
+                        )}
 
-                        {/* FINANCE & ATTENDANCE COMMITTEE REGISTRATION REPORTS WORKSPACE */}
-                        {(activeCommitteeToConfigure.toLowerCase().includes('finance') || activeCommitteeToConfigure.toLowerCase().includes('attendance')) && (
-                          <div className="pt-4 border-t border-stone-100 space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <div>
-                                <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
-                                  <span>📋</span>
-                                  <span>Event Registration Data ({activeCommitteeToConfigure} Committee)</span>
-                                </h5>
-                                <p className="text-[10px] text-stone-500 font-bold mt-0.5">
-                                  Comprehensive registration records showing registrant names, adult/child counts, payable amount, and payment status.
-                                </p>
+                        {/* ----------------- FOOD COMMITTEE WORKSPACE ----------------- */}
+                        {isFoodComm && (() => {
+                          const approvedRegs = registrations.filter(r => {
+                            const st = r.paymentStatus || 'pending';
+                            return st === 'paid' || st === 'waived' || st === 'overpaid' || st === 'approved';
+                          });
+
+                          const pendingRegs = registrations.filter(r => {
+                            const st = r.paymentStatus || 'pending';
+                            return st !== 'paid' && st !== 'waived' && st !== 'overpaid' && st !== 'approved';
+                          });
+
+                          let totalApprovedMeals = 0;
+                          approvedRegs.forEach(r => totalApprovedMeals += (r.totalParticipants || 1));
+
+                          return (
+                            <div className="space-y-5 animate-fadeIn">
+                              {/* MEAL METRICS */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-left">
+                                  <span className="text-[9px] uppercase font-bold text-emerald-800 block">Approved Households</span>
+                                  <span className="text-lg font-black font-mono text-[#0f4c2a] mt-0.5 block">{approvedRegs.length}</span>
+                                  <span className="text-[9px] text-emerald-700 font-bold">Payment Cleared / Waived</span>
+                                </div>
+
+                                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-left">
+                                  <span className="text-[9px] uppercase font-bold text-emerald-800 block">Total Approved Meals</span>
+                                  <span className="text-lg font-black font-mono text-[#0f4c2a] mt-0.5 block">{totalApprovedMeals}</span>
+                                  <span className="text-[9px] text-emerald-700 font-bold">Coupons Authorized</span>
+                                </div>
+
+                                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-left">
+                                  <span className="text-[9px] uppercase font-bold text-amber-800 block">Unapproved Households</span>
+                                  <span className="text-lg font-black font-mono text-amber-950 mt-0.5 block">{pendingRegs.length}</span>
+                                  <span className="text-[9px] text-amber-800 font-bold">Payment Pending</span>
+                                </div>
+
+                                <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl text-left">
+                                  <span className="text-[9px] uppercase font-bold text-stone-500 block">Distribution Status</span>
+                                  <span className="text-xs font-black text-stone-800 mt-1.5 block uppercase">Ready for Counter</span>
+                                </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={handleExportCSV}
-                                className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all shadow-xs flex items-center space-x-1 cursor-pointer self-start sm:self-auto"
-                              >
-                                <Download className="w-3.5 h-3.5 text-[#d4af37]" />
-                                <span>Export Report</span>
-                              </button>
+
+                              {/* APPROVED FOOD TABLE */}
+                              <div className="space-y-2 text-left">
+                                <div className="flex items-center justify-between">
+                                  <h5 className="text-xs font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
+                                    <Check className="w-4 h-4 text-emerald-600" />
+                                    <span>Financially Approved Food List ({approvedRegs.length})</span>
+                                  </h5>
+                                  <button
+                                    type="button"
+                                    onClick={handleExportCSV}
+                                    className="px-3 py-1 bg-white border border-stone-300 hover:bg-stone-100 text-stone-800 text-[10px] font-bold uppercase rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <Download className="w-3 h-3 text-[#0f4c2a]" />
+                                    <span>Export Food List</span>
+                                  </button>
+                                </div>
+
+                                {approvedRegs.length === 0 ? (
+                                  <div className="p-6 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl">
+                                    No registrations have been financially approved for food coupons yet.
+                                  </div>
+                                ) : (
+                                  <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white shadow-xs">
+                                    <table className="w-full text-left border-collapse">
+                                      <thead>
+                                        <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
+                                          <th className="p-3">GMK ID</th>
+                                          <th className="p-3">Primary Registrant</th>
+                                          <th className="p-3">Flat #</th>
+                                          <th className="p-3 text-center">Meals Count</th>
+                                          <th className="p-3 text-center">Food Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-stone-150 text-stone-800 font-bold font-sans text-xs">
+                                        {approvedRegs.map(reg => {
+                                          const fam = families.find(f => f.id === reg.familyId);
+                                          const pName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
+                                          const unit = fam ? fam.displayUnitNumber : 'Unknown';
+                                          return (
+                                            <tr key={reg.id} className="hover:bg-emerald-50/20">
+                                              <td className="p-3 font-mono text-[10px] text-stone-700 font-bold">
+                                                {reg.primaryMemberGmkId || 'N/A'}
+                                              </td>
+                                              <td className="p-3">
+                                                <span className="text-stone-900 font-black block">{pName}</span>
+                                                <span className="text-[10px] text-stone-500 font-mono">{reg.primaryMemberEmail}</span>
+                                              </td>
+                                              <td className="p-3 font-mono font-bold text-emerald-800">{unit}</td>
+                                              <td className="p-3 text-center font-mono font-black text-base text-[#0f4c2a]">
+                                                {reg.totalParticipants || 1}
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                <span className="px-2.5 py-0.5 bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-full text-[9px] font-black uppercase tracking-wider">
+                                                  Coupon Authorized
+                                                </span>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* PENDING / UNAPPROVED WARNING SECTION */}
+                              {pendingRegs.length > 0 && (
+                                <div className="space-y-2 text-left pt-3 border-t border-stone-200">
+                                  <h5 className="text-xs font-black uppercase text-amber-900 tracking-wider font-heading flex items-center space-x-1.5">
+                                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                                    <span>Unapproved Registrations — Food Coupon Withheld ({pendingRegs.length})</span>
+                                  </h5>
+                                  <div className="overflow-x-auto border border-amber-200/80 rounded-2xl bg-amber-50/20">
+                                    <table className="w-full text-left border-collapse text-xs font-bold text-stone-800">
+                                      <thead>
+                                        <tr className="bg-amber-100/40 text-[10px] uppercase font-black text-amber-900 tracking-wider">
+                                          <th className="p-2.5">GMK ID</th>
+                                          <th className="p-2.5">Registrant</th>
+                                          <th className="p-2.5">Requested Meals</th>
+                                          <th className="p-2.5 text-center">Payment Reason</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-amber-100">
+                                        {pendingRegs.map(reg => (
+                                          <tr key={reg.id}>
+                                            <td className="p-2.5 font-mono text-[10px]">{reg.primaryMemberGmkId}</td>
+                                            <td className="p-2.5">{reg.primaryMemberEmail}</td>
+                                            <td className="p-2.5 font-mono">{reg.totalParticipants || 1}</td>
+                                            <td className="p-2.5 text-center">
+                                              <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md text-[9px] font-black uppercase">
+                                                {reg.paymentStatus || 'Pending Payment Verification'}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* ----------------- ATTENDANCE COMMITTEE WORKSPACE ----------------- */}
+                        {isAttendanceComm && (
+                          <div className="space-y-5 animate-fadeIn text-left">
+                            {/* GATE SCANNER / PASS LOOKUP CARD */}
+                            <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+                              <h5 className="text-xs font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
+                                <QrCode className="w-4 h-4 text-[#0f4c2a]" />
+                                <span>Gate Entry Pass & QR Code Verification</span>
+                              </h5>
+
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <div className="relative flex-1">
+                                  <Search className="absolute left-3.5 top-3 w-4 h-4 text-stone-400" />
+                                  <input
+                                    type="text"
+                                    value={attendanceScanInput}
+                                    onChange={(e) => setAttendanceScanInput(e.target.value)}
+                                    placeholder="Enter or Scan Entry Pass #, GMK ID, or Registration ID..."
+                                    className="w-full pl-10 pr-4 py-2.5 font-mono font-bold bg-white border border-stone-250 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const input = attendanceScanInput.trim().toLowerCase();
+                                    if (!input) return;
+                                    const match = registrations.find(r => 
+                                      r.primaryMemberGmkId?.toLowerCase() === input ||
+                                      r.entryPassNumber?.toLowerCase() === input ||
+                                      r.id.toLowerCase() === input ||
+                                      input.includes(r.id.toLowerCase())
+                                    );
+                                    if (match) {
+                                      setAttendanceScannedReg(match);
+                                      setErrorMsg(null);
+                                    } else {
+                                      setAttendanceScannedReg(null);
+                                      setErrorMsg(`No matching event registration found for search term '${attendanceScanInput}'.`);
+                                    }
+                                  }}
+                                  className="px-5 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer shrink-0"
+                                >
+                                  Verify Gate Pass
+                                </button>
+                              </div>
+
+                              {/* SCANNED ENTRY PASS DETAILS RESULT CARD */}
+                              {attendanceScannedReg && (() => {
+                                const gmkId = attendanceScannedReg.primaryMemberGmkId || attendanceScannedReg.id.split('_')?.[1] || '';
+                                const existingAtt = activeAttendances.find(a => a.primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${selectedEventId}`);
+                                const isAlreadyAttended = existingAtt && existingAtt.status === 'attended';
+                                const passNo = attendanceScannedReg.entryPassNumber || `PASS-${selectedEventId.slice(-6).toUpperCase()}-${gmkId}`;
+
+                                return (
+                                  <div className="mt-3 p-4 bg-white border border-stone-200 rounded-2xl space-y-3 animate-scaleUp shadow-md">
+                                    <div className="flex justify-between items-start border-b border-stone-150 pb-2">
+                                      <div>
+                                        <span className="text-[9px] font-mono font-bold text-[#d4af37] uppercase tracking-wider block">Pass Verification Result</span>
+                                        <h6 className="text-sm font-black text-[#0f4c2a]">Household GMK ID: {gmkId}</h6>
+                                        <p className="text-[11px] text-stone-600 font-medium">{attendanceScannedReg.primaryMemberEmail}</p>
+                                      </div>
+                                      <span className="font-mono text-xs font-black text-emerald-900 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl">
+                                        {passNo}
+                                      </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                                      <div className="p-2 bg-stone-50 rounded-xl border border-stone-150">
+                                        <span className="text-[9px] text-stone-500 uppercase block">Total Gate Attendees</span>
+                                        <span className="text-sm font-mono font-black text-stone-900">{attendanceScannedReg.totalParticipants || 1}</span>
+                                      </div>
+                                      <div className="p-2 bg-stone-50 rounded-xl border border-stone-150">
+                                        <span className="text-[9px] text-stone-500 uppercase block">Payment Verification</span>
+                                        <span className="text-xs font-mono font-black capitalize text-[#0f4c2a]">{attendanceScannedReg.paymentStatus || 'pending'}</span>
+                                      </div>
+                                    </div>
+
+                                    {isAlreadyAttended ? (
+                                      <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl flex items-center justify-between">
+                                        <div className="flex items-center space-x-2">
+                                          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                                          <div>
+                                            <p className="font-black text-xs">ALREADY CHECKED IN AT GATE</p>
+                                            <p className="text-[10px] text-amber-800">Check-in recorded at {existingAtt.attendedAt || 'earlier'}. Double check-in blocked.</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex space-x-2 pt-1">
+                                        <button
+                                          type="button"
+                                          disabled={isSubmitting}
+                                          onClick={() => handleGateCheckInSubmit(attendanceScannedReg)}
+                                          className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center space-x-1.5"
+                                        >
+                                          <Check className="w-4 h-4 text-[#d4af37]" />
+                                          <span>Confirm Gate Entry & Mark Attended</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setAttendanceScannedReg(null)}
+                                          className="px-4 py-2.5 border border-stone-300 text-stone-700 font-bold text-xs uppercase rounded-xl hover:bg-stone-50 cursor-pointer"
+                                        >
+                                          Dismiss
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
 
-                            {registrations.length === 0 ? (
-                              <div className="p-4 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-xl">
-                                No event registrations found yet.
+                            {/* ALL REGISTRATIONS ATTENDANCE LIST */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <h5 className="text-xs font-black uppercase text-[#0f4c2a] tracking-wider font-heading">
+                                  Gate Check-In Register ({activeAttendances.filter(a => a.status === 'attended').length} / {registrations.length} Attended)
+                                </h5>
+                                <div className="flex items-center space-x-2">
+                                  <select
+                                    value={attendanceScanFilter}
+                                    onChange={(e) => setAttendanceScanFilter(e.target.value as any)}
+                                    className="px-2.5 py-1 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850"
+                                  >
+                                    <option value="all">All Registrations</option>
+                                    <option value="attended">Checked In at Gate</option>
+                                    <option value="pending">Pending Gate Check-In</option>
+                                  </select>
+                                </div>
                               </div>
-                            ) : (
-                              <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white">
+
+                              <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white shadow-xs">
                                 <table className="w-full text-left border-collapse">
                                   <thead>
                                     <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
-                                      <th className="p-3">GMK / Reg ID</th>
-                                      <th className="p-3">Name of Registrant</th>
-                                      <th className="p-3">Unit Number</th>
-                                      <th className="p-3 text-center">Adults</th>
-                                      <th className="p-3 text-center">Children</th>
-                                      <th className="p-3 text-center">Total</th>
-                                      <th className="p-3 text-right">Amount to Pay</th>
-                                      <th className="p-3 text-center">Payment Status</th>
+                                      <th className="p-3">GMK ID</th>
+                                      <th className="p-3">Registrant Name</th>
+                                      <th className="p-3 text-center">Attendees</th>
+                                      <th className="p-3 font-mono text-center">Entry Pass #</th>
+                                      <th className="p-3 text-center">Gate Check-In Status</th>
+                                      <th className="p-3 text-center">Action</th>
                                     </tr>
                                   </thead>
-                                  <tbody className="divide-y divide-stone-150 text-stone-750 font-bold font-sans text-xs">
-                                    {registrations.map(reg => {
-                                      const fam = families.find(f => f.id === reg.familyId);
-                                      const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
-                                      const unit = fam ? fam.displayUnitNumber : 'Unknown';
-                                      const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
-                                      const participants = reg.participants || [];
+                                  <tbody className="divide-y divide-stone-150 text-stone-800 font-bold font-sans text-xs">
+                                    {registrations
+                                      .filter(reg => {
+                                        const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1] || '';
+                                        const att = activeAttendances.find(a => a.primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${selectedEventId}`);
+                                        const isAttended = att && att.status === 'attended';
+                                        if (attendanceScanFilter === 'attended' && !isAttended) return false;
+                                        if (attendanceScanFilter === 'pending' && isAttended) return false;
+                                        return true;
+                                      })
+                                      .map(reg => {
+                                        const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A';
+                                        const fam = families.find(f => f.id === reg.familyId);
+                                        const pName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
+                                        const att = activeAttendances.find(a => a.primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${selectedEventId}`);
+                                        const isAttended = att && att.status === 'attended';
+                                        const passNo = reg.entryPassNumber || `PASS-${selectedEventId.slice(-6).toUpperCase()}-${gmkId}`;
 
-                                      let adults = 0;
-                                      let children = 0;
-
-                                      if (reg.paymentSummary && typeof reg.paymentSummary.childrenCount === 'number') {
-                                        children = reg.paymentSummary.childrenCount;
-                                        adults = Math.max(0, participants.length - children);
-                                      } else {
-                                        participants.forEach(name => {
-                                          if (name === primaryName) {
-                                            adults++;
-                                          } else {
-                                            const match = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
-                                            if (match && match.relationship === 'child') {
-                                              children++;
-                                            } else {
-                                              adults++;
-                                            }
-                                          }
-                                        });
-                                      }
-
-                                      const amountToPay = reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
-                                      const pStatus = reg.paymentStatus || (amountToPay === 0 ? 'waived' : 'pending');
-
-                                      return (
-                                        <tr key={reg.id} className="hover:bg-stone-50/50">
-                                          <td className="p-3 font-mono text-[10px] text-stone-600 uppercase">
-                                            {reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A'}
-                                          </td>
-                                          <td className="p-3">
-                                            <span className="text-stone-900 font-black block">{primaryName}</span>
-                                            <span className="text-[10px] text-stone-500 font-medium font-mono">{reg.primaryMemberEmail}</span>
-                                          </td>
-                                          <td className="p-3 font-mono text-[11px] text-emerald-800 font-bold">{unit}</td>
-                                          <td className="p-3 text-center">
-                                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-bold text-[10px]">
-                                              {adults}
-                                            </span>
-                                          </td>
-                                          <td className="p-3 text-center">
-                                            <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold text-[10px]">
-                                              {children}
-                                            </span>
-                                          </td>
-                                          <td className="p-3 text-center font-black text-stone-900">{reg.totalParticipants || (adults + children)}</td>
-                                          <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">
-                                            OMR {amountToPay.toFixed(3)}
-                                          </td>
-                                          <td className="p-3 text-center">
-                                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
-                                              pStatus === 'paid' || pStatus === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                                              pStatus === 'waived' ? 'bg-blue-50 text-blue-800 border-blue-200' :
-                                              'bg-amber-50 text-amber-800 border-amber-200'
-                                            }`}>
-                                              {pStatus}
-                                            </span>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
+                                        return (
+                                          <tr key={reg.id} className="hover:bg-stone-50/50">
+                                            <td className="p-3 font-mono text-[10px] text-stone-700">{gmkId}</td>
+                                            <td className="p-3">
+                                              <span className="text-stone-900 font-black block">{pName}</span>
+                                              <span className="text-[10px] text-stone-500 font-mono">{reg.primaryMemberEmail}</span>
+                                            </td>
+                                            <td className="p-3 text-center font-mono font-bold">{reg.totalParticipants || 1}</td>
+                                            <td className="p-3 text-center font-mono text-[11px] text-[#0f4c2a]">{passNo}</td>
+                                            <td className="p-3 text-center">
+                                              {isAttended ? (
+                                                <span className="px-2.5 py-0.5 bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-full text-[9px] font-black uppercase tracking-wider">
+                                                  Checked In
+                                                </span>
+                                              ) : (
+                                                <span className="px-2.5 py-0.5 bg-stone-100 text-stone-600 border border-stone-200 rounded-full text-[9px] font-bold uppercase tracking-wider">
+                                                  Pending Gate Check-In
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="p-3 text-center">
+                                              {!isAttended ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleGateCheckInSubmit(reg)}
+                                                  className="px-3 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[9px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer"
+                                                >
+                                                  Mark Attended
+                                                </button>
+                                              ) : (
+                                                <span className="text-[10px] text-stone-400 italic">Checked In</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
                                   </tbody>
                                 </table>
                               </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ----------------- OTHER OPERATIONAL COMMITTEES (PROGRAM, LOGISTICS, DECOR, ETC.) ----------------- */}
+                        {!isFinanceComm && !isFoodComm && !isAttendanceComm && (
+                          <div className="pt-4 border-t border-stone-100 space-y-4 text-left">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
+                                  {activeCommitteeToConfigure} Operational Expense Log
+                                </h5>
+                                <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                                  Log committee operational expenses in OMR formatted to 3 decimal places.
+                                </p>
+                              </div>
+                              <span className="text-xs font-mono font-extrabold text-[#0f4c2a] bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+                                Total Expense: OMR {((currentComm?.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0)).toFixed(3)}
+                              </span>
+                            </div>
+
+                            {(currentComm?.expenses || []).length === 0 ? (
+                              <p className="text-xs text-stone-500 italic font-bold p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
+                                No expenses recorded for this committee yet. Use the form below to log an expense.
+                              </p>
+                            ) : (
+                              <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150 bg-white">
+                                <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
+                                  <div className="col-span-3">Date</div>
+                                  <div className="col-span-5">Description</div>
+                                  <div className="col-span-3 text-right">Amount (OMR)</div>
+                                  <div className="col-span-1 text-center">Action</div>
+                                </div>
+                                {(currentComm?.expenses || []).map(exp => (
+                                  <div key={exp.id} className="p-2.5 grid grid-cols-12 items-center text-xs font-bold text-stone-850 hover:bg-stone-50/50">
+                                    <div className="col-span-3 font-mono text-[11px] text-stone-600">{exp.date}</div>
+                                    <div className="col-span-5 font-semibold text-stone-900 truncate">{exp.description}</div>
+                                    <div className="col-span-3 text-right font-mono font-extrabold text-[#0f4c2a]">
+                                      OMR {(exp.amount || 0).toFixed(3)}
+                                    </div>
+                                    <div className="col-span-1 text-center">
+                                      <button
+                                        type="button"
+                                        disabled={isSubmitting}
+                                        onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
+                                        className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                                        title="Delete Expense"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-stone-50 p-3 rounded-xl border border-stone-150">
+                              <div className="sm:col-span-3 space-y-1">
+                                <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
+                                <input
+                                  type="date"
+                                  value={commExpenseDate}
+                                  onChange={(e) => setCommExpenseDate(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                />
+                              </div>
+                              <div className="sm:col-span-4 space-y-1">
+                                <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
+                                <input
+                                  type="text"
+                                  value={commExpenseDesc}
+                                  onChange={(e) => setCommExpenseDesc(e.target.value)}
+                                  placeholder="Expense description..."
+                                  className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                />
+                              </div>
+                              <div className="sm:col-span-3 space-y-1">
+                                <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
+                                <input
+                                  type="number"
+                                  step="0.001"
+                                  value={commExpenseAmount}
+                                  onChange={(e) => setCommExpenseAmount(e.target.value)}
+                                  placeholder="0.000"
+                                  className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <button
+                                  type="button"
+                                  disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim()}
+                                  onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
+                                  className="w-full py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1 shadow-xs disabled:opacity-50"
+                                >
+                                  <Plus className="w-3.5 h-3.5 text-[#d4af37]" />
+                                  <span>Add Expense</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -8665,6 +9560,161 @@ export default function EventDirectorDashboard({ onBackToResidentPortal }: Event
           </div>
         </div>
       )}
+
+      {/* RECORD / PROCESS PAYMENT OVERLAY MODAL */}
+      {paymentModalReg && (() => {
+        const amtDue = paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0;
+        const amtRecNum = parseFloat(paymentModalAmtRec) || 0;
+        const diff = amtRecNum - amtDue;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white border border-stone-200 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-scaleUp text-left">
+              <div className="flex justify-between items-start border-b border-stone-150 pb-3">
+                <div>
+                  <span className="text-[9px] font-mono font-bold text-[#d4af37] uppercase tracking-wider block">Finance Committee Operational Tool</span>
+                  <h3 className="text-base font-black text-[#0f4c2a] font-heading">Record / Process Registration Payment</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalReg(null)}
+                  className="p-1 hover:bg-stone-100 rounded-lg text-stone-400 hover:text-stone-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* HOUSEHOLD DETAILS */}
+              <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">GMK Household ID</span>
+                  <span className="font-mono font-black text-stone-900 bg-stone-200/80 px-2 py-0.5 rounded text-[10px]">
+                    {paymentModalReg.primaryMemberGmkId || 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">Primary Member Email</span>
+                  <span className="font-semibold text-stone-800">{paymentModalReg.primaryMemberEmail}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">Total Registered Attendees</span>
+                  <span className="font-mono font-black text-[#0f4c2a]">{paymentModalReg.totalParticipants || 1} Persons</span>
+                </div>
+              </div>
+
+              {/* PAYMENT ENTRY & CALCULATION */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 p-3 rounded-2xl">
+                  <span className="text-xs font-bold text-emerald-900 uppercase">Total Registration Fee Due</span>
+                  <span className="text-base font-mono font-black text-[#0f4c2a]">OMR {amtDue.toFixed(3)}</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
+                    Amount Received from Resident (OMR)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 font-mono text-stone-400 text-xs font-bold">OMR</span>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={paymentModalAmtRec}
+                      onChange={(e) => setPaymentModalAmtRec(e.target.value)}
+                      placeholder="0.000"
+                      className="w-full pl-12 pr-4 py-2 font-mono font-black bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-300 focus:border-[#0f4c2a] rounded-xl text-sm text-stone-900 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* STATUS BADGE / CALCULATION PREVIEW */}
+                <div className={`p-3 rounded-xl border text-xs font-bold ${
+                  Math.abs(diff) < 0.0001 ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
+                  diff < 0 ? 'bg-amber-50 border-amber-300 text-amber-950' :
+                  'bg-blue-50 border-blue-300 text-blue-950'
+                }`}>
+                  <div className="flex justify-between items-center">
+                    <span className="uppercase text-[9px]">Calculated Payment Status</span>
+                    <span className="font-black uppercase">
+                      {Math.abs(diff) < 0.0001 ? 'Fully Paid' : diff < 0 ? 'Partially Paid' : 'Overpaid / Refund Due'}
+                    </span>
+                  </div>
+                  {diff < 0 && (
+                    <p className="text-[10px] mt-1 text-amber-800">
+                      Remaining Balance Due: <strong className="font-mono font-black">OMR {Math.abs(diff).toFixed(3)}</strong>
+                    </p>
+                  )}
+                  {diff > 0 && (
+                    <p className="text-[10px] mt-1 text-blue-800">
+                      Refund Amount Owed to Resident: <strong className="font-mono font-black">OMR {diff.toFixed(3)}</strong>
+                    </p>
+                  )}
+                </div>
+
+                {/* PRESETS */}
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModalAmtRec(amtDue.toString())}
+                    className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[10px] font-bold uppercase rounded-lg border border-stone-250 transition-all cursor-pointer"
+                  >
+                    Set Full Amount
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentModalAmtRec('0');
+                      setPaymentModalRemarks('Fee Waived by Finance Committee');
+                    }}
+                    className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 text-[10px] font-bold uppercase rounded-lg border border-blue-200 transition-all cursor-pointer"
+                  >
+                    Mark Waived
+                  </button>
+                </div>
+
+                {/* REMARKS */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
+                    Finance Committee Remarks / Payment Ref #
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentModalRemarks}
+                    onChange={(e) => setPaymentModalRemarks(e.target.value)}
+                    placeholder="e.g. Bank Transfer Ref #12345 / Cash collected at desk..."
+                    className="w-full px-3 py-2 font-bold bg-stone-50 border border-stone-250 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                  />
+                </div>
+              </div>
+
+              {/* ACTIONS */}
+              <div className="flex items-center space-x-2 pt-2 border-t border-stone-150">
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalReg(null)}
+                  className="flex-1 py-2.5 bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleRecordPaymentSubmit}
+                  className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[#d4af37]" />
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-[#d4af37]" />
+                      <span>Confirm & Record Payment</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {isConfirmOpen && confirmOptions && (
         <GEASConfirmationDialogUI

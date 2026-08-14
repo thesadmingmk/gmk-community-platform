@@ -196,6 +196,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 assignedRoles.push('admin');
               } else if (pos) {
                 positions.push(pos);
+                if (pos === 'committee_lead' && data.committee) {
+                  let cType = 'general';
+                  const n = String(data.committee).toLowerCase();
+                  if (n.includes('finance')) cType = 'finance';
+                  else if (n.includes('food')) cType = 'food';
+                  else if (n.includes('attendance')) cType = 'attendance';
+                  else if (n.includes('program')) cType = 'program';
+                  else if (n.includes('sourcing')) cType = 'sourcing';
+                  else if (n.includes('sponsorship')) cType = 'sponsorship';
+                  positions.push(`committee_lead_${cType}`);
+                }
               }
             }
           });
@@ -215,6 +226,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 assignedRoles.push('admin');
               } else if (pos) {
                 positions.push(pos);
+                if (pos === 'committee_lead' && data.committee) {
+                  let cType = 'general';
+                  const n = String(data.committee).toLowerCase();
+                  if (n.includes('finance')) cType = 'finance';
+                  else if (n.includes('food')) cType = 'food';
+                  else if (n.includes('attendance')) cType = 'attendance';
+                  else if (n.includes('program')) cType = 'program';
+                  else if (n.includes('sourcing')) cType = 'sourcing';
+                  else if (n.includes('sponsorship')) cType = 'sponsorship';
+                  positions.push(`committee_lead_${cType}`);
+                }
               }
             }
           });

@@ -202,7 +202,6 @@ export const processEmailQueue = onDocumentCreated({
  * and enqueue a beautifully branded notification without revealing user existence.
  */
 export const requestPasswordReset = onCall({
-  database: FIRESTORE_DATABASE_ID
 }, async (request: any) => {
   const email = request.data?.email?.toLowerCase().trim();
   if (!email) {
@@ -285,4 +284,191 @@ export const requestPasswordReset = onCall({
 
   // Secure identical response to the caller regardless of existence
   return { success: true };
+});
+
+/**
+ * Helper function to verify Finance Committee / Administrator authorization
+ */
+async function isAuthorizedForPayment(uid: string, email: string, eventId: string): Promise<boolean> {
+  const normEmail = (email || "").toLowerCase().trim();
+  if (normEmail === "thesadmingmk@gmail.com" || normEmail === "theadmingmk@gmail.com") {
+    return true;
+  }
+
+  if (uid) {
+    try {
+      const uDoc = await db.collection("users").doc(uid).get();
+      if (uDoc.exists) {
+        const uData = uDoc.data();
+        const roles: string[] = Array.isArray(uData?.roles) ? uData.roles : [];
+        const allowedRoles = [
+          "super_admin", "admin", 
+          "event_director", 
+          "finance", "treasurer", "finance_team", "committee_lead_finance", "finance_lead",
+          `event_director_${eventId}`,
+          `finance_${eventId}`, `finance_team_${eventId}`, `finance_lead_${eventId}`, `treasurer_${eventId}`
+        ].map(r => r.toLowerCase());
+
+        if (roles.some((r) => allowedRoles.includes(r.toLowerCase()))) {
+          return true;
+        }
+      }
+    } catch (err) {
+      logger.warn(`[isAuthorizedForPayment] Error reading users/${uid}:`, err);
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Callable HTTPS Cloud Function to securely process and record Event Registration Payments.
+ * Bypasses client-side Firestore rules via Admin SDK, ensuring atomic payment updates and audit logging.
+ */
+export const processEventPayment = onCall(async (request: any) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication is required to process event payments.");
+  }
+  
+  const uid = request.auth.uid;
+  const callerEmail = (request.auth.token?.email || "").toLowerCase().trim();
+  
+  const registrationId = request.data?.registrationId;
+  const amountReceivedInput = request.data?.amountReceived;
+  const financeRemarks = (request.data?.financeRemarks || "").toString().trim();
+
+  if (!registrationId || typeof registrationId !== "string") {
+    throw new HttpsError("invalid-argument", "Registration ID parameter is required.");
+  }
+
+  const amountReceived = parseFloat(amountReceivedInput);
+  if (isNaN(amountReceived) || amountReceived < 0) {
+    throw new HttpsError("invalid-argument", "Valid non-negative amountReceived parameter is required.");
+  }
+
+  const regRef = db.collection("event_registrations").doc(registrationId);
+  const nowIso = new Date().toISOString();
+  let resultPayload: any = null;
+
+  logger.info(`[processEventPayment] Attempting payment for regId: ${registrationId} by UID: ${uid}`);
+
+  await db.runTransaction(async (transaction) => {
+    const regSnap = await transaction.get(regRef);
+    if (!regSnap.exists) {
+      throw new HttpsError("not-found", `Event registration '${registrationId}' was not found.`);
+    }
+
+    const regData = regSnap.data()!;
+    const selectedEventId = regData.eventId;
+    
+    if (!selectedEventId) {
+      throw new HttpsError("failed-precondition", "Registration record is missing an eventId.");
+    }
+
+    // Validate Finance / Admin Authorization for this specific event
+    const authorized = await isAuthorizedForPayment(uid, callerEmail, selectedEventId);
+    if (!authorized) {
+      logger.warn(`[processEventPayment] Authorization denied for UID: ${uid}, Email: ${callerEmail}, Event: ${selectedEventId}`);
+      throw new HttpsError("permission-denied", "Unauthorized. Only authorized Event Directors or Finance team members can process payments.");
+    }
+
+    // Obtain authoritative amountDue server-side
+    let amountDue = 0;
+    if (typeof regData.amountDue === "number") {
+      amountDue = regData.amountDue;
+    } else if (typeof regData.paymentAmount === "number") {
+      amountDue = regData.paymentAmount;
+    } else if (regData.paymentSummary && typeof regData.paymentSummary.totalAmount === "number") {
+      amountDue = regData.paymentSummary.totalAmount;
+    } else if (regData.amountDue) {
+      amountDue = parseFloat(regData.amountDue) || 0;
+    }
+
+    const diff = amountReceived - amountDue;
+    let pStatus: "paid" | "partially_paid" | "overpaid" | "waived" | "pending" = "pending";
+
+    if (amountReceived === 0 && (amountDue === 0 || financeRemarks.toLowerCase().includes("waiv"))) {
+      pStatus = "waived";
+    } else if (Math.abs(diff) < 0.0001) {
+      pStatus = "paid";
+    } else if (diff < 0) {
+      pStatus = "partially_paid";
+    } else {
+      pStatus = "overpaid";
+    }
+
+    const balanceDue = Math.max(0, amountDue - amountReceived);
+    const refundDue = Math.max(0, amountReceived - amountDue);
+
+    const eventShort = selectedEventId.slice(-6).toUpperCase();
+    const memberShort = (regData.primaryMemberGmkId || registrationId.slice(-6)).toUpperCase();
+    const receiptNumber = regData.receiptNumber || `RCP-${eventShort}-${memberShort}-${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    // Only generate an entry pass if payment is cleared or waived, and it doesn't already exist
+    let entryPassNumber = regData.entryPassNumber || "";
+    if ((pStatus === "paid" || pStatus === "waived" || pStatus === "overpaid") && !entryPassNumber) {
+        entryPassNumber = `PASS-${eventShort}-${memberShort}`;
+    }
+
+    const paymentUpdates: any = {
+      paymentStatus: pStatus,
+      amountDue: amountDue,
+      amountReceived: amountReceived,
+      balanceDue: balanceDue,
+      refundDue: refundDue,
+      financeRemarks: financeRemarks,
+      paymentProcessedAt: nowIso,
+      paymentProcessedBy: uid, // Use UID as requested instead of email for better canonical tracking
+    };
+
+    if (receiptNumber) paymentUpdates["receiptNumber"] = receiptNumber;
+    if (entryPassNumber) paymentUpdates["entryPassNumber"] = entryPassNumber;
+
+    transaction.update(regRef, paymentUpdates);
+
+    // Record Audit Log atomically
+    const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const auditRef = db.collection("auditLogs").doc(auditId);
+    const auditPayload = {
+      id: auditId,
+      action: "RECORD_PAYMENT",
+      operation: "PAYMENT_RECORDED",
+      actorEmail: callerEmail,
+      performedByUid: uid,
+      processedBy: uid,
+      processedAt: nowIso,
+      timestamp: nowIso,
+      targetId: registrationId,
+      registrationId: registrationId,
+      eventId: selectedEventId,
+      gmkId: regData.primaryMemberGmkId || regData.gmkId || "",
+      amountDue: amountDue,
+      amountReceived: amountReceived,
+      balanceDue: balanceDue,
+      refundDue: refundDue,
+      paymentStatus: pStatus,
+      receiptNumber: receiptNumber,
+      entryPassNumber: entryPassNumber,
+      remarks: financeRemarks,
+      details: `Payment recorded via processEventPayment: Status=${pStatus}, Due=${amountDue.toFixed(3)}, Received=${amountReceived.toFixed(3)}`
+    };
+
+    transaction.set(auditRef, auditPayload);
+
+    resultPayload = {
+      success: true,
+      registrationId: registrationId,
+      paymentStatus: pStatus,
+      amountDue: amountDue,
+      amountReceived: amountReceived,
+      balanceDue: balanceDue,
+      refundDue: refundDue,
+      receiptNumber: receiptNumber,
+      entryPassNumber: entryPassNumber,
+      processedAt: nowIso
+    };
+  });
+
+  logger.info(`[processEventPayment] Payment processed successfully for regId: ${registrationId} by UID: ${uid}`);
+  return resultPayload;
 });

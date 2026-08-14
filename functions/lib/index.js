@@ -1,10 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processEmailQueue = void 0;
+exports.processEventPayment = exports.requestPasswordReset = exports.processEmailQueue = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
+const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
 const app_1 = require("firebase-admin/app");
 const firestore_2 = require("firebase-admin/firestore");
+const auth_1 = require("firebase-admin/auth");
 const firebase_functions_1 = require("firebase-functions");
 const nodemailer = require("nodemailer");
 const template_1 = require("./utils/template");
@@ -165,5 +167,254 @@ exports.processEmailQueue = (0, firestore_1.onDocumentCreated)({
             attempts: nextAttempts
         });
     }
+});
+/**
+ * Callable HTTPS Cloud Function to securely generate a Firebase Password Reset Link
+ * and enqueue a beautifully branded notification without revealing user existence.
+ */
+exports.requestPasswordReset = (0, https_1.onCall)({}, async (request) => {
+    const email = request.data?.email?.toLowerCase().trim();
+    if (!email) {
+        throw new https_1.HttpsError("invalid-argument", "Email parameter is required.");
+    }
+    // Define operational metadata to be saved or returned
+    let residentName = "Resident";
+    let resetLink = "";
+    try {
+        // 1. Securely generate Firebase password reset link using admin Auth SDK
+        resetLink = await (0, auth_1.getAuth)().generatePasswordResetLink(email);
+        // 2. Fetch the resident's or user's full name to personalize the email template
+        const residentSnap = await db.collection("residents")
+            .where("email", "==", email)
+            .limit(1)
+            .get();
+        if (!residentSnap.empty) {
+            residentName = residentSnap.docs[0].data().fullName || "Resident";
+        }
+        else {
+            const userSnap = await db.collection("users")
+                .where("email", "==", email)
+                .limit(1)
+                .get();
+            if (!userSnap.empty) {
+                residentName = userSnap.docs[0].data().fullName || "Resident";
+            }
+        }
+        // 3. Create document in the emailQueue collection to trigger notification engine
+        const queueDocRef = await db.collection("emailQueue").add({
+            to: email,
+            from: "",
+            template: "password_reset",
+            notificationType: "PASSWORD_RESET",
+            provider: "gmail",
+            priority: "high",
+            status: "pending",
+            attempts: 0,
+            createdAt: new Date().toISOString(),
+            processedAt: null,
+            sentAt: null,
+            messageId: null,
+            error: null,
+            source: "password_reset_flow",
+            data: {
+                residentName: residentName,
+                resetLink: resetLink
+            },
+            isTemplate: false
+        });
+        // 4. Securely log this action in the audit trail (never logging token or link)
+        const auditId = "audit_" + Math.random().toString(36).substring(2, 15);
+        await db.collection("auditLogs").doc(auditId).set({
+            id: auditId,
+            action: "PASSWORD_RESET_REQUESTED",
+            actorEmail: email,
+            targetId: email,
+            targetName: residentName,
+            details: `Password reset request enqueued in emailQueue (${queueDocRef.id}) for ${email}`,
+            timestamp: new Date().toISOString()
+        });
+        firebase_functions_1.logger.info(`[PasswordReset] Successfully generated link and enqueued mail queue item ${queueDocRef.id} for email: ${email}`);
+    }
+    catch (err) {
+        // If the error indicates user not found, swallow the error and log it internally.
+        // This strictly prevents account enumeration/disclosure security issues.
+        if (err.code === "auth/user-not-found") {
+            firebase_functions_1.logger.info(`[PasswordReset] Silent fallback: requested password reset for unregistered or un-activated email address: ${email}`);
+        }
+        else {
+            firebase_functions_1.logger.error(`[PasswordReset] Critical failure generating password reset link for email ${email}:`, err);
+            throw new https_1.HttpsError("internal", "An error occurred while initiating your password reset. Please try again later.");
+        }
+    }
+    // Secure identical response to the caller regardless of existence
+    return { success: true };
+});
+/**
+ * Helper function to verify Finance Committee / Administrator authorization
+ */
+async function isAuthorizedForPayment(uid, email, eventId) {
+    const normEmail = (email || "").toLowerCase().trim();
+    if (normEmail === "thesadmingmk@gmail.com" || normEmail === "theadmingmk@gmail.com") {
+        return true;
+    }
+    if (uid) {
+        try {
+            const uDoc = await db.collection("users").doc(uid).get();
+            if (uDoc.exists) {
+                const uData = uDoc.data();
+                const roles = Array.isArray(uData?.roles) ? uData.roles : [];
+                const allowedRoles = [
+                    "super_admin", "admin",
+                    "event_director",
+                    "finance", "treasurer", "finance_team", "committee_lead_finance", "finance_lead",
+                    `event_director_${eventId}`,
+                    `finance_${eventId}`, `finance_team_${eventId}`, `finance_lead_${eventId}`, `treasurer_${eventId}`
+                ].map(r => r.toLowerCase());
+                if (roles.some((r) => allowedRoles.includes(r.toLowerCase()))) {
+                    return true;
+                }
+            }
+        }
+        catch (err) {
+            firebase_functions_1.logger.warn(`[isAuthorizedForPayment] Error reading users/${uid}:`, err);
+        }
+    }
+    return false;
+}
+/**
+ * Callable HTTPS Cloud Function to securely process and record Event Registration Payments.
+ * Bypasses client-side Firestore rules via Admin SDK, ensuring atomic payment updates and audit logging.
+ */
+exports.processEventPayment = (0, https_1.onCall)(async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError("unauthenticated", "Authentication is required to process event payments.");
+    }
+    const uid = request.auth.uid;
+    const callerEmail = (request.auth.token?.email || "").toLowerCase().trim();
+    const registrationId = request.data?.registrationId;
+    const amountReceivedInput = request.data?.amountReceived;
+    const financeRemarks = (request.data?.financeRemarks || "").toString().trim();
+    if (!registrationId || typeof registrationId !== "string") {
+        throw new https_1.HttpsError("invalid-argument", "Registration ID parameter is required.");
+    }
+    const amountReceived = parseFloat(amountReceivedInput);
+    if (isNaN(amountReceived) || amountReceived < 0) {
+        throw new https_1.HttpsError("invalid-argument", "Valid non-negative amountReceived parameter is required.");
+    }
+    const regRef = db.collection("event_registrations").doc(registrationId);
+    const nowIso = new Date().toISOString();
+    let resultPayload = null;
+    firebase_functions_1.logger.info(`[processEventPayment] Attempting payment for regId: ${registrationId} by UID: ${uid}`);
+    await db.runTransaction(async (transaction) => {
+        const regSnap = await transaction.get(regRef);
+        if (!regSnap.exists) {
+            throw new https_1.HttpsError("not-found", `Event registration '${registrationId}' was not found.`);
+        }
+        const regData = regSnap.data();
+        const selectedEventId = regData.eventId;
+        if (!selectedEventId) {
+            throw new https_1.HttpsError("failed-precondition", "Registration record is missing an eventId.");
+        }
+        // Validate Finance / Admin Authorization for this specific event
+        const authorized = await isAuthorizedForPayment(uid, callerEmail, selectedEventId);
+        if (!authorized) {
+            firebase_functions_1.logger.warn(`[processEventPayment] Authorization denied for UID: ${uid}, Email: ${callerEmail}, Event: ${selectedEventId}`);
+            throw new https_1.HttpsError("permission-denied", "Unauthorized. Only authorized Event Directors or Finance team members can process payments.");
+        }
+        // Obtain authoritative amountDue server-side
+        let amountDue = 0;
+        if (typeof regData.amountDue === "number") {
+            amountDue = regData.amountDue;
+        }
+        else if (typeof regData.paymentAmount === "number") {
+            amountDue = regData.paymentAmount;
+        }
+        else if (regData.paymentSummary && typeof regData.paymentSummary.totalAmount === "number") {
+            amountDue = regData.paymentSummary.totalAmount;
+        }
+        else if (regData.amountDue) {
+            amountDue = parseFloat(regData.amountDue) || 0;
+        }
+        const diff = amountReceived - amountDue;
+        let pStatus = "pending";
+        if (amountReceived === 0 && (amountDue === 0 || financeRemarks.toLowerCase().includes("waiv"))) {
+            pStatus = "waived";
+        }
+        else if (Math.abs(diff) < 0.0001) {
+            pStatus = "paid";
+        }
+        else if (diff < 0) {
+            pStatus = "partially_paid";
+        }
+        else {
+            pStatus = "overpaid";
+        }
+        const balanceDue = Math.max(0, amountDue - amountReceived);
+        const refundDue = Math.max(0, amountReceived - amountDue);
+        const eventShort = selectedEventId.slice(-6).toUpperCase();
+        const memberShort = (regData.primaryMemberGmkId || registrationId.slice(-6)).toUpperCase();
+        const receiptNumber = regData.receiptNumber || `RCP-${eventShort}-${memberShort}-${Math.floor(1000 + Math.random() * 9000)}`;
+        // Only generate an entry pass if payment is cleared or waived, and it doesn't already exist
+        let entryPassNumber = regData.entryPassNumber || "";
+        if ((pStatus === "paid" || pStatus === "waived" || pStatus === "overpaid") && !entryPassNumber) {
+            entryPassNumber = `PASS-${eventShort}-${memberShort}`;
+        }
+        const paymentUpdates = {
+            paymentStatus: pStatus,
+            amountDue: amountDue,
+            amountReceived: amountReceived,
+            balanceDue: balanceDue,
+            refundDue: refundDue,
+            financeRemarks: financeRemarks,
+            paymentProcessedAt: nowIso,
+            paymentProcessedBy: uid, // Use UID as requested instead of email for better canonical tracking
+        };
+        if (receiptNumber)
+            paymentUpdates["receiptNumber"] = receiptNumber;
+        if (entryPassNumber)
+            paymentUpdates["entryPassNumber"] = entryPassNumber;
+        transaction.update(regRef, paymentUpdates);
+        // Record Audit Log atomically
+        const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const auditRef = db.collection("auditLogs").doc(auditId);
+        const auditPayload = {
+            id: auditId,
+            action: "RECORD_PAYMENT",
+            operation: "PAYMENT_RECORDED",
+            actorEmail: callerEmail,
+            performedByUid: uid,
+            processedBy: uid,
+            processedAt: nowIso,
+            timestamp: nowIso,
+            targetId: registrationId,
+            registrationId: registrationId,
+            eventId: selectedEventId,
+            gmkId: regData.primaryMemberGmkId || regData.gmkId || "",
+            amountDue: amountDue,
+            amountReceived: amountReceived,
+            balanceDue: balanceDue,
+            refundDue: refundDue,
+            paymentStatus: pStatus,
+            receiptNumber: receiptNumber,
+            entryPassNumber: entryPassNumber,
+            remarks: financeRemarks,
+            details: `Payment recorded via processEventPayment: Status=${pStatus}, Due=${amountDue.toFixed(3)}, Received=${amountReceived.toFixed(3)}`
+        };
+        transaction.set(auditRef, auditPayload);
+        resultPayload = {
+            success: true,
+            registrationId: registrationId,
+            paymentStatus: pStatus,
+            amountDue: amountDue,
+            amountReceived: amountReceived,
+            balanceDue: balanceDue,
+            refundDue: refundDue,
+            receiptNumber: receiptNumber,
+            entryPassNumber: entryPassNumber,
+            processedAt: nowIso
+        };
+    });
+    firebase_functions_1.logger.info(`[processEventPayment] Payment processed successfully for regId: ${registrationId} by UID: ${uid}`);
+    return resultPayload;
 });
 //# sourceMappingURL=index.js.map

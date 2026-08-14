@@ -503,7 +503,16 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
     }
 
     try {
-      const safeCommitteeKey = selectedCommittee.replace(/\s+/g, '_').toLowerCase();
+      let cType = 'general';
+      const n = selectedCommittee.toLowerCase();
+      if (n.includes('finance')) cType = 'finance';
+      else if (n.includes('food')) cType = 'food';
+      else if (n.includes('attendance')) cType = 'attendance';
+      else if (n.includes('program')) cType = 'program';
+      else if (n.includes('sourcing')) cType = 'sourcing';
+      else if (n.includes('sponsorship')) cType = 'sponsorship';
+      
+      const safeCommitteeKey = cType;
       const assignmentId = `${targetRes.gmkId}_committee_lead_${safeCommitteeKey}`;
       const emailAssignmentId = `${normEmail}_committee_lead_${safeCommitteeKey}`;
 
@@ -535,7 +544,7 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       const userSnap = await getDocs(userQ);
       for (const uDoc of userSnap.docs) {
         const currentRoles: string[] = uDoc.data().roles || [];
-        const updatedRoles = Array.from(new Set([...currentRoles, 'committee_lead']));
+        const updatedRoles = Array.from(new Set([...currentRoles, 'committee_lead', `committee_lead_${safeCommitteeKey}`]));
         await setDoc(doc(db, "users", uDoc.id), { roles: updatedRoles }, { merge: true });
       }
 
@@ -571,7 +580,16 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
     const resName = targetRes ? targetRes.fullName : assignment.email;
     const resEmail = assignment.email.toLowerCase().trim();
     const committeeName = assignment.committee || "Selected Committee";
-    const safeCommitteeKey = committeeName.replace(/\s+/g, '_').toLowerCase();
+    let cType = 'general';
+    const n = committeeName.toLowerCase();
+    if (n.includes('finance')) cType = 'finance';
+    else if (n.includes('food')) cType = 'food';
+    else if (n.includes('attendance')) cType = 'attendance';
+    else if (n.includes('program')) cType = 'program';
+    else if (n.includes('sourcing')) cType = 'sourcing';
+    else if (n.includes('sponsorship')) cType = 'sponsorship';
+    
+    const safeCommitteeKey = cType;
 
     try {
       const assignmentId = `${assignment.gmkId}_committee_lead_${safeCommitteeKey}`;
@@ -592,7 +610,7 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
         const userSnap = await getDocs(userQ);
         for (const uDoc of userSnap.docs) {
           const currentRoles: string[] = uDoc.data().roles || [];
-          const updatedRoles = currentRoles.filter((r: string) => r !== 'committee_lead');
+          const updatedRoles = currentRoles.filter((r: string) => r !== 'committee_lead' && r !== `committee_lead_${safeCommitteeKey}`);
           await setDoc(doc(db, "users", uDoc.id), { roles: updatedRoles }, { merge: true });
         }
       }
