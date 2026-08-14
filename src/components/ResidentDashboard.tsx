@@ -582,50 +582,6 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
             </div>
           </GMKCard>
 
-          {/* My Responsibilities & Operational Assignments Section */}
-          {responsibilities.length > 0 && (
-            <div className="space-y-4">
-              <h4 className="text-xs font-extrabold text-[#0f4c2a] uppercase tracking-wider flex items-center space-x-1.5 font-heading">
-                <Award className="w-4 h-4 text-[#d4af37]" />
-                <span>My Active Roles & Responsibilities</span>
-              </h4>
-              <div className="bg-white border border-stone-200 rounded-3xl p-5 shadow-sm space-y-3">
-                <div className="divide-y divide-stone-100">
-                  {responsibilities.map((resp, idx) => (
-                    <div key={resp.id || idx} className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-extrabold text-stone-900 font-heading">
-                          {resp.title || resp.role}
-                        </span>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[10px] text-stone-500 font-bold">{resp.type || 'Event Operation'}</span>
-                          {resp.committee && (
-                            <span className="text-[9px] uppercase tracking-wider text-emerald-800 font-black bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
-                              {resp.committee} Committee
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveWorkspaceTarget(resp.targetWorkspace || resp.committee || null);
-                            setActiveTab('event_director');
-                          }}
-                          className="px-3.5 py-1.5 rounded-xl bg-[#0f4c2a] hover:bg-[#0b381f] text-white text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 active:scale-[0.98]"
-                        >
-                          <span>Open Workspace</span>
-                          <span>➜</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Registered Events Section (Sprint GMK-STAB-003) */}
           {registrations.length > 0 && (
             <div className="space-y-4">
