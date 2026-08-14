@@ -11,7 +11,8 @@ import {
   onSnapshot,
   where,
   getDoc,
-  updateDoc
+  updateDoc,
+  limit
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { ResidentProfile, UserProfile, CommunityEvent, GovernanceAssignment, AuditLog, PendingRegistration } from '../types';
@@ -1077,7 +1078,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
     );
 
     const unsubLogs = onSnapshot(
-      query(collection(db, "auditLogs"), orderBy("timestamp", "desc")),
+      query(collection(db, "auditLogs"), orderBy("timestamp", "desc"), limit(100)),
       (snapshot) => {
         const list: AuditLog[] = [];
         snapshot.forEach((doc) => {
@@ -2818,7 +2819,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
             GMK Governance Console • Developed by Elite IT
           </div>
           <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.4 (Release Notes)</button>
+            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.0 (Release Notes)</button>
           </div>
         </div>
       </div>

@@ -164,7 +164,7 @@ export interface EventRegistration {
   updatedAt: string;
   registrationType?: 'individual' | 'couple' | 'family';
   paymentAmount?: number;
-  paymentStatus?: 'pending' | 'paid' | 'partially_paid' | 'overpaid' | 'refund_due' | 'waived' | 'approved';
+  paymentStatus?: 'pending' | 'paid' | 'partially_paid' | 'overpaid' | 'refund_due' | 'waived' | 'approved' | 'cancelled' | 'refunded';
   amountReceived?: number;
   amountDue?: number;
   balanceDue?: number;
@@ -347,13 +347,15 @@ export interface EventCommittee {
 export interface EventProgram {
   id: string;
   eventId: string;
+  committeeId?: string;
+  committeeName?: string;
   title: string;
   description: string;
   category: string;
   programType?: 'ADULTS' | 'KIDS' | 'MIXED';
   coordinators: Array<{ residentId: string; fullName: string; email: string; phone?: string; relation?: string; unitDisplay?: string }>;
   participants: Array<{ residentId: string; fullName: string; email: string; role?: string; phone?: string; unitDisplay?: string; accommodationType?: string; parentPhone?: string; isChild?: boolean; age?: number; gender?: string }>;
-  volunteers: Array<{ residentId: string; fullName: string; email: string; phone?: string; unitDisplay?: string }>;
+  volunteers: Array<{ residentId: string; fullName: string; email: string; phone?: string; unitDisplay?: string; role?: string }>;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   updatedAt: string;
@@ -407,11 +409,13 @@ export interface EventCertificate {
 export interface EventFinance {
   id: string; // fin_${eventId}
   eventId: string;
+  openingBalance: number;
   openingBalanceApproved: boolean;
   openingBalanceApprovedBy?: string;
   closingStatementsApproved: boolean;
   closingStatementsApprovedBy?: string;
   budgetAllocations: { [committeeName: string]: number };
+  sponsorshipIncome: { source: string; amount: number; date: string }[];
   totalRevenue: number;
   totalExpenses: number;
   netBalance: number;

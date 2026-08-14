@@ -1,6 +1,6 @@
 {
   "name": "Greens Malayalee Koottayma Platform",
   "description": "The official Greens Malayalee Koottayma (GMK) Community Management & Event Platform for gated community residents in Muscat Governorate, Oman.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

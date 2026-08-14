@@ -2070,10 +2070,11 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         {/* Administration Sub-navigation */}
         {mainTab === 'administration' && (
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-stone-200 pb-3">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setActiveTab('approvals');
+            <div className="overflow-x-auto hide-scrollbar -mx-4 px-4 md:mx-0 md:px-0">
+              <div className="flex items-center gap-1.5 min-w-max pb-px">
+                <button
+                  onClick={() => {
+                    setActiveTab('approvals');
                   setIsCreating(false);
                   setHighlightedPendingUid(null);
                 }}
@@ -2236,6 +2237,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                   </div>
                 </>
               )}
+            </div>
             </div>
           </div>
         )}
@@ -3710,7 +3712,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           Resident Administration Portal • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.4.4 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.0 (Release Notes)</button>
         </div>
       </footer>
 

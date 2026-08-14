@@ -340,6 +340,9 @@ exports.processEventPayment = (0, https_1.onCall)(async (request) => {
         if (amountReceived === 0 && (amountDue === 0 || financeRemarks.toLowerCase().includes("waiv"))) {
             pStatus = "waived";
         }
+        else if (amountReceived === 0 && amountDue > 0) {
+            pStatus = "pending";
+        }
         else if (Math.abs(diff) < 0.0001) {
             pStatus = "paid";
         }

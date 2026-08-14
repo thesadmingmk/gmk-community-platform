@@ -53,6 +53,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
   
   const [activeTab, setActiveTab] = useState<'home' | 'events' | 'expertise_search' | 'admin_workspace' | 'super_admin_workspace' | 'governance' | 'event_director'>(defaultTab);
   const [forceEditingOnboarding, setForceEditingOnboarding] = useState(false);
+  const [activeWorkspaceTarget, setActiveWorkspaceTarget] = useState<string | null>(null);
   
   // Real-time data
   const [residentProfile, setResidentProfile] = useState<ResidentProfile | null>(null);
@@ -92,7 +93,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
     } else if (activeTab === 'event_director' && !isEventDirector) {
       setActiveTab('home');
     }
-  }, [profile?.roles, activeTab]);
+  }, [profile?.roles, activeTab, responsibilities.length]);
 
   useEffect(() => {
     setLoading(true);
@@ -244,12 +245,17 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
     let commCount = 0;
     let progCoordCount = 0;
 
-    // 2. Subscribe to eventCommittees
+    // 2. Subscribe to eventCommittees safely
     const qComm = collection(db, "eventCommittees");
     const unsubComm = onSnapshot(qComm, (snapshot) => {
       const commItems: any[] = [];
       snapshot.forEach(docSnap => {
         const commData = docSnap.data();
+        const cName = (commData.name || '').trim();
+        // Ignore obsolete Event&Program or generic program committees
+        if (['event&program', 'event & program', 'program committee', 'programs', 'program'].includes(cName.toLowerCase())) {
+          return;
+        }
         const membersList = commData.members || [];
         const userMem = membersList.find((m: any) => 
           (m.email && m.email.toLowerCase().trim() === currentEmail) || 
@@ -257,10 +263,8 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
         );
         if (userMem) {
           commCount++;
-          const cName = commData.name || 'Special';
-          const isProgComm = ['program', 'program committee', 'programs'].includes(cName.toLowerCase());
           const roleTitle = userMem.role === 'Lead'
-            ? (isProgComm ? 'Program Lead — Program' : `Committee Lead — ${cName}`)
+            ? `Committee Lead — ${cName}`
             : userMem.role === 'Coordinator'
             ? `Committee Coordinator — ${cName}`
             : `Committee Member — ${cName}`;
@@ -272,33 +276,21 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
             role: roleTitle,
             type: 'Event Operation',
             committee: cName,
-            targetTab: 'event_director'
+            targetTab: 'event_director',
+            targetWorkspace: cName
           });
         }
       });
       
       setResponsibilities(prev => {
         const otherSources = prev.filter(r => r.source !== 'event_committee');
-        const nextList = [...otherSources, ...commItems];
-
-        // Diagnostic Logs
-        const isED = userRoles.includes('event_director') || userRoles.includes('president') || userRoles.includes('vp') || userRoles.includes('admin') || userRoles.includes('super_admin');
-        const titles = nextList.map(r => r.title);
-        const links = Array.from(new Set(nextList.map(r => r.targetTab || 'home')));
-
-        console.log(`[HOME 01] User authenticated: ${currentEmail}`);
-        console.log(`[HOME 02] Roles resolved: ${userRoles.join(', ')}`);
-        console.log(`[HOME 03] Committee assignments resolved: ${commCount}`);
-        console.log(`[HOME 04] Program coordinator assignments resolved: ${progCoordCount}`);
-        console.log(`[HOME 05] Event Director assignment resolved: ${isED}`);
-        console.log(`[HOME 06] Responsibilities assembled: ${titles.join(', ') || 'None'}`);
-        console.log(`[HOME 07] Navigation links assembled: ${links.join(', ')}`);
-
-        return nextList;
+        return [...otherSources, ...commItems];
       });
+    }, (err) => {
+      console.warn("⚠️ [ResidentDashboard] eventCommittees snapshot handled:", err.message);
     });
 
-    // 3. Subscribe to eventPrograms
+    // 3. Subscribe to eventPrograms safely
     const qProg = collection(db, "eventPrograms");
     const unsubProg = onSnapshot(qProg, (snapshot) => {
       const progItems: any[] = [];
@@ -311,13 +303,16 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
         );
         if (userCoord) {
           progCoordCount++;
+          const pTitle = progData.title || 'Program';
           progItems.push({
             id: docSnap.id,
             source: 'event_program',
-            title: `Program Coordinator — ${progData.title || 'Program'}`,
-            role: `Program Coordinator — ${progData.title || 'Program'}`,
+            title: `Program Coordinator — ${pTitle}`,
+            role: `Program Coordinator — ${pTitle}`,
             type: 'Event Program',
-            targetTab: 'event_director'
+            targetTab: 'event_director',
+            targetWorkspace: 'programs',
+            programId: docSnap.id
           });
         }
       });
@@ -325,28 +320,39 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
         const otherSources = prev.filter(r => r.source !== 'event_program');
         return [...otherSources, ...progItems];
       });
+    }, (err) => {
+      console.warn("⚠️ [ResidentDashboard] eventPrograms snapshot handled:", err.message);
     });
 
-    // 4. Subscribe to roleAssignments
+    // 4. Subscribe to roleAssignments safely
     const qRoles = query(collection(db, "roleAssignments"), where("email", "==", currentEmail));
     const unsubRoles = onSnapshot(qRoles, (snapshot) => {
       const roleItems: any[] = [];
       snapshot.forEach(docSnap => {
         const ra = docSnap.data();
-        const roleTitle = ra.committee ? `Committee Lead — ${ra.committee}` : 'Community Representative';
+        const cName = (ra.committee || ra.committeeName || '').trim();
+        // Ignore obsolete Event&Program or program_lead records
+        if (['event&program', 'event & program', 'program committee', 'programs', 'program'].includes(cName.toLowerCase()) || ra.position === 'program_lead') {
+          return;
+        }
+        const roleTitle = cName ? `Committee Lead — ${cName}` : 'Community Representative';
         roleItems.push({
           id: docSnap.id,
           source: 'role_assignment',
           title: roleTitle,
           role: roleTitle,
           type: 'Community Governance',
-          targetTab: 'event_director'
+          committee: cName,
+          targetTab: 'event_director',
+          targetWorkspace: cName || 'committees'
         });
       });
       setResponsibilities(prev => {
         const otherSources = prev.filter(r => r.source !== 'role_assignment');
         return [...otherSources, ...roleItems];
       });
+    }, (err) => {
+      console.warn("⚠️ [ResidentDashboard] roleAssignments query handled:", err.message);
     });
 
     // Set initial static user role items
@@ -369,6 +375,8 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
         }
       });
       if (leadInfo) setAttendanceLead(leadInfo);
+    }, (err) => {
+      console.warn("⚠️ [ResidentDashboard] attendance lead query handled:", err.message);
     });
 
     return () => {
@@ -404,8 +412,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
     profile?.roles.includes('vp') ||
     profile?.roles.includes('vice_president') ||
     profile?.roles.includes('admin') ||
-    profile?.roles.includes('super_admin') ||
-    responsibilities.length > 0;
+    profile?.roles.includes('super_admin');
 
   useEffect(() => {
     if (isEventDirectorRole) {
@@ -505,7 +512,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
 
   if (activeTab === 'event_director' && isEventDirectorRole) {
     return (
-      <EventDirectorDashboard onBackToResidentPortal={() => setActiveTab('home')} />
+      <EventDirectorDashboard onBackToResidentPortal={() => setActiveTab('home')} initialTabTarget={activeWorkspaceTarget} userResponsibilities={responsibilities} />
     );
   }
 
@@ -659,56 +666,6 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                 </div>
               )}
             </div>
-          </GMKCard>
-
-          {/* MY RESPONSIBILITIES Widget */}
-          <GMKCard className="space-y-4">
-            <h4 className="text-xs font-extrabold text-[#0f4c2a] uppercase tracking-wider flex items-center space-x-1.5 font-heading border-b border-stone-100 pb-3">
-              <Award className="w-4 h-4 text-[#d4af37]" />
-              <span>My Responsibilities</span>
-            </h4>
-            {(() => {
-              if (responsibilities.length === 0) {
-                return (
-                  <p className="text-stone-500 text-[11px] leading-relaxed font-medium italic">
-                    You currently do not have any operational committee assignments or program coordinator responsibilities assigned to you.
-                  </p>
-                );
-              }
-
-              // Deduplicate by title
-              const seen = new Set<string>();
-              const uniqueItems = responsibilities.filter(r => {
-                if (seen.has(r.title)) return false;
-                seen.add(r.title);
-                return true;
-              });
-
-              return (
-                <div className="space-y-2 py-1">
-                  {uniqueItems.map((item, idx) => (
-                    <div 
-                      key={`resp-${idx}`} 
-                      onClick={() => {
-                        if (item.targetTab) setActiveTab(item.targetTab);
-                      }}
-                      className="flex items-center justify-between p-2.5 bg-stone-50 hover:bg-emerald-50/50 border border-stone-200/80 hover:border-emerald-200 rounded-xl transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <span className="w-2 h-2 rounded-full bg-[#0f4c2a] shrink-0" />
-                        <span className="text-stone-850 text-xs font-black group-hover:text-[#0f4c2a] transition-colors">
-                          {item.title}
-                        </span>
-                      </div>
-                      <span className="text-[10px] uppercase tracking-wider font-extrabold text-[#0f4c2a] opacity-80 group-hover:opacity-100 flex items-center space-x-1">
-                        <span>Open Workspace</span>
-                        <span>➜</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
           </GMKCard>
 
           {/* Announcements block inside a card if any exist */}

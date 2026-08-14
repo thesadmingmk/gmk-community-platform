@@ -128,7 +128,7 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
       id: 'event_director',
       label: 'Event Operations',
       icon: Award,
-      roles: ['event_director', 'president', 'vp', 'vice_president', 'admin', 'super_admin', 'program_lead', 'committee_lead'],
+      roles: ['event_director', 'president', 'vp', 'vice_president', 'admin', 'super_admin', 'program_lead', 'committee_lead', 'program_coordinator', 'committee_member', 'coordinator', 'lead'],
       accentColor: 'text-[#d4af37]',
     },
   ];
@@ -321,7 +321,7 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
 
               <div className="pt-4 border-t border-stone-200 mt-auto text-center">
                 <span className="text-[10px] text-stone-550 font-extrabold block uppercase tracking-wider">
-                  Oman Gated Communities
+                  GREENS MALAYALEE KOOTAYAMA
                 </span>
                 <span className="text-[9px] text-stone-400 font-mono block mt-1">
                   GMK Community Platform by Elite IT

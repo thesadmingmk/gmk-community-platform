@@ -853,9 +853,10 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       )}
 
       {/* 3. Sub-Navigation Tabs */}
-      <div className="flex items-center space-x-1.5 border-b border-stone-200 pb-px">
-        <button
-          onClick={() => { setActiveTab('dashboard'); setErrorMsg(null); setSuccessMsg(null); }}
+      <div className="overflow-x-auto hide-scrollbar border-b border-stone-200">
+        <div className="flex items-center space-x-1.5 min-w-max pb-px">
+          <button
+            onClick={() => { setActiveTab('dashboard'); setErrorMsg(null); setSuccessMsg(null); }}
           className={`px-4 py-2.5 rounded-t-xl text-[10px] font-mono font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer flex items-center space-x-1.5 ${
             activeTab === 'dashboard'
               ? 'border-[#0f4c2a] text-[#0f4c2a] bg-emerald-50/40 font-black'
@@ -901,6 +902,7 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
           <DollarSign className="w-3.5 h-3.5" />
           <span>Finance Governance</span>
         </button>
+      </div>
       </div>
 
       {/* Tab Contents */}

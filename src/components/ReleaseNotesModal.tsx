@@ -19,7 +19,22 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
-    version: "v1.4.4",
+    version: "v1.5.0",
+    title: "Production Release: Unified Workspaces & Performance Safety (RTCO-064, RTCO-065, RTCO-066)",
+    releaseDate: "2026-08-14",
+    author: "Core Platform Team",
+    notes: [
+      "Finance Workspace stabilization and Committee Lead mapping.",
+      "Food Committee Workspace, Attendance Scanner, manual verification, and reports.",
+      "Program Committee integration with deferred Program Workspace Save/Modify workflow.",
+      "Program coordinator/volunteer/participant management with KIDS/MIXED age and gender participant filtering.",
+      "Program expense → Program Committee → Finance flow with uniform expense handling.",
+      "Performance safety fixes: Finance listener cleanup, Event listener cleanup verification, and AuditLogs limited to 100.",
+      "Attendance Entry Pass verification fix with PASS UTILIZED protection against duplicate check-ins."
+    ]
+  },
+  {
+    version: "v1.5.0",
     title: "Emergency Registration Cancellation Containment & Decoupled Cleanup Release (RTCO-033)",
     releaseDate: "2026-08-11",
     author: "Core Platform Team",

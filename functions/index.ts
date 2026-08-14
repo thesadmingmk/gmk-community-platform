@@ -389,6 +389,8 @@ export const processEventPayment = onCall(async (request: any) => {
 
     if (amountReceived === 0 && (amountDue === 0 || financeRemarks.toLowerCase().includes("waiv"))) {
       pStatus = "waived";
+    } else if (amountReceived === 0 && amountDue > 0) {
+      pStatus = "pending";
     } else if (Math.abs(diff) < 0.0001) {
       pStatus = "paid";
     } else if (diff < 0) {

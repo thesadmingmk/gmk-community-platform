@@ -31,17 +31,27 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [showingPaymentModalEvent, setShowingPaymentModalEvent] = useState<{ evt: CommunityEvent; reg?: EventRegistration } | null>(null);
 
+  // Sync viewingRegDetails and showingPaymentModalEvent with registrations updates
+  useEffect(() => {
+    if (viewingRegDetails) {
+      const updatedReg = registrations.find(r => r.id === viewingRegDetails.id);
+      if (updatedReg && JSON.stringify(updatedReg) !== JSON.stringify(viewingRegDetails)) {
+        setViewingRegDetails(updatedReg);
+      }
+    }
+    if (showingPaymentModalEvent && showingPaymentModalEvent.reg) {
+      const updatedReg = registrations.find(r => r.id === showingPaymentModalEvent.reg!.id);
+      if (updatedReg && JSON.stringify(updatedReg) !== JSON.stringify(showingPaymentModalEvent.reg)) {
+        setShowingPaymentModalEvent(prev => prev ? { ...prev, reg: updatedReg } : null);
+      }
+    }
+  }, [registrations, viewingRegDetails, showingPaymentModalEvent]);
+
   useEffect(() => {
     if (viewingRegDetails) {
       const passNo = viewingRegDetails.entryPassNumber || `PASS-${viewingRegDetails.eventId.slice(-6).toUpperCase()}-${viewingRegDetails.primaryMemberGmkId || viewingRegDetails.id.slice(-6).toUpperCase()}`;
-      const payload = JSON.stringify({
-        eventId: viewingRegDetails.eventId,
-        registrationId: viewingRegDetails.id,
-        entryPassNumber: passNo,
-        gmkId: viewingRegDetails.primaryMemberGmkId,
-        email: viewingRegDetails.primaryMemberEmail,
-        totalParticipants: viewingRegDetails.totalParticipants
-      });
+      // RTCO-053: Do NOT encode unnecessary personal information inside the QR payload.
+      const payload = passNo;
       QRCode.toDataURL(payload, { margin: 1, width: 220, color: { dark: '#0f4c2a', light: '#ffffff' } })
         .then(url => setQrDataUrl(url))
         .catch(err => console.error("QR Code Error:", err));
@@ -505,6 +515,23 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const diffRevenue = pricingResult.totalAmount - oldRevenue;
 
       // Step B: PREPARE RESIDENT-OWNED PAYLOADS
+      
+      let nextPaymentStatus = 'pending';
+      let originalAmountPaid = oldReg ? (oldReg.amountReceived || (oldReg.paymentStatus === 'paid' ? oldReg.paymentAmount : 0)) : 0;
+      let existingAmountDue = oldReg?.amountDue;
+      let existingBalanceDue = oldReg?.balanceDue;
+      let refundDue = oldReg?.refundDue || 0;
+
+      if (oldReg && ['paid', 'waived', 'overpaid', 'refund_due', 'approved'].includes(oldReg.paymentStatus!)) {
+        if (pricingResult.totalAmount < originalAmountPaid) {
+          nextPaymentStatus = 'refund_due';
+          refundDue = originalAmountPaid - pricingResult.totalAmount;
+        } else if (pricingResult.totalAmount === originalAmountPaid) {
+          nextPaymentStatus = oldReg.paymentStatus;
+        } else {
+          nextPaymentStatus = 'partially_paid';
+        }
+      }
       const regPayload: any = {
         id: regId,
         eventId: activeEventForReg.id,
@@ -517,9 +544,16 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         createdAt: oldReg ? oldReg.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         registrationType: pricingResult.registrationType,
-        paymentAmount: pricingResult.totalAmount,
-        paymentStatus: 'pending',
-        qrCode: null,
+        paymentAmount: pricingResult.totalAmount, // This is the revised value
+        paymentStatus: nextPaymentStatus,
+        qrCode: oldReg?.qrCode || null,
+        amountReceived: originalAmountPaid,
+        amountDue: pricingResult.totalAmount,
+        refundDue: refundDue,
+        ...(oldReg?.receiptNumber ? { receiptNumber: oldReg.receiptNumber } : {}),
+        ...(oldReg?.entryPassNumber ? { entryPassNumber: oldReg.entryPassNumber } : {}),
+        ...(oldReg?.paymentProcessedAt ? { paymentProcessedAt: oldReg.paymentProcessedAt } : {}),
+        ...(oldReg?.paymentProcessedBy ? { paymentProcessedBy: oldReg.paymentProcessedBy } : {}),
         paymentSummary: {
           baseRate: pricingResult.baseRate || 0,
           baseRateApplied: pricingResult.registrationType,
@@ -891,11 +925,25 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       console.log(`[REGISTRATION CANCEL 03] Ownership verified for event ${eventId} (regId: ${regId})`);
 
       const oldRevenue = regData?.paymentAmount || 0;
+      const amountReceived = regData?.amountReceived || (regData?.paymentStatus === 'paid' ? regData?.paymentAmount : 0);
+      const isPaid = ['paid', 'waived', 'overpaid', 'refund_due', 'approved', 'partially_paid'].includes(regData?.paymentStatus!);
 
       // STEP 3: EXECUTE PRIMARY CANCELLATION (CRITICAL OPERATION)
-      console.log(`[PRIMARY CANCELLATION] Deleting event_registrations/${regId}`);
-      await deleteDoc(regRef);
-      console.log(`[PRIMARY CANCELLATION SUCCESS] Registration ${regId} deleted.`);
+      if (isPaid && amountReceived > 0) {
+        console.log(`[PRIMARY CANCELLATION] Updating event_registrations/${regId} to cancelled/refund_due`);
+        await setDoc(regRef, { 
+          paymentStatus: 'cancelled',
+          refundDue: amountReceived,
+          amountDue: 0,
+          paymentAmount: 0,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        console.log(`[PRIMARY CANCELLATION SUCCESS] Registration ${regId} marked as cancelled with refund due.`);
+      } else {
+        console.log(`[PRIMARY CANCELLATION] Deleting event_registrations/${regId}`);
+        await deleteDoc(regRef);
+        console.log(`[PRIMARY CANCELLATION SUCCESS] Registration ${regId} deleted.`);
+      }
 
       // Primary operation succeeded — user registration is cancelled!
       setSuccessMsg(`✓ Successfully cancelled your household registration for ${title}.`);
@@ -1077,10 +1125,24 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
                       <div className="flex items-start justify-between">
                         {reg ? (
-                          <span className="flex items-center space-x-1 text-emerald-855 bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
-                            <Check className="w-3 h-3" />
-                            <span>Registered</span>
-                          </span>
+                          <>
+                            {reg.paymentStatus === 'cancelled' ? (
+                              <span className="flex items-center space-x-1 text-red-800 bg-red-100 border border-red-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
+                                <AlertCircle className="w-3 h-3" />
+                                <span>Cancelled & Refund Pending</span>
+                              </span>
+                            ) : reg.paymentStatus === 'refund_due' ? (
+                              <span className="flex items-center space-x-1 text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
+                                <Clock className="w-3 h-3" />
+                                <span>Finance Review Required</span>
+                              </span>
+                            ) : (
+                              <span className="flex items-center space-x-1 text-emerald-855 bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
+                                <Check className="w-3 h-3" />
+                                <span>{(reg.paymentStatus === 'paid' || reg.paymentStatus === 'approved' || reg.paymentStatus === 'waived' || reg.paymentStatus === 'overpaid') ? 'Paid & Registered' : 'Registered'}</span>
+                              </span>
+                            )}
+                          </>
                         ) : (
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-wider uppercase ${badgeClass}`}>
                             ● {regStatusLabel}
@@ -1143,32 +1205,53 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                       {reg ? (
                         /* WHEN REGISTRATION IS COMPLETED */
                         <div className="flex flex-col space-y-2">
-                          {/* 1. View Registration */}
-                          <button
-                            type="button"
-                            onClick={() => setViewingRegDetails(reg)}
-                            className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
-                          >
-                            View Registration
-                          </button>
+                          {reg.paymentStatus === 'cancelled' || reg.paymentStatus === 'refund_due' ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewingRegDetails(reg)}
+                              className="w-full py-2.5 text-center bg-stone-100 text-stone-850 border border-stone-250 hover:bg-stone-200 uppercase tracking-wider text-[11px] font-black rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center space-x-2"
+                            >
+                              <span>View Details</span>
+                            </button>
+                          ) : (reg.paymentStatus === 'paid' || reg.paymentStatus === 'approved' || reg.paymentStatus === 'waived' || reg.paymentStatus === 'overpaid') ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewingRegDetails(reg)}
+                              className="w-full py-2.5 text-center bg-[#0f4c2a] text-white hover:bg-[#125831] uppercase tracking-wider text-[11px] font-black rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center space-x-2"
+                            >
+                              <QrCode className="w-4 h-4" />
+                              <span>Entry Pass</span>
+                            </button>
+                          ) : (
+                            <>
+                              {/* 1. View Registration */}
+                              <button
+                                type="button"
+                                onClick={() => setViewingRegDetails(reg)}
+                                className="w-full py-2 text-center bg-stone-100 hover:bg-stone-200 border border-stone-250 text-stone-850 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                              >
+                                View Registration
+                              </button>
 
-                          {/* 2. Payment Options */}
-                          <button
-                            type="button"
-                            onClick={() => setShowingPaymentModalEvent({ evt, reg })}
-                            className="w-full py-2 text-center bg-[#0f4c2a] text-white hover:bg-[#125831] uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center space-x-1"
-                          >
-                            <span>Payment options</span>
-                          </button>
+                              {/* 2. Payment Options */}
+                              <button
+                                type="button"
+                                onClick={() => setShowingPaymentModalEvent({ evt, reg })}
+                                className="w-full py-2 text-center bg-[#0f4c2a] text-white hover:bg-[#125831] uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center space-x-1"
+                              >
+                                <span>Payment options</span>
+                              </button>
 
-                          {/* 3. Pricing Details */}
-                          <button
-                            type="button"
-                            onClick={() => setShowingPricingModalEvent(evt)}
-                            className="w-full py-2 text-center bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center justify-center"
-                          >
-                            <span>Pricing Details</span>
-                          </button>
+                              {/* 3. Pricing Details */}
+                              <button
+                                type="button"
+                                onClick={() => setShowingPricingModalEvent(evt)}
+                                className="w-full py-2 text-center bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 uppercase tracking-wider text-[10px] font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center justify-center"
+                              >
+                                <span>Pricing Details</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       ) : (
                         /* WHEN REGISTRATION IS NOT COMPLETED */
@@ -1374,32 +1457,34 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
               <div className="overflow-y-auto pr-1 space-y-4 text-left flex-1 min-h-0">
                 {/* PASS & QR CODE CARD */}
-                <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="space-y-1.5 text-center sm:text-left">
-                    <span className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Gate Entry Pass</span>
-                    <span className="text-xs font-mono font-black text-[#0f4c2a] bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-xl block w-fit mx-auto sm:mx-0">
-                      {entryPassNo}
-                    </span>
-                    {viewingRegDetails.receiptNumber && (
-                      <div className="text-[10px] text-stone-600 font-medium">
-                        Receipt #: <span className="font-mono font-bold text-stone-900">{viewingRegDetails.receiptNumber}</span>
+                {['paid', 'waived', 'overpaid', 'approved', 'partially_paid', 'pending'].includes(pStatus) && (
+                  <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="space-y-1.5 text-center sm:text-left">
+                      <span className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Gate Entry Pass</span>
+                      <span className="text-xs font-mono font-black text-[#0f4c2a] bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-xl block w-fit mx-auto sm:mx-0">
+                        {entryPassNo}
+                      </span>
+                      {viewingRegDetails.receiptNumber && (
+                        <div className="text-[10px] text-stone-600 font-medium">
+                          Receipt #: <span className="font-mono font-bold text-stone-900">{viewingRegDetails.receiptNumber}</span>
+                        </div>
+                      )}
+                      <p className="text-[10px] text-stone-500 font-medium max-w-xs">
+                        Present this QR code or Entry Pass number at the event gate for instant check-in.
+                      </p>
+                    </div>
+                    {qrDataUrl && (['paid', 'waived', 'overpaid', 'approved'].includes(pStatus)) ? (
+                      <div className="bg-white p-2 border border-stone-200 rounded-2xl shadow-xs shrink-0 text-center">
+                        <img src={qrDataUrl} alt="Entry Pass QR Code" className="w-28 h-28 mx-auto rounded-lg" />
+                        <span className="text-[8px] font-mono text-stone-400 block mt-1 uppercase">Scan at Gate</span>
+                      </div>
+                    ) : (
+                      <div className="w-28 h-28 bg-stone-100 rounded-2xl flex items-center justify-center shrink-0 text-stone-400 text-[9px] font-bold text-center p-2">
+                        Pending Payment
                       </div>
                     )}
-                    <p className="text-[10px] text-stone-500 font-medium max-w-xs">
-                      Present this QR code or Entry Pass number at the event gate for instant check-in.
-                    </p>
                   </div>
-                  {qrDataUrl ? (
-                    <div className="bg-white p-2 border border-stone-200 rounded-2xl shadow-xs shrink-0 text-center">
-                      <img src={qrDataUrl} alt="Entry Pass QR Code" className="w-28 h-28 mx-auto rounded-lg" />
-                      <span className="text-[8px] font-mono text-stone-400 block mt-1 uppercase">Scan at Gate</span>
-                    </div>
-                  ) : (
-                    <div className="w-28 h-28 bg-stone-100 rounded-2xl flex items-center justify-center shrink-0 text-stone-400 text-xs font-mono">
-                      Generating...
-                    </div>
-                  )}
-                </div>
+                )}
 
                 {/* FINANCIAL SNAPSHOT */}
                 <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 space-y-2 text-xs">
