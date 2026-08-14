@@ -180,7 +180,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (normalizedEmail) {
         const assignedRoles: string[] = [];
         const positions: string[] = [];
+        let hasResidentDoc = false;
+        let residentData: any = null;
+
         try {
+          // Check if there is an active resident profile
+        try {
+          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
+          console.log(`[RTCO-CONNECTION] PATH: residents where email == ${normalizedEmail}`);
+          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
+          const resQuery = query(collection(db, "residents"), where("email", "==", normalizedEmail));
+          const resSnap = await getDocs(resQuery);
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (residents)`);
+          hasResidentDoc = !resSnap.empty;
+          if (hasResidentDoc) {
+            residentData = resSnap.docs[0].data();
+          }
+        } catch (err: any) {
+          console.error(`[RTCO-CONNECTION] RESULT: FAILED`);
+          console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
+          console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
+          console.warn("⚠️ Non-blocking warning: residents query failed", err.message);
+        }
+
+        
           // 1. Query governanceAssignments collection
           console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
           console.log(`[RTCO-CONNECTION] PATH: governanceAssignments where email == ${normalizedEmail}`);
@@ -217,8 +240,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
           const rolesQuery = query(collection(db, "roleAssignments"), where("email", "==", normalizedEmail));
           const rolesSnap = await getDocs(rolesQuery);
-          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (roleAssignments)`);
-          rolesSnap.forEach((roleDoc) => {
+          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (roleAssignments by email)`);
+          
+          let rolesDocs = [...rolesSnap.docs];
+          
+          if (hasResidentDoc && residentData && residentData.gmkId) {
+            const rolesGmkQuery = query(collection(db, "roleAssignments"), where("gmkId", "==", residentData.gmkId.toUpperCase()));
+            const rolesGmkSnap = await getDocs(rolesGmkQuery);
+            console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (roleAssignments by gmkId)`);
+            rolesGmkSnap.forEach(doc => {
+              if (!rolesDocs.find(d => d.id === doc.id)) {
+                rolesDocs.push(doc);
+              }
+            });
+          }
+          
+          rolesDocs.forEach((roleDoc) => {
             const data = roleDoc.data();
             if (data) {
               const pos = (data.position || data.role || '').toLowerCase();
@@ -245,27 +282,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
           console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
           console.warn("⚠️ Non-blocking warning: governance role/position query failed", err.message);
-        }
-
-        // Check if there is an active resident profile
-        let hasResidentDoc = false;
-        let residentData: any = null;
-        try {
-          console.log(`[RTCO-CONNECTION] OPERATION: query(getDocs)`);
-          console.log(`[RTCO-CONNECTION] PATH: residents where email == ${normalizedEmail}`);
-          console.log(`[RTCO-CONNECTION] UID: ${firebaseUser.uid}`);
-          const resQuery = query(collection(db, "residents"), where("email", "==", normalizedEmail));
-          const resSnap = await getDocs(resQuery);
-          console.log(`[RTCO-CONNECTION] RESULT: SUCCESS (residents)`);
-          hasResidentDoc = !resSnap.empty;
-          if (hasResidentDoc) {
-            residentData = resSnap.docs[0].data();
-          }
-        } catch (err: any) {
-          console.error(`[RTCO-CONNECTION] RESULT: FAILED`);
-          console.error(`[RTCO-CONNECTION] ERROR CODE: ${err.code || 'UNKNOWN'}`);
-          console.error(`[RTCO-CONNECTION] ERROR MESSAGE: ${err.message || String(err)}`);
-          console.warn("⚠️ Non-blocking warning: residents query failed", err.message);
         }
 
         // Check if there is a pending registration

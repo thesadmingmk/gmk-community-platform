@@ -19,6 +19,21 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.1",
+    title: "Committee Lead Workspace Access & Routing (RTCO-069)",
+    releaseDate: "2026-08-14",
+    author: "Core Platform Team",
+    notes: [
+      "Committee Leads can now access Event Operations directly.",
+      "Event Operations displays only the committees assigned to the authenticated Lead.",
+      "Existing committee workspaces are opened directly from the Lead Work Console.",
+      "Multiple committee assignments are supported.",
+      "Lead addition and removal continue to update workspace access dynamically.",
+      "Committee Leads remain separate from Event Director authority.",
+      "Fixed the authentication profile-loading regression caused by the hasResidentDoc scoping error."
+    ]
+  },
+  {
     version: "v1.5.0",
     title: "Production Release: Unified Workspaces & Performance Safety (RTCO-064, RTCO-065, RTCO-066)",
     releaseDate: "2026-08-14",

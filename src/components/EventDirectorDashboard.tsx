@@ -290,13 +290,29 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const { profile } = useAuth();
   
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
+  const userRolesList = profile?.roles || [];
+  const isGlobalED = userRolesList.some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp', 'vice_president'].includes(r));
+  const isFinanceLeadAuth = userResponsibilities.some(r => r.committee && r.committee.toLowerCase().includes('finance')) ||
+    userRolesList.some((r: string) => r.includes('finance'));
+  const isProgramLeadAuth = userResponsibilities.some(r => r.committee && r.committee.toLowerCase().includes('program')) ||
+    userRolesList.some((r: string) => r.includes('program'));
+  const showFinanceTab = isGlobalED || isFinanceLeadAuth;
+
   const [activeTab, setActiveTab] = useState<EDTab>(() => {
-    if (!initialTabTarget) return 'events';
-    const target = initialTabTarget.toLowerCase();
-    if (target.includes('finance')) return 'finance';
-    if (target.includes('program')) return 'programs';
-    if (target.includes('registration')) return 'registrations';
-    return 'committees';
+    if (initialTabTarget) {
+      const target = initialTabTarget.toLowerCase();
+      if (target.includes('finance')) return 'finance';
+      if (target.includes('program')) return 'programs';
+      if (target.includes('registration')) return 'registrations';
+      return 'committees';
+    }
+    if (!isGlobalED) {
+      if (showFinanceTab) return 'finance';
+      const firstComm = userResponsibilities.find(r => r.committee && !r.committee.toLowerCase().includes('finance') && !r.committee.toLowerCase().includes('program'));
+      if (firstComm) return 'committees';
+      if (isProgramLeadAuth) return 'programs';
+    }
+    return 'events';
   });
   
   // Real-time Firestore collections
@@ -338,10 +354,16 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   // Local navigation & sub-state
   const [showNewEventForm, setShowNewEventForm] = useState(false);
   const [activeCommitteeToConfigure, setActiveCommitteeToConfigure] = useState<string | null>(() => {
-    if (!initialTabTarget) return null;
-    const target = initialTabTarget.toLowerCase();
-    if (target.includes('finance') || target.includes('program') || target.includes('registration')) return null;
-    return initialTabTarget;
+    if (initialTabTarget) {
+      const target = initialTabTarget.toLowerCase();
+      if (target.includes('finance') || target.includes('program') || target.includes('registration')) return null;
+      return initialTabTarget;
+    }
+    if (!isGlobalED && !showFinanceTab) {
+      const firstComm = userResponsibilities.find(r => r.committee && !r.committee.toLowerCase().includes('finance') && !r.committee.toLowerCase().includes('program'));
+      if (firstComm) return firstComm.committee;
+    }
+    return null;
   });
   const [committeeTab, setCommitteeTab] = useState<'active' | 'archived'>('active');
   const [showRegistrantsTable, setShowRegistrantsTable] = useState(true);
@@ -371,17 +393,6 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   // Track transaction and detailed errors
   const [lastTransactionStatus, setLastTransactionStatus] = useState<string>('IDLE');
   const [lastRefreshTimestamp, setLastRefreshTimestamp] = useState<string>('Never');
-
-  const userRolesList = profile?.roles || [];
-  const isGlobalED = userRolesList.some((r: string) => ['event_director', 'admin', 'super_admin', 'president', 'vp', 'vice_president'].includes(r));
-  const theFinanceComm = activeCommittees.find(c => c.name.toLowerCase().includes('finance'));
-  const isFinanceLeadAuth = (theFinanceComm?.members || []).some(m => 
-    m.role === 'Lead' && (
-      (m.email && m.email.toLowerCase().trim() === (profile?.email?.toLowerCase().trim() || '')) ||
-      (m.residentId && m.residentId.toUpperCase().trim() === (profile?.gmkId?.toUpperCase().trim() || ''))
-    )
-  );
-  const showFinanceTab = isGlobalED || isFinanceLeadAuth;
 
   const [lastErrorCode, setLastErrorCode] = useState<string>('None');
   const [lastErrorMessage, setLastErrorMessage] = useState<string>('None');
@@ -5158,26 +5169,24 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     if (showFinanceTab) navItems.push({ id: 'finance', label: 'Finance Workspace', icon: PieChart });
     navItems.push({ id: 'reports', label: 'Reports', icon: TrendingUp });
   } else {
-    navItems.push({ id: 'events', label: 'Events', icon: Calendar });
+    // Non-Global ED: Left Work Console shows ONLY the committees for which user has an active Lead assignment
     if (showFinanceTab) navItems.push({ id: 'finance', label: 'Finance Workspace', icon: PieChart });
     
-    // Add other assigned committees dynamically
-    const myLedCommittees = activeCommittees.filter(c => 
-      c.members?.some(m => 
-        (m.email && m.email.toLowerCase().trim() === (profile?.email?.toLowerCase().trim() || '')) ||
-        (m.residentId && m.residentId.toUpperCase().trim() === (profile?.gmkId?.toUpperCase().trim() || ''))
-      )
-    );
+    // Add other assigned committees dynamically from canonical userResponsibilities
+    const myLedCommittees = userResponsibilities.filter(r => r.committee);
     
     myLedCommittees.forEach(comm => {
-      const cName = comm.name.toLowerCase();
+      const cName = comm.committee.toLowerCase();
       if (!cName.includes('finance') && !cName.includes('program')) {
-        navItems.push({
-          id: `comm_${comm.name}`,
-          label: `${comm.name} Workspace`,
-          icon: Users,
-          targetComm: comm.name
-        });
+        // Prevent duplicate tabs
+        if (!navItems.find(i => i.id === `comm_${comm.committee}`)) {
+          navItems.push({
+            id: `comm_${comm.committee}`,
+            label: `${comm.committee} Workspace`,
+            icon: Users,
+            targetComm: comm.committee
+          });
+        }
       }
     });
     
@@ -5187,10 +5196,33 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         (c.residentId && c.residentId.toUpperCase().trim() === (profile?.gmkId?.toUpperCase().trim() || ''))
       )
     );
-    if (isProgramCoordinatorAny || myLedCommittees.some(c => c.name.toLowerCase().includes('program'))) {
+    if (isProgramCoordinatorAny || isProgramLeadAuth) {
       navItems.push({ id: 'programs', label: 'Programs', icon: Flame });
     }
   }
+
+  // Automatic routing synchronization for Committee Leads (RTCO-069)
+  useEffect(() => {
+    if (!isGlobalED && navItems.length > 0) {
+      const isCurrentTabValid = navItems.some(item => {
+        if (item.id.startsWith('comm_')) {
+          return activeTab === 'committees' && activeCommitteeToConfigure?.toLowerCase() === (item as any).targetComm?.toLowerCase();
+        }
+        return activeTab === item.id;
+      });
+
+      if (!isCurrentTabValid || activeTab === 'events') {
+        const firstItem = navItems[0];
+        if (firstItem.id.startsWith('comm_')) {
+          setActiveTab('committees');
+          setActiveCommitteeToConfigure((firstItem as any).targetComm);
+        } else {
+          setActiveTab(firstItem.id as EDTab);
+          setActiveCommitteeToConfigure(null);
+        }
+      }
+    }
+  }, [isGlobalED, navItems, activeTab, activeCommitteeToConfigure]);
 
   return (
     <div className="min-h-screen bg-[#fafaf9] flex flex-col font-sans text-xs" id="ems-full-screen-root">
@@ -5211,7 +5243,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           <div>
             <h2 className="text-sm font-black uppercase tracking-widest font-heading flex items-center space-x-2">
               <CalendarDays className="w-4 h-4 text-[#d4af37]" />
-              <span>Event Director Workspace</span>
+              <span>{isGlobalED ? "Event Director Workspace" : "Committee Lead Work Console"}</span>
             </h2>
             <p className="text-[10px] text-emerald-200/90 font-medium">Simplify Community Gatherings & Festivals</p>
           </div>
@@ -5226,7 +5258,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                 value={selectedEventId}
                 onChange={(e) => {
                   setSelectedEventId(e.target.value);
-                  setActiveCommitteeToConfigure(null);
+                  if (isGlobalED) {
+                    setActiveCommitteeToConfigure(null);
+                  }
                 }}
                 className="text-xs font-black bg-[#0d4124] border border-emerald-700 p-2 rounded-xl text-white focus:outline-none cursor-pointer"
               >
@@ -5258,7 +5292,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
               </div>
               <div className="text-left hidden lg:block leading-none">
                 <strong className="block text-[10px] text-white font-bold">{profile.fullName}</strong>
-                <span className="text-[9px] text-[#d4af37] font-black uppercase tracking-wider">Director</span>
+                <span className="text-[9px] text-[#d4af37] font-black uppercase tracking-wider">
+                  {isGlobalED ? "Director" : "Committee Lead"}
+                </span>
               </div>
             </div>
           )}
@@ -5574,14 +5610,22 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                             <button
                               onClick={() => {
                                 setSelectedEventId(evt.id);
-                                if (navItems.length > 1) {
-                                  // Auto-navigate to their first allowed workspace
-                                  setActiveTab(navItems[1].id as any);
+                                const allowedWorkspaces = navItems.filter(i => i.id !== 'events');
+                                if (allowedWorkspaces.length > 0) {
+                                  const targetItem = allowedWorkspaces[0];
+                                  if (targetItem.id.startsWith('comm_')) {
+                                    setActiveTab('committees');
+                                    setActiveCommitteeToConfigure((targetItem as any).targetComm);
+                                  } else {
+                                    setActiveTab(targetItem.id as any);
+                                    setActiveCommitteeToConfigure(null);
+                                  }
                                 }
                               }}
-                              className="flex-1 py-2 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-250 text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.99]"
+                              className="flex-1 py-2.5 rounded-xl bg-[#0f4c2a] hover:bg-[#0b381f] text-white text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.99]"
                             >
-                              <span>Select Event Workspace</span>
+                              <span>Open Committee Workspace</span>
+                              <span>➜</span>
                             </button>
                           )}
                         </div>
@@ -7021,7 +7065,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                       : "Assign leaders and coordinate staffing for each committee."}
                   </p>
                 </div>
-                {activeCommitteeToConfigure && (
+                {activeCommitteeToConfigure && isGlobalED && (
                   <button
                     onClick={() => setActiveCommitteeToConfigure(null)}
                     className="flex items-center space-x-1.5 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
@@ -7304,7 +7348,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
                   {/* ACTIVE CONFIGURATION WORKSPACE */}
                   {activeCommitteeToConfigure && (() => {
-                    const currentComm = activeCommittees.find(c => c.name === activeCommitteeToConfigure);
+                    const currentComm = activeCommittees.find(c => c.name?.toLowerCase() === activeCommitteeToConfigure?.toLowerCase());
                     if (!currentComm) {
                       return (
                         <div className="p-6 text-center text-stone-500 font-bold bg-white rounded-2xl border border-stone-200">

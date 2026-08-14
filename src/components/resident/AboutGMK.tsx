@@ -131,7 +131,7 @@ export default function AboutGMK() {
               GMK Resident Portal • Developed by Elite IT
             </div>
             <div>
-              Platform Version: <button type="button" onClick={() => setIsNotesOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.0 (Release Notes)</button>
+              Platform Version: <button type="button" onClick={() => setIsNotesOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.1 (Release Notes)</button>
             </div>
           </div>
         </div>

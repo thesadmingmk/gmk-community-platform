@@ -138,7 +138,11 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
 
   // Filter navigation items based on current subscriber's authentic security privileges
   const visibleNavItems = navItems.filter(item => 
-    item.roles.some(role => userRoles.includes(role))
+    item.roles.some(role => 
+      userRoles.includes(role) ||
+      (role === 'committee_lead' && userRoles.some(r => r.startsWith('committee_lead') || r === 'lead')) ||
+      (role === 'program_lead' && userRoles.some(r => r.startsWith('program_lead') || r === 'program_coordinator'))
+    )
   );
 
   // Helper to determine role description badge
@@ -157,6 +161,12 @@ export default function AppShell({ activeTab, setActiveTab, children, unitNumber
     }
     if (userRoles.includes('event_director')) {
       return <GMKBadge variant="role">Event Director</GMKBadge>;
+    }
+    if (userRoles.some(r => r.startsWith('committee_lead') || r === 'committee_lead' || r === 'lead')) {
+      return <GMKBadge variant="role">Committee Lead</GMKBadge>;
+    }
+    if (userRoles.some(r => r.startsWith('program_lead') || r === 'program_lead' || r === 'program_coordinator')) {
+      return <GMKBadge variant="role">Program Lead</GMKBadge>;
     }
     return <GMKBadge variant="success">Verified Resident</GMKBadge>;
   };
