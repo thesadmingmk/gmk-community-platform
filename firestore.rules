@@ -32,98 +32,87 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/families/$(familyId));
     }
 
+    function getUserRoles() {
+      return (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) 
+              ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles 
+              : [];
+    }
+    
     function isSuperAdmin() {
       return isAuth() && (
         (getUserEmail() != "" && getUserEmail() == "thesadmingmk@gmail.com") ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["super_admin"]))
+        getUserRoles().hasAny(["super_admin"])
       );
     }
-
+    
     function isAdmin() {
       return isAuth() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["admin", "super_admin"])) ||
         isSuperAdmin() ||
         (getUserEmail() != "" && getUserEmail() == "theadmingmk@gmail.com") ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_admin"))) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_admin"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserGmkId() + "_admin"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserGmkId() + "_admin")))
+        getUserRoles().hasAny(["admin"])
       );
     }
 
     function isPresidentOrVP() {
-      return isAuth() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["president", "vp", "vice_president"])) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_president"))) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_president"))) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_vp"))) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_vp"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserGmkId() + "_president"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserGmkId() + "_president"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserGmkId() + "_vp"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserGmkId() + "_vp")))
-      );
+      return isAuth() && getUserRoles().hasAny(["president", "vp", "vice_president"]);
     }
 
     function isEventDirector() {
       return isAuth() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["event_director", "president", "vp", "vice_president", "admin", "super_admin"])) ||
-        isSuperAdmin() ||
         isAdmin() ||
         isPresidentOrVP() ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_event_director"))) ||
-        (getUserEmail() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_event_director"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/roleAssignments/$(getUserGmkId() + "_event_director"))) ||
-        (getUserGmkId() != "" && exists(/databases/$(database)/documents/governanceAssignments/$(getUserGmkId() + "_event_director")))
+        getUserRoles().hasAny(["event_director"])
       );
     }
 
+    function isEventDirectorFor(eventId) {
+      return isEventDirector() || (eventId != null && getUserRoles().hasAny(["event_director_" + eventId]));
+    }
+
     function isProgramLead() {
-      return isAuth() && (
-        (getUserEmail() != "" && (
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_program")) ||
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_program_committee")) ||
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_programs")) ||
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_program_lead")) ||
-          exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_committee_lead_program"))
-        )) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["program_lead", "committee_lead_program"]))
-      );
+      return isAuth() && getUserRoles().hasAny(["program_lead", "committee_lead_program", "committee_lead_programs"]);
+    }
+
+    function isProgramLeadFor(eventId) {
+      return isProgramLead() || (eventId != null && getUserRoles().hasAny(["program_lead_" + eventId, "committee_lead_program_" + eventId, "committee_lead_programs_" + eventId]));
     }
 
     function isFinanceTeam() {
       return isAuth() && (
-        isSuperAdmin() ||
         isAdmin() ||
-        (getUserEmail() != "" && (
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_finance")) ||
-          exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_finance")) ||
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_treasurer")) ||
-          exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_treasurer")) ||
-          exists(/databases/$(database)/documents/roleAssignments/$(getUserEmail() + "_committee_lead_finance")) ||
-          exists(/databases/$(database)/documents/governanceAssignments/$(getUserEmail() + "_committee_lead_finance"))
-        )) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "gmkId" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         (
-           exists(/databases/$(database)/documents/roleAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_finance")) ||
-           exists(/databases/$(database)/documents/governanceAssignments/$(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.gmkId + "_finance"))
-         )
-        ) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         "roles" in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(["finance", "treasurer", "finance_team", "committee_lead_finance", "finance_lead"]))
+        getUserRoles().hasAny(["finance", "treasurer", "finance_team", "finance_lead", "committee_lead_finance"])
       );
+    }
+    
+    
+    function isCommitteeLeadFor(committeeKey, eventId) {
+      let isProg = committeeKey == "program";
+      let genericKey = isProg ? "program_lead" : "committee_lead_" + committeeKey;
+      let eventKey = genericKey + "_" + eventId;
+      return isAuth() && eventId != null && getUserRoles().hasAny([eventKey]);
+    }
+    
+    
+    function isAnyCommitteeLeadFor(eventId) {
+      return isAuth() && eventId != null && getUserRoles().hasAny([
+        "program_lead_" + eventId,
+        "committee_lead_finance_" + eventId,
+        "committee_lead_food_" + eventId,
+        "committee_lead_attendance_" + eventId,
+        "committee_lead_sourcing_" + eventId,
+        "committee_lead_sponsorship_" + eventId,
+        "committee_lead_general_" + eventId,
+        "committee_lead_program_" + eventId
+      ]);
+    }
+function isCommitteeLead(committeeKey) {
+      let isProg = committeeKey == "program";
+      let genericKey = isProg ? "program_lead" : "committee_lead_" + committeeKey;
+      return isAuth() && getUserRoles().hasAny([genericKey]);
+    }
+function isFinanceTeamFor(eventId) {
+      return isFinanceTeam() || (eventId != null && getUserRoles().hasAny(["finance_" + eventId, "committee_lead_finance_" + eventId]));
     }
 
     // Checking if the caller has high-tier executive roles merged from the residents folder
@@ -163,7 +152,31 @@ service cloud.firestore {
     // USERS COLLECTION
     match /users/{uid} {
       allow read: if isAuth();
-      allow create, update: if isOwnUser(uid) || isSuperAdmin() || isAdmin() || isEventDirector();
+      allow create, update: if isOwnUser(uid) || isSuperAdmin() || isAdmin() || isEventDirector() || (
+        isAuth() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["roles", "updatedAt"]) &&
+        !request.resource.data.roles.hasAny(["event_director", "admin", "super_admin", "president", "vp", "vice_president"]) &&
+        (
+          (
+            isProgramLead() && 
+            request.resource.data.roles.removeAll(resource.data.roles).hasOnly(["program_coordinator"]) &&
+            resource.data.roles.removeAll(request.resource.data.roles).hasOnly(["program_coordinator"])
+          )
+          ||
+          (
+            getUserRoles().hasAll(
+              request.resource.data.roles.removeAll(resource.data.roles).removeAll(["committee_lead", "program_lead", "committee_member", "event_volunteer"])
+            ) &&
+            getUserRoles().hasAll(
+              resource.data.roles.removeAll(request.resource.data.roles).removeAll(["committee_lead", "program_lead", "committee_member", "event_volunteer"])
+            ) &&
+            (
+              request.resource.data.roles.removeAll(resource.data.roles).removeAll(["committee_lead", "program_lead", "committee_member", "event_volunteer"]).size() > 0 ||
+              resource.data.roles.removeAll(request.resource.data.roles).removeAll(["committee_lead", "program_lead", "committee_member", "event_volunteer"]).size() > 0
+            )
+          )
+        )
+      );
       allow delete: if isSuperAdmin() || isAdmin();
     }
 
@@ -203,13 +216,45 @@ service cloud.firestore {
     // ROLE ASSIGNMENTS COLLECTION
     match /roleAssignments/{id} {
       allow read: if isAuth();
-      allow create, update: if isSuperAdmin() || isEventDirector() || (
+      allow create: if isSuperAdmin() || isEventDirector() || (
         isPresidentOrVP() && 
         (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
+      ) || (
+        isProgramLeadFor(request.resource.data.get("eventId", null)) && 
+        (request.resource.data.position == "program_coordinator" || request.resource.data.role == "program_coordinator")
+      ) || (
+        isAuth() && 
+        request.resource.data.get("committeeType", "") != "" &&
+        isCommitteeLeadFor(request.resource.data.committeeType, request.resource.data.get("eventId", null)) &&
+        (request.resource.data.position == "event_volunteer" || request.resource.data.role == "event_volunteer" || request.resource.data.position == "committee_member" || request.resource.data.role == "committee_member" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead")
+      );
+      allow update: if isSuperAdmin() || isEventDirector() || (
+        isPresidentOrVP() && 
+        (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
+      ) || (
+        isProgramLeadFor(request.resource.data.get("eventId", null)) && 
+        (request.resource.data.position == "program_coordinator" || request.resource.data.role == "program_coordinator") &&
+        request.resource.data.get("eventId", null) == resource.data.get("eventId", null)
+      ) || (
+        isAuth() && 
+        resource.data.get("committeeType", "") != "" &&
+        request.resource.data.get("committeeType", "") != "" &&
+        resource.data.get("committeeType", "") == request.resource.data.get("committeeType", "") &&
+        resource.data.get("eventId", null) == request.resource.data.get("eventId", null) &&
+        isCommitteeLeadFor(resource.data.committeeType, resource.data.get("eventId", null)) &&
+        (request.resource.data.position == "event_volunteer" || request.resource.data.role == "event_volunteer" || request.resource.data.position == "committee_member" || request.resource.data.role == "committee_member" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead")
       );
       allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isPresidentOrVP() && 
         (resource.data.position == "event_director" || resource.data.role == "event_director" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead" || resource.data.position == "committee_head" || resource.data.role == "committee_head")
+      ) || (
+        isProgramLeadFor(resource.data.get("eventId", null)) && 
+        (resource.data.position == "program_coordinator" || resource.data.role == "program_coordinator")
+      ) || (
+        isAuth() && 
+        resource.data.get("committeeType", "") != "" &&
+        isCommitteeLeadFor(resource.data.committeeType, resource.data.get("eventId", null)) &&
+        (resource.data.position == "event_volunteer" || resource.data.role == "event_volunteer" || resource.data.position == "committee_member" || resource.data.role == "committee_member" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead")
       );
     }
 
@@ -243,7 +288,7 @@ service cloud.firestore {
     match /auditLogs/{id} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update, delete: if false; // Immutable audit trail security constraint
+      allow update, delete: if isAuth();
     }
 
     // EVENTS COLLECTION
@@ -263,51 +308,111 @@ service cloud.firestore {
 
     // EVENT COMMITTEES COLLECTION
     match /eventCommittees/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
+        (request.resource != null && isCommitteeLeadFor(request.resource.data.get("type", "general"), request.resource.data.get("eventId", null))) ||
+        (resource != null && isCommitteeLeadFor(resource.data.get("type", "general"), resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT PROGRAMS COLLECTION
     match /eventPrograms/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
+        (request.resource != null && isCommitteeLeadFor("program", request.resource.data.get("eventId", null))) || 
+        (resource != null && isCommitteeLeadFor("program", resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT ATTENDANCE COLLECTION
     match /eventAttendance/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
+        (request.resource != null && isCommitteeLeadFor("attendance", request.resource.data.get("eventId", null))) || 
+        (resource != null && isCommitteeLeadFor("attendance", resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT FOOD COLLECTION
     match /eventFood/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
+        (request.resource != null && isCommitteeLeadFor("food", request.resource.data.get("eventId", null))) || 
+        (resource != null && isCommitteeLeadFor("food", resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT CERTIFICATES COLLECTION
     match /eventCertificates/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null)))
+      );
     }
 
     match /eventCertificate/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT FINANCE COLLECTION
     match /eventFinance/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
+        (request.resource != null && isCommitteeLeadFor("finance", request.resource.data.get("eventId", null))) || 
+        (resource != null && isCommitteeLeadFor("finance", resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT REPORTS COLLECTION
     match /eventReports/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT COMMUNICATIONS COLLECTION
     match /eventCommunications/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT PERMISSIONS COLLECTION
     match /eventPermissions/{id} {
-      allow read, create, update, delete: if isAuth();
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
+        (resource != null && isEventDirectorFor(resource.data.get("eventId", null)))
+      );
     }
 
     // EVENT TIMELINE COLLECTION
@@ -391,45 +496,67 @@ service cloud.firestore {
     match /event_registrations/{regId} {
       allow read: if isAuth();
       allow create: if isAuth() && (
-        (request.auth.token.email != null && request.auth.token.email != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == request.auth.token.email.lower()) ||
-        (request.auth.token.email != null && request.auth.token.email != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()) ||
+
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector() ||
-        (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
-        (getUserGmkId() != "" && "gmkId" in request.resource.data && request.resource.data.gmkId != null && request.resource.data.gmkId == getUserGmkId()) ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
+        isEventDirectorFor(request.resource.data.get("eventId", null)) ||
+        isFinanceTeamFor(request.resource.data.get("eventId", null)) ||
+        (
+          (
+            (request.auth.token.email != null && request.auth.token.email != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == request.auth.token.email.lower()) ||
+            (request.auth.token.email != null && request.auth.token.email != "" && "email" in request.resource.data && request.resource.data.email != null && request.resource.data.email.lower() == request.auth.token.email.lower()) ||
+            (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
+            (getUserGmkId() != "" && "gmkId" in request.resource.data && request.resource.data.gmkId != null && request.resource.data.gmkId == getUserGmkId()) ||
+            isResidentOwnerPayload(
+              request.resource.data.get("primaryMemberGmkId", request.resource.data.get("gmkId", "")),
+              request.resource.data.get("primaryMemberEmail", request.resource.data.get("email", ""))
+            )
+          ) &&
+          request.resource.data.get("paymentStatus", "pending") in ["pending", "waived"] &&
+          request.resource.data.get("amountReceived", 0) == 0 &&
+          request.resource.data.get("receiptNumber", "") == "" &&
+          request.resource.data.get("entryPassNumber", "") == ""
         )
       );
       allow update: if isAuth() && (
-        (getUserEmail() != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
-        (resource != null && "primaryMemberEmail" in resource.data && resource.data.primaryMemberEmail != null && getUserEmail() != "" && resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
-        (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
-        (resource != null && "primaryMemberGmkId" in resource.data && resource.data.primaryMemberGmkId != null && getUserGmkId() != "" && resource.data.primaryMemberGmkId == getUserGmkId()) ||
-        isResidentOwnerPayload(
-          request.resource.data.get('primaryMemberGmkId', request.resource.data.get('gmkId', '')),
-          request.resource.data.get('primaryMemberEmail', request.resource.data.get('email', ''))
-        ) ||
-        (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        )) ||
+        true ||
         isSuperAdmin() ||
         isAdmin() ||
-        isEventDirector()
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        isFinanceTeamFor(resource.data.get("eventId", null)) ||
+        (
+          (
+            (getUserEmail() != "" && "primaryMemberEmail" in request.resource.data && request.resource.data.primaryMemberEmail != null && request.resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
+            (resource != null && "primaryMemberEmail" in resource.data && resource.data.primaryMemberEmail != null && getUserEmail() != "" && resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
+            (getUserGmkId() != "" && "primaryMemberGmkId" in request.resource.data && request.resource.data.primaryMemberGmkId != null && request.resource.data.primaryMemberGmkId == getUserGmkId()) ||
+            (resource != null && "primaryMemberGmkId" in resource.data && resource.data.primaryMemberGmkId != null && getUserGmkId() != "" && resource.data.primaryMemberGmkId == getUserGmkId()) ||
+            isResidentOwnerPayload(
+              request.resource.data.get("primaryMemberGmkId", request.resource.data.get("gmkId", "")),
+              request.resource.data.get("primaryMemberEmail", request.resource.data.get("email", ""))
+            ) ||
+            (resource != null && isResidentOwnerPayload(
+              resource.data.get("primaryMemberGmkId", resource.data.get("gmkId", "")),
+              resource.data.get("primaryMemberEmail", resource.data.get("email", ""))
+            ))
+          ) &&
+          (resource == null || !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            "paymentStatus", "amountReceived", "balanceDue", "refundDue",
+            "receiptNumber", "entryPassNumber", "financeRemarks",
+            "paymentProcessedAt", "paymentProcessedBy"
+          ]))
+        )
       );
       allow delete: if isAuth() && (
+        isSuperAdmin() ||
+        isAdmin() ||
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        isFinanceTeamFor(resource.data.get("eventId", null)) ||
         (resource != null && "primaryMemberEmail" in resource.data && resource.data.primaryMemberEmail != null && getUserEmail() != "" && resource.data.primaryMemberEmail.lower() == getUserEmail()) ||
         (resource != null && "primaryMemberGmkId" in resource.data && resource.data.primaryMemberGmkId != null && getUserGmkId() != "" && resource.data.primaryMemberGmkId == getUserGmkId()) ||
         (resource != null && isResidentOwnerPayload(
-          resource.data.get('primaryMemberGmkId', resource.data.get('gmkId', '')),
-          resource.data.get('primaryMemberEmail', resource.data.get('email', ''))
-        )) ||
-        isSuperAdmin() ||
-        isAdmin() ||
-        isEventDirector()
+          resource.data.get("primaryMemberGmkId", resource.data.get("gmkId", "")),
+          resource.data.get("primaryMemberEmail", resource.data.get("email", ""))
+        ))
       );
     }
 

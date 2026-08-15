@@ -873,7 +873,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       const defaultCommittees = ['Attendance', 'Finance', 'Food', 'Cultural', 'Sports', 'Sponsorship', 'Sourcing'];
       for (const commName of defaultCommittees) {
         const commDocId = `${eventId}_${commName.replace(/\s+/g, '_')}`;
-        const canonicalType = (['finance', 'food', 'attendance', 'sourcing', 'sponsorship'].includes(commName.toLowerCase()) ? commName.toLowerCase() : 'general') as any;
+        const canonicalType = (['finance', 'food', 'attendance', 'sourcing', 'sponsorship', 'program', 'events_&_programs'].includes(commName.toLowerCase()) ? (commName.toLowerCase() === 'events_&_programs' || commName.toLowerCase() === 'programs') ? 'program' : commName.toLowerCase() : 'general') as any;
         const committeePayload: EventCommittee = {
           id: commDocId,
           eventId: eventId,
@@ -3098,10 +3098,13 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
         transaction.set(doc(db, "residents", resident.gmkId), {
           committee: committee.name,
+          committeeType: committeeType,
+          eventId: selectedEventId,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        const safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
+        let safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
+        if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
         const assignmentId = `${resident.gmkId}_committee_lead_${safeCommitteeKey}`;
         const emailAssignmentId = `${resident.email.toLowerCase().trim()}_committee_lead_${safeCommitteeKey}`;
 
@@ -3112,6 +3115,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           position: roleToAssign,
           role: roleToAssign,
           committee: committee.name,
+          committeeType: committeeType,
+          eventId: selectedEventId,
           assignedBy: profile?.email || 'event_director',
           assignedAt: new Date().toISOString()
         };
@@ -3261,10 +3266,13 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
         transaction.set(doc(db, "residents", resident.gmkId), {
           committee: committee.name,
+          committeeType: committeeType,
+          eventId: selectedEventId,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        const safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
+        let safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
+        if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
         const assignmentId = `${resident.gmkId}_committee_lead_${safeCommitteeKey}`;
         const emailAssignmentId = `${resident.email.toLowerCase().trim()}_committee_lead_${safeCommitteeKey}`;
 
@@ -3275,6 +3283,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           position: roleToAssign,
           role: roleToAssign,
           committee: committee.name,
+          committeeType: committeeType,
+          eventId: selectedEventId,
           assignedBy: profile?.email || 'event_director',
           assignedAt: new Date().toISOString()
         };
@@ -4418,6 +4428,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
             position: 'event_volunteer',
             role: 'event_volunteer',
             eventId: selectedEventId,
+            committeeType: 'program',
+            programId: workingProgram.id,
             status: 'ACTIVE',
             assignedAt: new Date().toISOString()
           });
