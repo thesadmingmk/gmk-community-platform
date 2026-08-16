@@ -512,7 +512,8 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       else if (n.includes('sourcing')) cType = 'sourcing';
       else if (n.includes('sponsorship')) cType = 'sponsorship';
       
-      const safeCommitteeKey = cType;
+      let safeCommitteeKey = cType;
+      if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
       const assignmentId = `${targetRes.gmkId}_committee_lead_${safeCommitteeKey}`;
       const emailAssignmentId = `${normEmail}_committee_lead_${safeCommitteeKey}`;
 
@@ -589,7 +590,8 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
     else if (n.includes('sourcing')) cType = 'sourcing';
     else if (n.includes('sponsorship')) cType = 'sponsorship';
     
-    const safeCommitteeKey = cType;
+    let safeCommitteeKey = cType;
+    if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
 
     try {
       const assignmentId = `${assignment.gmkId}_committee_lead_${safeCommitteeKey}`;

@@ -87,10 +87,19 @@ service cloud.firestore {
     
     
     function isCommitteeLeadFor(committeeKey, eventId) {
-      let isProg = committeeKey == "program";
-      let genericKey = isProg ? "program_lead" : "committee_lead_" + committeeKey;
-      let eventKey = genericKey + "_" + eventId;
-      return isAuth() && eventId != null && getUserRoles().hasAny([eventKey]);
+      return isAuth() &&
+        eventId != null &&
+        (
+          getUserRoles().hasAny([
+            "committee_lead_" + committeeKey + "_" + eventId
+          ]) ||
+          (
+            committeeKey == "program" &&
+            getUserRoles().hasAny([
+              "program_lead_" + eventId
+            ])
+          )
+        );
     }
     
     
@@ -219,42 +228,14 @@ function isFinanceTeamFor(eventId) {
       allow create: if isSuperAdmin() || isEventDirector() || (
         isPresidentOrVP() && 
         (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
-      ) || (
-        isProgramLeadFor(request.resource.data.get("eventId", null)) && 
-        (request.resource.data.position == "program_coordinator" || request.resource.data.role == "program_coordinator")
-      ) || (
-        isAuth() && 
-        request.resource.data.get("committeeType", "") != "" &&
-        isCommitteeLeadFor(request.resource.data.committeeType, request.resource.data.get("eventId", null)) &&
-        (request.resource.data.position == "event_volunteer" || request.resource.data.role == "event_volunteer" || request.resource.data.position == "committee_member" || request.resource.data.role == "committee_member" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead")
       );
       allow update: if isSuperAdmin() || isEventDirector() || (
         isPresidentOrVP() && 
         (request.resource.data.position == "event_director" || request.resource.data.role == "event_director" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead" || request.resource.data.position == "committee_head" || request.resource.data.role == "committee_head")
-      ) || (
-        isProgramLeadFor(request.resource.data.get("eventId", null)) && 
-        (request.resource.data.position == "program_coordinator" || request.resource.data.role == "program_coordinator") &&
-        request.resource.data.get("eventId", null) == resource.data.get("eventId", null)
-      ) || (
-        isAuth() && 
-        resource.data.get("committeeType", "") != "" &&
-        request.resource.data.get("committeeType", "") != "" &&
-        resource.data.get("committeeType", "") == request.resource.data.get("committeeType", "") &&
-        resource.data.get("eventId", null) == request.resource.data.get("eventId", null) &&
-        isCommitteeLeadFor(resource.data.committeeType, resource.data.get("eventId", null)) &&
-        (request.resource.data.position == "event_volunteer" || request.resource.data.role == "event_volunteer" || request.resource.data.position == "committee_member" || request.resource.data.role == "committee_member" || request.resource.data.position == "committee_lead" || request.resource.data.role == "committee_lead")
       );
       allow delete: if isSuperAdmin() || isAdmin() || isEventDirector() || (
         isPresidentOrVP() && 
         (resource.data.position == "event_director" || resource.data.role == "event_director" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead" || resource.data.position == "committee_head" || resource.data.role == "committee_head")
-      ) || (
-        isProgramLeadFor(resource.data.get("eventId", null)) && 
-        (resource.data.position == "program_coordinator" || resource.data.role == "program_coordinator")
-      ) || (
-        isAuth() && 
-        resource.data.get("committeeType", "") != "" &&
-        isCommitteeLeadFor(resource.data.committeeType, resource.data.get("eventId", null)) &&
-        (resource.data.position == "event_volunteer" || resource.data.role == "event_volunteer" || resource.data.position == "committee_member" || resource.data.role == "committee_member" || resource.data.position == "committee_lead" || resource.data.role == "committee_lead")
       );
     }
 
@@ -309,48 +290,113 @@ function isFinanceTeamFor(eventId) {
     // EVENT COMMITTEES COLLECTION
     match /eventCommittees/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth() && (
+      allow create: if isAuth() && (
         isSuperAdmin() || isAdmin() || 
-        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
-        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
-        (request.resource != null && isCommitteeLeadFor(request.resource.data.get("type", "general"), request.resource.data.get("eventId", null))) ||
-        (resource != null && isCommitteeLeadFor(resource.data.get("type", "general"), resource.data.get("eventId", null)))
+        isEventDirectorFor(request.resource.data.get("eventId", null))
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (
+          isCommitteeLeadFor(resource.data.get("name", resource.data.get("type", "general")), resource.data.get("eventId", null)) &&
+          isCommitteeLeadFor(request.resource.data.get("name", request.resource.data.get("type", "general")), request.resource.data.get("eventId", null)) &&
+          request.resource.data.get("eventId", null) == resource.data.get("eventId", null) &&
+          request.resource.data.get("name", "") == resource.data.get("name", "") &&
+          request.resource.data.get("type", "") == resource.data.get("type", "")
+        )
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null))
       );
     }
 
     // EVENT PROGRAMS COLLECTION
     match /eventPrograms/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth() && (
+      allow create: if isAuth() && (
         isSuperAdmin() || isAdmin() || 
-        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
-        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
-        (request.resource != null && isCommitteeLeadFor("program", request.resource.data.get("eventId", null))) || 
-        (resource != null && isCommitteeLeadFor("program", resource.data.get("eventId", null)))
+        isEventDirectorFor(request.resource.data.get("eventId", null)) ||
+        isCommitteeLeadFor("program", request.resource.data.get("eventId", null))
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (
+          isCommitteeLeadFor("program", resource.data.get("eventId", null)) &&
+          isCommitteeLeadFor("program", request.resource.data.get("eventId", null)) &&
+          request.resource.data.get("eventId", null) == resource.data.get("eventId", null)
+        )
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        isCommitteeLeadFor("program", resource.data.get("eventId", null))
       );
     }
 
     // EVENT ATTENDANCE COLLECTION
     match /eventAttendance/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth() && (
+      allow create: if isAuth() && (
         isSuperAdmin() || isAdmin() || 
-        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
-        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
-        (request.resource != null && isCommitteeLeadFor("attendance", request.resource.data.get("eventId", null))) || 
-        (resource != null && isCommitteeLeadFor("attendance", resource.data.get("eventId", null)))
+        isEventDirectorFor(request.resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("attendance", request.resource.data.get("eventId", null)) && request.resource.data.get("committeeKey", "") == "attendance") ||
+        (
+          request.resource.data.get("committeeKey", null) == null && 
+          request.auth.token.email != null && 
+          request.auth.token.email.matches('.*@.*') &&
+          get(/databases/$(database)/documents/families/$(request.resource.data.get("primaryMemberGmkId", ""))).data.email == request.auth.token.email
+        )
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("attendance", resource.data.get("eventId", null)) && 
+         isCommitteeLeadFor("attendance", request.resource.data.get("eventId", null)) && 
+         resource.data.get("committeeKey", "") == "attendance" && 
+         request.resource.data.get("committeeKey", "") == "attendance") ||
+        (
+          resource.data.get("committeeKey", null) == null && 
+          request.resource.data.get("committeeKey", null) == null && 
+          request.auth.token.email != null && 
+          request.auth.token.email.matches('.*@.*') &&
+          get(/databases/$(database)/documents/families/$(resource.data.get("primaryMemberGmkId", ""))).data.email == request.auth.token.email
+        )
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("attendance", resource.data.get("eventId", null)) && resource.data.get("committeeKey", "") == "attendance") ||
+        (
+          resource.data.get("committeeKey", null) == null && 
+          request.auth.token.email != null && 
+          request.auth.token.email.matches('.*@.*') &&
+          get(/databases/$(database)/documents/families/$(resource.data.get("primaryMemberGmkId", ""))).data.email == request.auth.token.email
+        )
       );
     }
 
     // EVENT FOOD COLLECTION
     match /eventFood/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth() && (
+      allow create: if isAuth() && (
         isSuperAdmin() || isAdmin() || 
-        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
-        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
-        (request.resource != null && isCommitteeLeadFor("food", request.resource.data.get("eventId", null))) || 
-        (resource != null && isCommitteeLeadFor("food", resource.data.get("eventId", null)))
+        isEventDirectorFor(request.resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("food", request.resource.data.get("eventId", null)) && request.resource.data.get("committeeKey", "") == "food")
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("food", resource.data.get("eventId", null)) && 
+         isCommitteeLeadFor("food", request.resource.data.get("eventId", null)) && 
+         resource.data.get("committeeKey", "") == "food" && 
+         request.resource.data.get("committeeKey", "") == "food")
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("food", resource.data.get("eventId", null)) && resource.data.get("committeeKey", "") == "food")
       );
     }
 
@@ -376,12 +422,23 @@ function isFinanceTeamFor(eventId) {
     // EVENT FINANCE COLLECTION
     match /eventFinance/{id} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth() && (
+      allow create: if isAuth() && (
         isSuperAdmin() || isAdmin() || 
-        (request.resource != null && isEventDirectorFor(request.resource.data.get("eventId", null))) || 
-        (resource != null && isEventDirectorFor(resource.data.get("eventId", null))) ||
-        (request.resource != null && isCommitteeLeadFor("finance", request.resource.data.get("eventId", null))) || 
-        (resource != null && isCommitteeLeadFor("finance", resource.data.get("eventId", null)))
+        isEventDirectorFor(request.resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("finance", request.resource.data.get("eventId", null)) && request.resource.data.get("committeeKey", "") == "finance")
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("finance", resource.data.get("eventId", null)) && 
+         isCommitteeLeadFor("finance", request.resource.data.get("eventId", null)) && 
+         resource.data.get("committeeKey", "") == "finance" && 
+         request.resource.data.get("committeeKey", "") == "finance")
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || isAdmin() || 
+        isEventDirectorFor(resource.data.get("eventId", null)) ||
+        (isCommitteeLeadFor("finance", resource.data.get("eventId", null)) && resource.data.get("committeeKey", "") == "finance")
       );
     }
 

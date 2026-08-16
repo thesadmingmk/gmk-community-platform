@@ -34,7 +34,8 @@ import {
   EventAttendance,
   Family,
   FamilyMember,
-  PaymentAccount
+  PaymentAccount,
+  EventPricingConfig
 } from '../types';
 import { 
   Calendar, 
@@ -1042,6 +1043,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       } else {
         await setDoc(finRef, {
           eventId: selectedEventId,
+          committeeKey: 'finance',
           openingBalance: 0,
           budgetAllocations: {},
           sponsorshipIncome: [],
@@ -2017,7 +2019,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           allowExternal: configAllowExternal,
           externalRate: configExternalRate,
           parentRate: configParentFee,
-          otherRate: configOtherFee
+          otherRate: configOtherFee,
+          policyVersion: 'v2.0',
+          policyRevisionDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+          policyRef: `GMK-POL-v2.0-${(activeEvent?.eventCode || selectedEventId || 'GEN').toUpperCase().replace(/[^A-Z0-9]/g, '')}-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}-${String(new Date().getHours()).padStart(2, '0')}${String(new Date().getMinutes()).padStart(2, '0')}`,
+          policyUpdatedAt: new Date().toISOString(),
+          policyUpdatedBy: profile?.email || 'event_director'
         },
         completionChecklist: {
           registrationClosed: chkRegClosed,
@@ -2084,10 +2091,60 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     setIsPricingEditing(false);
   };
 
-  const handleDownloadPDF = () => {
+
+// Helper to format consistent Pricing Policy metadata with reference numbers and timestamps
+const getPolicyMetadata = (event: CommunityEvent | null, pricingConfig?: EventPricingConfig) => {
+  if (!event) {
+    return {
+      version: 'v2.0',
+      ref: 'GMK-POL-v2.0-GEN-001',
+      revisionDate: '16 Aug 2026',
+      date: '16 Aug 2026',
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
+      fullFormatted: '16 Aug 2026',
+      iso: new Date().toISOString()
+    };
+  }
+  
+  // Stored policy updated date or fallbacks
+  const storedPolicyDate = pricingConfig?.policyUpdatedAt || event.pricing?.policyUpdatedAt;
+  const rawDate = storedPolicyDate || event.updatedAt || event.createdAt || new Date().toISOString();
+  let dateObj = new Date(rawDate);
+  if (isNaN(dateObj.getTime())) dateObj = new Date();
+  
+  // v2.0 Core Heads policy was enacted on 16 Aug 2026
+  const v2EnactmentDate = new Date('2026-08-16T00:00:00Z');
+  const effectiveDateObj = (!storedPolicyDate || dateObj < v2EnactmentDate) ? new Date('2026-08-16T11:00:00') : dateObj;
+  
+  const code = (event.eventCode || event.id || 'GEN').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const yyyy = effectiveDateObj.getFullYear();
+  const mm = String(effectiveDateObj.getMonth() + 1).padStart(2, '0');
+  const dd = String(effectiveDateObj.getDate()).padStart(2, '0');
+  const hh = String(effectiveDateObj.getHours()).padStart(2, '0');
+  const min = String(effectiveDateObj.getMinutes()).padStart(2, '0');
+  
+  const version = pricingConfig?.policyVersion || event.pricing?.policyVersion || 'v2.0';
+  const ref = pricingConfig?.policyRef || event.pricing?.policyRef || `GMK-POL-${version}-${code}-${yyyy}${mm}${dd}-${hh}${min}`;
+  
+  const formattedDate = effectiveDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formattedTime = effectiveDateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  const revisionDate = pricingConfig?.policyRevisionDate || event.pricing?.policyRevisionDate || '16 Aug 2026';
+  
+  return {
+    version,
+    ref,
+    revisionDate,
+    date: formattedDate,
+    time: formattedTime,
+    fullFormatted: `${formattedDate} ${formattedTime}`,
+    iso: effectiveDateObj.toISOString()
+  };
+};
+const handleDownloadPDF = () => {
     if (!activeEvent) return;
     const doc = new jsPDF();
-    
+    const policyMeta = getPolicyMetadata(activeEvent, activeEvent.pricing);
+
     // Title / Header
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
@@ -2106,29 +2163,33 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     // Metadata Table
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text(`Event Name: ${activeEvent.eventName || activeEvent.title}`, 15, 42);
-    doc.text(`Event Code: ${activeEvent.eventCode || 'N/A'}`, 15, 48);
-    doc.text(`Venue: ${activeEvent.venue || activeEvent.Venue || 'N/A'}`, 15, 54);
-    doc.text(`Date of Event: ${activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : 'N/A'}`, 15, 60);
-    doc.text(`Document Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 15, 66);
+    doc.text(`Event Name: ${activeEvent.eventName || activeEvent.title}`, 15, 40);
+    doc.text(`Event Code: ${activeEvent.eventCode || 'N/A'}`, 15, 46);
+    doc.text(`Policy Reference: ${policyMeta.ref}`, 15, 52);
+    doc.text(`Policy Revision: ${policyMeta.version} (Core Heads Schedule)`, 15, 58);
+    doc.text(`Revision Date: ${policyMeta.revisionDate}`, 15, 64);
+    doc.text(`Policy Effective: ${policyMeta.fullFormatted}`, 15, 70);
+    doc.text(`Venue: ${activeEvent.venue || activeEvent.Venue || 'N/A'}`, 15, 76);
+    doc.text(`Date of Event: ${activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : 'N/A'}`, 15, 82);
+    doc.text(`Document Exported: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 15, 88);
     
     // Sub-header for Pricing Setup
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(15, 76, 42);
-    doc.text("FROZEN REGISTRATION PRICING SCHEDULE (v1.1)", 15, 78);
+    doc.text(`FROZEN REGISTRATION PRICING SCHEDULE (${policyMeta.version} • Rev: ${policyMeta.revisionDate})`, 15, 98);
     
     doc.setLineWidth(0.2);
     doc.setDrawColor(200, 200, 200);
-    doc.line(15, 81, 195, 81);
+    doc.line(15, 101, 195, 101);
     
     // Setup Table
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.setTextColor(50, 50, 50);
     
-    let y = 88;
-    const addRow = (label, value) => {
+    let y = 108;
+    const addRow = (label: string, value: string) => {
       doc.setFont("helvetica", "bold");
       doc.text(label, 15, y);
       doc.setFont("helvetica", "normal");
@@ -2160,7 +2221,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     doc.setFontSize(9);
     doc.setTextColor(80, 80, 80);
     
-    const addRuleRow = (composition, rateText) => {
+    const addRuleRow = (composition: string, rateText: string) => {
       doc.setFont("helvetica", "bold");
       doc.text(composition, 15, y);
       doc.setFont("helvetica", "normal");
@@ -2168,12 +2229,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       y += 7;
     };
     
-    addRuleRow("• Individual Rule (Primary Resident only):", `OMR ${configIndividualFee.toFixed(3)} (Individual Rate)`);
-    addRuleRow("• Couple Rule (Primary Resident + Spouse):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
-    addRuleRow("• Family Rule (Resident + Spouse + Children):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
-    addRuleRow("• Single Parent Rule (Resident + Child above Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate applied)`);
-    addRuleRow("• Parent Rule (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
-    addRuleRow("• Other Resident Rule (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
+    addRuleRow("• Core 1 Head (e.g. 1 Parent, 0 Children > Free Age):", `OMR ${configIndividualFee.toFixed(3)} (Single Rate)`);
+    addRuleRow("• Core 2 Heads (e.g. 2 Parents OR 1 Parent + 1 Child > Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
+    addRuleRow("• Core 3+ Heads (e.g. 2 Parents + 1+ Children > Free Age):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
+    addRuleRow("• Children < Free Age:", `OMR 0.000 (Free - Excluded from Core Heads)`);
+    addRuleRow("• Extra Adult (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
+    addRuleRow("• Extra Adult (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
     if (configAllowExternal) {
       addRuleRow("• Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
     } else {
@@ -2186,7 +2247,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     doc.setTextColor(150, 150, 150);
     doc.text("Note: This document represents the official active pricing tariff approved by the GMK Executive Committee.", 15, y);
     y += 4;
-    doc.text("Pricing Engine v1.1 • All calculations are dynamically verified on commit.", 15, y);
+    doc.text(`Official Policy Ref: ${policyMeta.ref} • Rev Date: ${policyMeta.revisionDate} • Effective: ${policyMeta.fullFormatted} • Verified on commit.`, 15, y);
     
     doc.save(`${activeEvent.eventName || activeEvent.title}_pricing_policy.pdf`);
   };
@@ -3548,6 +3609,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       const rawPayload: EventProgram = {
         id: progId,
         eventId: selectedEventId,
+        committeeKey: 'program',
         committeeId: owningCommittee?.id || '',
         committeeName: owningCommittee?.name || 'Program Committee',
         title: progTitle.trim(),
@@ -5071,6 +5133,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       await setDoc(attRef, {
         id: `att_${gmkId}_${selectedEventId}`,
         eventId: selectedEventId,
+        committeeKey: 'attendance',
         primaryMemberGmkId: gmkId,
         status: 'attended',
         attendedAt: nowStr,
@@ -5932,12 +5995,24 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
                   {/* SECTION 3: Registration Rules (Sprint 6 & GMK-ARCH-002) */}
                   <GMKCard className="p-6 bg-white border border-stone-200 space-y-5">
-                    <div className="border-b border-stone-150 pb-2 flex items-center justify-between gap-4">
-                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Section 3: Registration Pricing</h4>
+                    <div className="border-b border-stone-150 pb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">Section 3: Registration Pricing</h4>
+                          <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-[#0f4c2a] text-[9px] font-mono font-bold rounded-md">
+                            Ref: {getPolicyMetadata(activeEvent, activeEvent?.pricing).ref}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-stone-500 font-medium mt-0.5">
+                          <span>Revision Date: <strong className="text-stone-800 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}</strong></span>
+                          <span className="text-stone-300">•</span>
+                          <span>Effective: <strong className="text-stone-700 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setShowPricingPolicyModal(true)}
-                        className="px-2.5 py-1.5 border border-stone-250 hover:bg-stone-50 text-[#0f4c2a] font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1"
+                        className="px-2.5 py-1.5 border border-stone-250 hover:bg-stone-50 text-[#0f4c2a] font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1 shrink-0"
                       >
                         <span>View Pricing Policy</span>
                       </button>
@@ -6657,8 +6732,19 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                         {/* Floating/Nearby Close Header */}
                         <div className="sticky top-0 bg-white z-10 flex items-start justify-between gap-4 border-b border-stone-100 pb-3">
                           <div>
-                            <span className="text-[10px] font-extrabold font-mono text-[#0f4c2a] block uppercase tracking-wider">Specifications & Matrix</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-[10px] font-extrabold font-mono text-[#0f4c2a] block uppercase tracking-wider">Specifications & Matrix</span>
+                              <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-[#0f4c2a] text-[9px] font-mono font-black rounded-md">
+                                Ref: {getPolicyMetadata(activeEvent, activeEvent?.pricing).ref}
+                              </span>
+                            </div>
                             <h3 className="text-sm font-extrabold text-[#0f4c2a] font-heading mt-0.5">Registration Pricing Policy</h3>
+                            <div className="text-[10px] text-stone-500 font-mono font-medium mt-1 flex flex-wrap items-center gap-2">
+                              <span className="px-1.5 py-0.5 bg-stone-100 border border-stone-200 rounded text-stone-700 font-bold">
+                                Rev Date: {getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}
+                              </span>
+                              <span>📅 Effective: <strong className="text-stone-800 font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
+                            </div>
                           </div>
                           <div className="flex items-center space-x-2 shrink-0">
                             <button
@@ -6691,31 +6777,31 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                             <span className="text-[#0f4c2a] text-right">Effective Subtotal Fee</span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">1. Resident only</span>
-                            <span className="font-mono font-black text-stone-950">OMR {configIndividualFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Individual Rate)</span></span>
+                            <span className="text-stone-600 font-bold">1. Core 1 Head (1 Parent, 0 Children &gt; Free Age)</span>
+                            <span className="font-mono font-black text-stone-950">OMR {configIndividualFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Single Rate)</span></span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">2. Resident + Spouse (Couple)</span>
+                            <span className="text-stone-600 font-bold">2. Core 2 Heads (2 Parents, 0 Children &gt; Free Age)</span>
                             <span className="font-mono font-black text-stone-950">OMR {configCoupleFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Couple Rate)</span></span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">3. Resident + Child (Below {configFreeChildAge} years)</span>
-                            <span className="font-mono font-black text-stone-950">OMR {configIndividualFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Individual Rate - Child Free)</span></span>
+                            <span className="text-stone-600 font-bold">3. Core 2 Heads (1 Parent, 1 Child &gt; Free Age)</span>
+                            <span className="font-mono font-black text-stone-950">OMR {configCoupleFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Couple Rate)</span></span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">4. Resident + Child (Above {configFreeChildAge} years)</span>
-                            <span className="font-mono font-black text-stone-950">OMR {configCoupleFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Couple Rate / Single Parent discount)</span></span>
-                          </div>
-                          <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">5. Resident + Spouse + Children (Full Family)</span>
+                            <span className="text-stone-600 font-bold">4. Core 3+ Heads (2 Parents, 1+ Children &gt; Free Age)</span>
                             <span className="font-mono font-black text-stone-950">OMR {configFamilyFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Family Rate Cap)</span></span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">6. Parents (Spouse Parents / Own Parents)</span>
+                            <span className="text-stone-600 font-bold">5. Children &lt; Free Age</span>
+                            <span className="font-mono font-black text-stone-950">OMR 0.000 <span className="text-[9px] text-stone-500">(Free)</span></span>
+                          </div>
+                          <div className="p-3 flex justify-between">
+                            <span className="text-stone-600 font-bold">6. Extra Adult (Parents / In-laws)</span>
                             <span className="font-mono font-black text-stone-950">OMR {configParentFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Per Parent)</span></span>
                           </div>
                           <div className="p-3 flex justify-between">
-                            <span className="text-stone-600 font-bold">7. Other Resident (Maid / Other Dependents)</span>
+                            <span className="text-stone-600 font-bold">7. Extra Adult (Other Dependents / Maids)</span>
                             <span className="font-mono font-black text-stone-950">OMR {configOtherFee.toFixed(3)} <span className="text-[9px] text-stone-500">(Per Person)</span></span>
                           </div>
                           {configAllowExternal && (
@@ -8124,10 +8210,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                                     <button
                                       type="button"
                                       onClick={() => setActiveProgForManagement(null)}
-                                      className="flex items-center space-x-1 text-stone-500 hover:text-[#0f4c2a] text-[10px] font-extrabold uppercase tracking-wider transition-colors self-start"
+                                      className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2 self-start active:scale-95"
                                     >
-                                      <ChevronRight className="w-3.5 h-3.5 rotate-180" />
-                                      <span>Back to Registry</span>
+                                      <ArrowLeft className="w-4 h-4" />
+                                      <span>Back</span>
                                     </button>
                                     <div className="flex items-center space-x-2 flex-wrap gap-y-1 mt-1">
                                       <span className="text-[9px] font-black tracking-widest text-[#d4af37] uppercase bg-[#0f4c2a]/5 border border-[#0f4c2a]/15 px-2 py-0.5 rounded-lg font-mono">
@@ -8663,45 +8749,55 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
                                 </div>
 
                                 {/* ACTION BUTTONS */}
-                                <div className="pt-4 border-t border-stone-150 flex items-center justify-end space-x-3">
-                                  {!isEditingProgram ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setWorkingProgram(JSON.parse(JSON.stringify(prog)));
-                                          setIsEditingProgram(true);
-                                        }}
-                                        className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2"
-                                      >
-                                        <Edit2 className="w-4 h-4" />
-                                        <span>Modify Workspace</span>
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setIsEditingProgram(false);
-                                          setWorkingProgram(JSON.parse(JSON.stringify(activePrograms.find(p => p.id === activeProgForManagement) || {})));
-                                          setIsProgramDirty(false);
-                                        }}
-                                        className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs uppercase tracking-wider font-bold cursor-pointer transition-all"
-                                      >
-                                        Cancel Changes
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={!isProgramDirty || isSubmitting}
-                                        onClick={handleSaveProgramWorkspace}
-                                        className="px-6 py-2.5 bg-[#d4af37] hover:bg-[#c4a132] text-stone-900 rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all disabled:opacity-50 flex items-center space-x-2"
-                                      >
-                                        <Save className="w-4 h-4" />
-                                        <span>Save Program Data</span>
-                                      </button>
-                                    </>
-                                  )}
+                                <div className="pt-4 border-t border-stone-150 flex items-center justify-between space-x-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveProgForManagement(null)}
+                                    className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2 active:scale-95"
+                                  >
+                                    <ArrowLeft className="w-4 h-4" />
+                                    <span>Back</span>
+                                  </button>
+                                  <div className="flex items-center space-x-3">
+                                    {!isEditingProgram ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setWorkingProgram(JSON.parse(JSON.stringify(prog)));
+                                            setIsEditingProgram(true);
+                                          }}
+                                          className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2"
+                                        >
+                                          <Edit2 className="w-4 h-4" />
+                                          <span>Modify Workspace</span>
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setIsEditingProgram(false);
+                                            setWorkingProgram(JSON.parse(JSON.stringify(activePrograms.find(p => p.id === activeProgForManagement) || {})));
+                                            setIsProgramDirty(false);
+                                          }}
+                                          className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs uppercase tracking-wider font-bold cursor-pointer transition-all"
+                                        >
+                                          Cancel Changes
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={!isProgramDirty || isSubmitting}
+                                          onClick={handleSaveProgramWorkspace}
+                                          className="px-6 py-2.5 bg-[#d4af37] hover:bg-[#c4a132] text-stone-900 rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all disabled:opacity-50 flex items-center space-x-2"
+                                        >
+                                          <Save className="w-4 h-4" />
+                                          <span>Save Program Data</span>
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );

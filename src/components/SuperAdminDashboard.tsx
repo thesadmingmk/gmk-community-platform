@@ -2084,7 +2084,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
                             </div>
                           ) : (
                             matchedResidents.slice(0, 10).map(r => {
-                              const existingAssignment = roleAssignments.find(ra => ra.gmkId === r.gmkId);
+                              const existingAssignment = govAssignments.find(ga => ga.gmkId === r.gmkId);
                               const isAssigned = !!existingAssignment;
                               return (
                                 <div
@@ -2104,7 +2104,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
                                     {r.fullName}
                                     {isAssigned && (
                                       <span className="text-[10px] font-normal text-amber-650 italic ml-1.5 bg-amber-50 px-1 py-0.2 rounded border border-amber-100 font-sans uppercase">
-                                        {existingAssignment.position === 'admin' ? 'Admin' : existingAssignment.position === 'president' ? 'President' : 'Vice President'} Assigned
+                                        {existingAssignment.position === 'admin' ? 'Admin' : existingAssignment.position === 'president' ? 'President' : existingAssignment.position === 'vp' ? 'Vice President' : existingAssignment.position === 'event_director' ? 'Event Director' : existingAssignment.position} Assigned
                                       </span>
                                     )}
                                   </div>
@@ -2819,7 +2819,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
             GMK Governance Console • Developed by Elite IT
           </div>
           <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.1 (Release Notes)</button>
+            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.2 (Release Notes)</button>
           </div>
         </div>
       </div>

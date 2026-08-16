@@ -219,16 +219,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 assignedRoles.push('admin');
               } else if (pos) {
                 positions.push(pos);
-                if (pos === 'committee_lead' && data.committee) {
-                  let cType = 'general';
-                  const n = String(data.committee).toLowerCase();
-                  if (n.includes('finance')) cType = 'finance';
-                  else if (n.includes('food')) cType = 'food';
-                  else if (n.includes('attendance')) cType = 'attendance';
-                  else if (n.includes('program')) cType = 'program';
-                  else if (n.includes('sourcing')) cType = 'sourcing';
-                  else if (n.includes('sponsorship')) cType = 'sponsorship';
+                if (pos === 'committee_lead' && (data.committeeType || data.committee)) {
+                  let cType = String(data.committeeType || data.committee).toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and');
+                  if (cType === 'events_and_programs' || cType === 'programs' || cType === 'events_&_programs') cType = 'program';
                   positions.push(`committee_lead_${cType}`);
+                  if (data.eventId) {
+                    positions.push(`committee_lead_${cType}_${data.eventId}`);
+                  }
+                } else if (pos === 'program_lead' && data.eventId) {
+                  positions.push(`program_lead_${data.eventId}`);
                 }
               }
             }
@@ -263,16 +262,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 assignedRoles.push('admin');
               } else if (pos) {
                 positions.push(pos);
-                if (pos === 'committee_lead' && data.committee) {
-                  let cType = 'general';
-                  const n = String(data.committee).toLowerCase();
-                  if (n.includes('finance')) cType = 'finance';
-                  else if (n.includes('food')) cType = 'food';
-                  else if (n.includes('attendance')) cType = 'attendance';
-                  else if (n.includes('program')) cType = 'program';
-                  else if (n.includes('sourcing')) cType = 'sourcing';
-                  else if (n.includes('sponsorship')) cType = 'sponsorship';
+                if (pos === 'committee_lead' && (data.committeeType || data.committee)) {
+                  let cType = String(data.committeeType || data.committee).toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and');
+                  if (cType === 'events_and_programs' || cType === 'programs' || cType === 'events_&_programs') cType = 'program';
                   positions.push(`committee_lead_${cType}`);
+                  if (data.eventId) {
+                    positions.push(`committee_lead_${cType}_${data.eventId}`);
+                  }
+                } else if (pos === 'program_lead' && data.eventId) {
+                  positions.push(`program_lead_${data.eventId}`);
                 }
               }
             }
@@ -303,8 +301,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (userProfile) {
           let finalRoles = [...userProfile.roles];
-          // If the user matches a pending registration, force 'pending' state
-          if (isPending) {
+          
+          const isFullyRegistered = hasResidentDoc && residentData && residentData.status === 'active';
+
+          // If the user matches a pending registration and is not fully registered, force 'pending' state
+          if (isPending && !isFullyRegistered) {
             console.log("⏳ User email matches a pending registration. Blocking active session authorization.");
             userProfile = {
               ...userProfile,
@@ -314,8 +315,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             };
           } else {
             // Otherwise, compile their roles
-            if (hasResidentDoc && residentData && residentData.status === 'active') {
+            if (isFullyRegistered) {
               finalRoles.push('resident');
+              finalRoles = finalRoles.filter(role => role !== 'pending');
             }
             
             finalRoles = [...finalRoles, ...assignedRoles, ...positions];

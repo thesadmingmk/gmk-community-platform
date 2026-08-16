@@ -14,6 +14,52 @@ interface EventsManagerProps {
   onViewEventDetails?: (evt: CommunityEvent) => void;
 }
 
+
+// Helper to format consistent Pricing Policy metadata with reference numbers and timestamps
+const getTariffMetadata = (event: CommunityEvent | null) => {
+  if (!event) {
+    return {
+      version: 'v2.0',
+      ref: 'GMK-POL-v2.0-GEN-001',
+      revisionDate: '16 Aug 2026',
+      date: '16 Aug 2026',
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
+      fullFormatted: '16 Aug 2026'
+    };
+  }
+  
+  const storedPolicyDate = event.pricing?.policyUpdatedAt;
+  const rawDate = storedPolicyDate || event.updatedAt || event.createdAt || new Date().toISOString();
+  let dateObj = new Date(rawDate);
+  if (isNaN(dateObj.getTime())) dateObj = new Date();
+  
+  // v2.0 Core Heads policy was enacted on 16 Aug 2026
+  const v2EnactmentDate = new Date('2026-08-16T00:00:00Z');
+  const effectiveDateObj = (!storedPolicyDate || dateObj < v2EnactmentDate) ? new Date('2026-08-16T11:00:00') : dateObj;
+  
+  const code = (event.eventCode || event.id || 'GEN').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const yyyy = effectiveDateObj.getFullYear();
+  const mm = String(effectiveDateObj.getMonth() + 1).padStart(2, '0');
+  const dd = String(effectiveDateObj.getDate()).padStart(2, '0');
+  const hh = String(effectiveDateObj.getHours()).padStart(2, '0');
+  const min = String(effectiveDateObj.getMinutes()).padStart(2, '0');
+  
+  const version = event.pricing?.policyVersion || 'v2.0';
+  const ref = event.pricing?.policyRef || `GMK-POL-${version}-${code}-${yyyy}${mm}${dd}-${hh}${min}`;
+  
+  const formattedDate = effectiveDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formattedTime = effectiveDateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  const revisionDate = event.pricing?.policyRevisionDate || '16 Aug 2026';
+  
+  return {
+    version,
+    ref,
+    revisionDate,
+    date: formattedDate,
+    time: formattedTime,
+    fullFormatted: `${formattedDate} ${formattedTime}`
+  };
+};
 export default function EventsManager({ residentProfile, onViewEventDetails }: EventsManagerProps) {
   const { profile } = useAuth();
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
@@ -228,44 +274,24 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     let baseRate = 0;
 
     const spousesCount = (hasResident ? 1 : 0) + (hasSpouse ? 1 : 0);
-
+    const coreHeads = spousesCount + kidsAboveFreeAge;
+    
     const singleRate = pricing.singleRate ?? 10;
     const coupleRate = pricing.coupleRate ?? 20;
     const familyRate = pricing.familyRate ?? 25;
 
-    if (spousesCount === 2) {
-      // Both spouses attending
-      if (kidsBelowFreeAge > 0 || kidsAboveFreeAge > 0) {
-        registrationType = 'family';
-        baseRate = familyRate;
-      } else {
-        registrationType = 'couple';
-        baseRate = coupleRate;
-      }
-    } else if (spousesCount === 1) {
-      // Single adult (or resident only, or single parent)
-      if (kidsAboveFreeAge > 0) {
-        // At least one child above Free Age attends -> Couple Rate (Single Parent Rule)
-        registrationType = 'couple';
-        baseRate = coupleRate;
-      } else if (kidsBelowFreeAge > 0) {
-        // All children are below Free Age -> Individual Rate
-        registrationType = 'individual';
-        baseRate = singleRate;
-      } else {
-        // Just the resident/spouse alone -> Individual Rate
-        registrationType = 'individual';
-        baseRate = singleRate;
-      }
+    if (coreHeads >= 3) {
+      registrationType = 'family';
+      baseRate = familyRate;
+    } else if (coreHeads === 2) {
+      registrationType = 'couple';
+      baseRate = coupleRate;
+    } else if (coreHeads === 1) {
+      registrationType = 'individual';
+      baseRate = singleRate;
     } else {
-      // spousesCount === 0 (e.g. only kids or parents checked without primary/spouse)
-      if (kidsAboveFreeAge > 0) {
-        registrationType = 'couple';
-        baseRate = coupleRate;
-      } else {
-        registrationType = 'individual';
-        baseRate = singleRate;
-      }
+      registrationType = 'individual';
+      baseRate = 0;
     }
 
     // Additional subtotals
@@ -281,27 +307,29 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
     // Craft transparent breakdown details string
     const detailsParts: string[] = [];
-    if (registrationType === 'individual') {
-      detailsParts.push(`Base Registration (Individual): OMR ${baseRate}`);
-    } else if (registrationType === 'couple') {
-      if (spousesCount === 1 && kidsAboveFreeAge > 0) {
-        detailsParts.push(`Base Registration (Couple - Single Parent Rule): OMR ${baseRate}`);
+    
+    if (coreHeads > 0) {
+      if (registrationType === 'individual') {
+        detailsParts.push(`Core Registration (Single): OMR ${baseRate}`);
+      } else if (registrationType === 'couple') {
+        detailsParts.push(`Core Registration (Couple): OMR ${baseRate}`);
       } else {
-        detailsParts.push(`Base Registration (Couple): OMR ${baseRate}`);
+        detailsParts.push(`Core Registration (Family): OMR ${baseRate}`);
       }
-    } else {
-      detailsParts.push(`Base Registration (Family): OMR ${baseRate}`);
     }
 
     if (parentsCount > 0) {
-      detailsParts.push(`Parents: ${parentsCount} × OMR ${parentRate} = OMR ${parentsSubtotal}`);
+      detailsParts.push(`Extra Adults (Parents): ${parentsCount} × OMR ${parentRate} = OMR ${parentsSubtotal}`);
     }
+    
     if (othersCount > 0) {
-      detailsParts.push(`Others: ${othersCount} × OMR ${otherRate} = OMR ${othersSubtotal}`);
+      detailsParts.push(`Extra Adults (Others): ${othersCount} × OMR ${otherRate} = OMR ${othersSubtotal}`);
     }
+
     if (extCount > 0 && allowExternal) {
       detailsParts.push(`Guests: ${extCount} × OMR ${externalRate} = OMR ${externalSubtotal}`);
     }
+
     if (kidsBelowFreeAge > 0) {
       detailsParts.push(`Children below ${freeChildAge} years: FREE`);
     }
@@ -313,10 +341,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       totalAmount,
       details: detailsStr,
       breakdown: { 
-        adults: spousesCount, 
-        halfPriceChildren: kidsAboveFreeAge, 
-        freeChildren: kidsBelowFreeAge 
-      },
+         adults: spousesCount, 
+         halfPriceChildren: kidsAboveFreeAge, 
+         freeChildren: kidsBelowFreeAge 
+       },
       baseRate,
       parentsCount,
       parentRate,
@@ -590,6 +618,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const attPayload = {
         id: `att_${residentGmkId}_${activeEventForReg.id}`,
         eventId: activeEventForReg.id,
+        committeeKey: 'attendance',
         uid: currentUid,
         gmkId: residentGmkId,
         email: residentEmail,
@@ -726,6 +755,31 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       }
 
       // Defer direct eventFood creation by resident client
+      // eventFood creation
+      const foodDocRef = doc(db, "eventFood", `food_${residentGmkId}_${activeEventForReg.id}`);
+      const foodPayload = {
+        id: `food_${residentGmkId}_${activeEventForReg.id}`,
+        eventId: activeEventForReg.id,
+        committeeKey: 'food',
+        gmkId: residentGmkId,
+        fullName: residentProfile.fullName,
+        mealCouponStatus: 'none',
+        mealCount: {
+          adults: regPayload.totalParticipants || 1,
+          halfChildren: 0,
+          freeChildren: 0,
+          guests: 0
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      try {
+        await setDoc(foodDocRef, foodPayload);
+        console.log("[RTCO-024L STEP 07] eventFood setDoc SUCCESS");
+      } catch (foodErr: any) {
+        console.error("[RTCO-024L FAILURE] eventFood write failed", foodErr);
+        // non-blocking
+      }
       console.log("[RTCO-EMERGENCY-015] FOOD RECORD DEFERRED");
       console.log("[RTCO-EMERGENCY-015] EVENT REGISTRATION SUCCESS");
 
@@ -781,6 +835,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         } else {
           finPayload = {
             id: `fin_${activeEventForReg.id}`,
+            committeeKey: "finance",
             eventId: activeEventForReg.id,
             openingBalanceApproved: false,
             closingStatementsApproved: false,
@@ -1934,10 +1989,21 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
             </button>
 
             <div>
-              <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Official Event Tariff</span>
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Official Event Tariff</span>
+                <span className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-900 text-[9px] font-mono font-bold rounded-md">
+                  Ref: {getTariffMetadata(showingPricingModalEvent).ref}
+                </span>
+              </div>
               <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
                 {showingPricingModalEvent.title}
               </h3>
+              <div className="text-[10px] text-stone-500 font-mono font-medium mt-1 flex flex-wrap items-center gap-2">
+                <span className="px-1.5 py-0.5 bg-amber-50 border border-amber-200/60 rounded text-amber-900 font-bold">
+                  Rev Date: {getTariffMetadata(showingPricingModalEvent).revisionDate}
+                </span>
+                <span>📅 Effective: <strong className="text-stone-700 font-bold">{getTariffMetadata(showingPricingModalEvent).fullFormatted}</strong></span>
+              </div>
               <p className="text-stone-500 text-xs mt-1">
                 Review the applicable registration rates and fee breakdown for this gathering.
               </p>

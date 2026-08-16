@@ -19,6 +19,19 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.2",
+    title: "Core Heads Pricing Engine & Policy Revision Auditability (RTCO-072, RTCO-073)",
+    releaseDate: "2026-08-16",
+    author: "Core Platform Team",
+    notes: [
+      "Authoritative Core Heads Pricing Engine (RTCO-072): Overhauled internal pricing calculations with strict mathematical constraint (Core Heads = Core Parents + Children > Free Age; 1 Head = Single Rate, 2 Heads = Couple Rate, 3+ Heads = Family Rate Cap).",
+      "Dynamic Pricing Policy Versioning & Ref Stamp (RTCO-073): Standardized policy reference IDs (GMK-POL-v2.0-[EVENT_CODE]-[YYYYMMDD-HHMM]) stamped automatically upon saving pricing configurations.",
+      "Explicit Policy Revision Date Tracking: Stamped dedicated revision dates across the database schema, Director Dashboard Section 3, and Resident Tariff Modal.",
+      "Immutable Official PDF Tariff Sheet: Export formatted PDF tariff sheets featuring Policy Reference, Policy Revision, Revision Date, Effective Timestamps, and the frozen Core Pricing Engine Calculation Matrix.",
+      "Resident Tariff Transparency: Enabled residents to view live tariff details along with policy reference and revision date directly before registering."
+    ]
+  },
+  {
     version: "v1.5.1",
     title: "Committee Lead Workspace Access & Routing (RTCO-069)",
     releaseDate: "2026-08-14",

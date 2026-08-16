@@ -449,7 +449,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
     if (isEventDirectorRole) {
       const activeUserEmail = profile?.email || residentProfile?.email || '';
       console.log(`[ED ACCESS 1] User authenticated: ${activeUserEmail}`);
-      console.log(`[ED ACCESS 2] Event Director role resolved: ${profile?.roles?.includes('event_director') ? 'ACTIVE' : 'EXECUTIVE_PRIVILEGE'}`);
+      console.log(`[ED ACCESS 2] Event Director role resolved: ${profile?.roles?.includes('event_director') ? 'ACTIVE' : 'COMMITTEE_LEAD_ACCESS'}`);
       console.log(`[ED ACCESS 3] Committee assignments resolved: ${responsibilities.length} operational role(s) assigned`);
       console.log(`[ED ACCESS 4] Navigation permissions resolved: ED_WORKSPACE_PERMITTED`);
       console.log(`[ED ACCESS 5] Event Director menu enabled: TRUE`);

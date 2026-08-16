@@ -105,6 +105,7 @@ export default function AttendanceWorkspace({
       await setDoc(attRef, {
         id: `att_${gmkId}_${activeEvent.id}`,
         eventId: activeEvent.id,
+        committeeKey: 'attendance',
         primaryMemberGmkId: gmkId,
         status: 'attended',
         attendedAt: nowStr,

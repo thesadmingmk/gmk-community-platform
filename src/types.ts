@@ -271,6 +271,11 @@ export interface EventPricingConfig {
   externalRate?: number;
   parentRate?: number;
   otherRate?: number;
+  policyVersion?: string;
+  policyRef?: string;
+  policyRevisionDate?: string;
+  policyUpdatedAt?: string;
+  policyUpdatedBy?: string;
 }
 
 export interface EventTemplate {
@@ -345,6 +350,7 @@ export interface EventCommittee {
 }
 
 export interface EventProgram {
+  committeeKey?: string;
   id: string;
   eventId: string;
   committeeId?: string;
@@ -363,6 +369,7 @@ export interface EventProgram {
 }
 
 export interface EventAttendance {
+  committeeKey?: string;
   id: string; // att_${gmkId}_${eventId}
   eventId: string;
   gmkId: string;
@@ -380,6 +387,7 @@ export interface EventAttendance {
 }
 
 export interface EventFood {
+  committeeKey?: string;
   id: string; // food_${gmkId}_${eventId}
   eventId: string;
   gmkId: string;
