@@ -659,7 +659,7 @@ export default function IdentityGateway() {
         if (!signedInUser.emailVerified && !isSysAdmin) {
           setUnverifiedEmailUser(signedInUser);
           await signOut(auth);
-          throw new Error("Registration successful. Please check your email and verify your email address before logging in.");
+          throw new Error("Please verify your email address first.\n\nCheck your email inbox and click the verification link. After your email has been verified, return here and log in using your email address and password.");
         } else {
           setUnverifiedEmailUser(null);
           setAuthSuccess(`Welcome back! Logged in successfully.`);
@@ -768,7 +768,7 @@ export default function IdentityGateway() {
                     setEmail('');
                     setPassword('');
                     setConfirmPassword('');
-                    setAuthSuccess(null);
+                    setAuthSuccess("Your account is active. Please sign in with your email and password.");
                     setErrorMsg(null);
                   }}
                   className="w-full py-3 bg-[#0f4c2a] hover:bg-[#125831] text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-950/10 flex items-center justify-center space-x-1.5"
@@ -845,7 +845,7 @@ export default function IdentityGateway() {
                     setEmail('');
                     setPassword('');
                     setConfirmPassword('');
-                    setAuthSuccess(null);
+                    setAuthSuccess("Registration completed. Please check your email to confirm your account, then log in using your email address and password.");
                     setErrorMsg(null);
                   }}
                   className="w-full py-3 bg-[#0f4c2a] hover:bg-[#125831] text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-950/10 flex items-center justify-center space-x-1.5"
@@ -1185,7 +1185,9 @@ export default function IdentityGateway() {
             {/* Error and Success Alerts */}
             {errorMsg && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs leading-relaxed font-medium space-y-2">
-                <p>{errorMsg}</p>
+                {errorMsg.split('\n\n').map((msg, i) => (
+                  <p key={i} className={i === 0 && errorMsg.includes("Please verify") ? "font-extrabold text-sm text-red-900" : ""}>{msg}</p>
+                ))}
                 {unverifiedEmailUser && (
                   <button
                     type="button"
