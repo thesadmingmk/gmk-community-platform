@@ -615,11 +615,22 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
       setErrorMsg("Please provide a valid 4-digit Year of Birth.");
       return;
     }
+    const normalizedName = normalizeName(childFormName);
+    const isDuplicate = familyMembersList.some(m => 
+      m.relationship === 'child' && 
+      m.name.toLowerCase() === normalizedName.toLowerCase() &&
+      m.gender === childGender &&
+      m.yearOfBirth === childYob.trim()
+    );
+    if (isDuplicate) {
+      setErrorMsg(`Duplicate family member detected: ${normalizedName} (child).`);
+      return;
+    }
     setErrorMsg(null);
     setFamilyMembersList([
       ...familyMembersList,
       {
-        name: normalizeName(childFormName),
+        name: normalizedName,
         relationship: 'child',
         gender: childGender,
         yearOfBirth: childYob.trim()
@@ -639,11 +650,21 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
       setErrorMsg("Please select the parent's gender.");
       return;
     }
+    const normalizedName = normalizeName(parentFormName);
+    const isDuplicate = familyMembersList.some(m => 
+      m.relationship === 'parent' && 
+      m.name.toLowerCase() === normalizedName.toLowerCase() &&
+      m.gender === parentGender
+    );
+    if (isDuplicate) {
+      setErrorMsg(`Duplicate family member detected: ${normalizedName} (parent).`);
+      return;
+    }
     setErrorMsg(null);
     setFamilyMembersList([
       ...familyMembersList,
       {
-        name: normalizeName(parentFormName),
+        name: normalizedName,
         relationship: 'parent',
         gender: parentGender,
         notes: parentNotes.trim() || undefined
@@ -663,11 +684,21 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
       setErrorMsg("Please select the household member's gender.");
       return;
     }
+    const normalizedName = normalizeName(depFormName);
+    const isDuplicate = familyMembersList.some(m => 
+      m.relationship === 'dependent' && 
+      m.name.toLowerCase() === normalizedName.toLowerCase() &&
+      m.gender === depGender
+    );
+    if (isDuplicate) {
+      setErrorMsg(`Duplicate family member detected: ${normalizedName} (dependent).`);
+      return;
+    }
     setErrorMsg(null);
     setFamilyMembersList([
       ...familyMembersList,
       {
-        name: normalizeName(depFormName),
+        name: normalizedName,
         relationship: 'dependent',
         gender: depGender,
         notes: depNotes.trim() || undefined

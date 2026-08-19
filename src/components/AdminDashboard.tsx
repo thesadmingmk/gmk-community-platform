@@ -13,7 +13,9 @@ import {
   where,
   getDocs,
   getDoc,
-  updateDoc
+  updateDoc,
+  writeBatch,
+  deleteField
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { ResidentProfile, PendingRegistration, Family, FamilyMember, UserProfile } from '../types';
@@ -69,7 +71,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
   const { profile } = useAuth();
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
   const [mainTab, setMainTab] = useState<'administration' | 'log_center' | 'system'>('administration');
-  const [activeTab, setActiveTab] = useState<'approvals' | 'residents' | 'archived' | 'add_resident' | 'log_center'>('approvals');
+  const [activeTab, setActiveTab] = useState<'residents' | 'archived' | 'add_resident' | 'log_center'>('residents');
 
   useEffect(() => {
     if (hideHeaderAndTabs) {
@@ -1007,6 +1009,11 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
   const [editProfessionCategory, setEditProfessionCategory] = useState('');
   const [editProfessionTitle, setEditProfessionTitle] = useState('');
   const [editCompany, setEditCompany] = useState('');
+  
+  // Spouse edit
+  const [editSpouseName, setEditSpouseName] = useState('');
+  const [editSpousePhone, setEditSpousePhone] = useState('');
+  const [editSpouseEmail, setEditSpouseEmail] = useState('');
 
   // Rejection modal state
   const [rejectionPending, setRejectionPending] = useState<PendingRegistration | null>(null);
@@ -1502,10 +1509,16 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       setEditProfessionCategory(selectedFamily.professionCategory || '');
       setEditProfessionTitle(selectedFamily.professionTitle || '');
       setEditCompany(selectedFamily.company || '');
+      setEditSpouseName(selectedFamily.spouseName || '');
+      setEditSpousePhone(selectedFamily.spousePhone || selectedFamily.spouseWhatsApp || '');
+      setEditSpouseEmail(selectedFamily.spouseEmail || '');
     } else {
       setEditProfessionCategory('');
       setEditProfessionTitle('');
       setEditCompany('');
+      setEditSpouseName('');
+      setEditSpousePhone('');
+      setEditSpouseEmail('');
     }
   };
 
@@ -1555,20 +1568,29 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       };
 
       const residentRef = doc(db, "residents", selectedResident.gmkId);
-      await setDoc(residentRef, sanitizeFirestorePayload(residentPayload), { merge: true });
+      
+      const batch = writeBatch(db);
+      
+      batch.set(residentRef, sanitizeFirestorePayload(residentPayload), { merge: true });
 
       // Update associated accounts isActive attributes
       const usersQuery = query(collection(db, "users"), where("email", "==", (selectedResident.email || '').toLowerCase().trim()));
       const usersSnapshot = await getDocs(usersQuery);
       if (!usersSnapshot.empty) {
         const userDocId = usersSnapshot.docs[0].id;
-        await setDoc(doc(db, "users", userDocId), sanitizeFirestorePayload({
+        batch.set(doc(db, "users", userDocId), sanitizeFirestorePayload({
           isActive: editStatus === 'active'
         }), { merge: true });
       }
 
-      // Sync the profession details to family profile
+      // Sync the profession details and spouse details to family profile
       const familyRef = doc(db, "families", `fam_${selectedResident.gmkId}`);
+      
+      // Determine spouse values (delete fields if empty)
+      const finalSpouseName = editSpouseName.trim() || deleteField();
+      const finalSpousePhone = editSpouseName.trim() ? editSpousePhone.trim() : deleteField();
+      const finalSpouseEmail = editSpouseName.trim() ? editSpouseEmail.trim() : deleteField();
+
       const familyPayload = {
         fullName: editName.trim(),
         salutation: editSalutation as any,
@@ -1580,10 +1602,55 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         professionCategory: editProfessionCategory.trim() || 'None Specified',
         professionTitle: editProfessionTitle.trim() || 'Not disclosed',
         company: editCompany.trim() || 'Not disclosed',
+        spouseName: finalSpouseName,
+        spousePhone: finalSpousePhone,
+        spouseWhatsApp: finalSpousePhone, // Sync both just in case
+        spouseEmail: finalSpouseEmail,
         updatedAt: timestamp
       };
+      
+      batch.set(familyRef, sanitizeFirestorePayload(familyPayload), { merge: true });
 
-      await setDoc(familyRef, sanitizeFirestorePayload(familyPayload), { merge: true });
+      // Synchronize the familyMembers spouse sub-document
+      const spouseMemberRef = doc(db, "familyMembers", `mem_${selectedResident.gmkId}_spouse`);
+      if (editSpouseName.trim()) {
+        // Read and preserve existing spouse member's gender if available
+        let spouseGender: 'male' | 'female' | '' = '';
+        const existingSpouse = householdMembers.find(
+          m => m.relationship === 'spouse' || m.id === `mem_${selectedResident.gmkId}_spouse`
+        );
+        if (existingSpouse && existingSpouse.gender) {
+          spouseGender = existingSpouse.gender;
+        } else {
+          // If not present in householdMembers state, inspect existing Firestore document
+          const spouseSnap = await getDoc(spouseMemberRef);
+          if (spouseSnap.exists() && spouseSnap.data()?.gender) {
+            spouseGender = spouseSnap.data().gender;
+          } else if (editSalutation === 'Mr') {
+            spouseGender = 'female';
+          } else if (editSalutation === 'Mrs' || editSalutation === 'Ms') {
+            spouseGender = 'male';
+          }
+        }
+
+        const spouseMemberPayload: Partial<FamilyMember> = {
+          id: `mem_${selectedResident.gmkId}_spouse`,
+          familyId: `fam_${selectedResident.gmkId}`,
+          name: editSpouseName.trim(),
+          relationship: 'spouse',
+          gender: spouseGender,
+          phone: editSpousePhone.trim(),
+          whatsAppNumber: editSpousePhone.trim(),
+          email: editSpouseEmail.trim(),
+          createdAt: timestamp
+        };
+        batch.set(spouseMemberRef, sanitizeFirestorePayload(spouseMemberPayload), { merge: true });
+      } else {
+        // If spouse name is empty, it means spouse was removed or none exists
+        batch.delete(spouseMemberRef);
+      }
+
+      await batch.commit();
 
       await createAuditLog(
         'ACTIVATE_RESIDENT',
@@ -1953,7 +2020,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               onClick={() => {
                 setMainTab('administration');
                 if (activeTab === 'log_center') {
-                  setActiveTab('approvals');
+                  setActiveTab('residents');
                 }
                 setIsCreating(false);
               }}
@@ -2072,20 +2139,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-stone-200 pb-3">
             <div className="overflow-x-auto hide-scrollbar -mx-4 px-4 md:mx-0 md:px-0">
               <div className="flex items-center gap-1.5 min-w-max pb-px">
-                <button
-                  onClick={() => {
-                    setActiveTab('approvals');
-                  setIsCreating(false);
-                  setHighlightedPendingUid(null);
-                }}
-                className={`px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer ${
-                  activeTab === 'approvals'
-                    ? 'bg-emerald-50 text-[#0f4c2a] border border-emerald-250 shadow-2xs'
-                    : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200'
-                }`}
-              >
-                Approvals ({pendingRegs.length})
-              </button>
+                
               <button
                 onClick={() => {
                   setActiveTab('residents');
@@ -2188,16 +2242,12 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                         key={`${suggestion.type}-${suggestion.id}`}
                         onClick={() => {
                           setSearchTerm(''); // reset manual search filters to avoid state collision
-                          if (suggestion.type === 'pending') {
-                            setActiveTab('approvals');
-                            setHighlightedPendingUid(suggestion.id);
-                            setIsCreating(false);
-                          } else {
+                          
                             setActiveTab(suggestion.type === 'active' ? 'residents' : 'archived');
                             setSelectedResident(suggestion.original);
                             setIsCreating(false);
                             setIsEditing(false);
-                          }
+                          
                           setPredictiveQuery('');
                           setShowPredictiveDropdown(false);
                         }}
@@ -2243,7 +2293,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         )}
 
         {/* Global Tab Search Header */}
-        {mainTab === 'administration' && activeTab !== 'approvals' && activeTab !== 'add_resident' && (
+        {mainTab === 'administration' && activeTab !== 'add_resident' && (
           <div className="bg-white border border-stone-250 p-4 rounded-3xl flex items-center justify-between gap-4">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-stone-600 absolute left-3.5 top-3" />
@@ -2275,91 +2325,6 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           <div className="py-24 text-center">
             <RefreshCw className="w-8 h-8 text-[#0f4c2a] animate-spin mx-auto opacity-75" />
             <p className="text-xs font-semibold text-stone-600 mt-2 font-mono">Synchronizing databases...</p>
-          </div>
-        )}
-
-        {/* A. APPROVALS TAB CONTAINER */}
-        {!loading && mainTab === 'administration' && activeTab === 'approvals' && (
-          <div className="space-y-6">
-            <div className="bg-white border border-stone-200 shadow-sm p-6 rounded-3xl">
-              <div className="flex items-center space-x-2 pb-4 border-b border-stone-150 mb-4">
-                <Clock className="w-5 h-5 text-[#d4af37]" />
-                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading">Onboarding verification Queue</h3>
-              </div>
-
-              {pendingRegs.length === 0 ? (
-                <div className="py-12 text-center bg-stone-50 rounded-2xl border border-stone-200 border-dashed">
-                  <UserCheck className="w-10 h-10 text-stone-300 mx-auto mb-2" />
-                  <h4 className="text-sm font-extrabold text-stone-750">Registration Queue Clear</h4>
-                  <p className="text-[11px] text-stone-600 font-medium mt-0.5">No pending resident profiles are waiting for review at this time.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {pendingRegs.map((pending) => {
-                    const isHighlighted = pending.uid === highlightedPendingUid;
-                    return (
-                      <div 
-                        key={pending.uid} 
-                        className={`p-5 rounded-3xl flex flex-col justify-between space-y-4 transition-all relative ${
-                          isHighlighted 
-                            ? 'bg-emerald-50/40 border-2 border-[#0f4c2a] shadow-md shadow-emerald-950/10' 
-                            : 'bg-stone-50/50 border border-stone-250/80 hover:border-emerald-600/35'
-                        }`}
-                      >
-                        {isHighlighted && (
-                          <div className="absolute -top-2.5 -right-2 bg-[#0f4c2a] text-white font-extrabold text-[8px] uppercase tracking-widest px-2 py-0.5 rounded-full shadow-xs animate-pulse">
-                            Selected Target
-                          </div>
-                        )}
-                        <div className="space-y-2">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <span className="text-[10px] font-extrabold uppercase bg-[#0f4c2a]/10 text-[#0f4c2a] px-2 py-0.5 rounded-md">
-                              {pending.unitType}
-                            </span>
-                            <h4 className="text-sm font-extrabold text-stone-900 font-heading mt-1">
-                              {pending.salutation}. {pending.fullName}
-                            </h4>
-                          </div>
-                          <span className="text-[10px] font-mono text-stone-600 font-extrabold">
-                            {new Date(pending.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-
-                        <div className="text-[11px] font-semibold text-stone-700 space-y-1 bg-white p-3 rounded-2xl border border-stone-200 border-dashed">
-                          <div><span className="text-stone-600">Primary Unit:</span> <span className="text-stone-900 font-extrabold font-serif">{pending.displayUnitNumber}</span></div>
-                          <div><span className="text-stone-600">Email:</span> <span className="text-stone-900 font-mono font-bold select-all">{pending.email}</span></div>
-                          <div><span className="text-stone-600">Mobile:</span> <span className="text-stone-900 select-all font-bold">{formatPhoneWithCountryCode(pending.phone)}</span></div>
-                          {pending.gatedCommunity && (
-                            <div><span className="text-stone-600">Location:</span> <span className="text-[#0f4c2a] font-bold font-serif">{normalizeGatedCommunity(pending.gatedCommunity)}</span></div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-2 border-t border-stone-200">
-                        <button
-                          onClick={() => handleApproveRegistration(pending)}
-                          disabled={isApproving}
-                          className="flex-1 inline-flex items-center justify-center space-x-1.5 py-2 px-3 border border-emerald-600 bg-[#0f4c2a] hover:bg-[#125831] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Check className="w-3.5 h-3.5 text-[#d4af37]" />
-                          <span>{isApproving ? 'Verifying...' : 'Verify & Approve'}</span>
-                        </button>
-                        <button
-                          onClick={() => handleTriggerRejectionModal(pending)}
-                          disabled={isApproving}
-                          className="inline-flex items-center justify-center py-2 px-3 border border-red-200 bg-red-50 hover:bg-red-100 hover:border-red-300 text-red-700 rounded-xl text-xs font-bold cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <X className="w-3.5 h-3.5 shrink-0" />
-                          <span className="hidden sm:inline ml-1">Reject</span>
-                        </button>
-                      </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </div>
         )}
 
@@ -2429,6 +2394,90 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               <div className="lg:col-span-1 bg-white border border-stone-250 p-4 rounded-3xl space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-extrabold text-[#0f4c2a] font-heading uppercase tracking-wide">Active Residents Registry ({filteredActiveResidents.length})</h3>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const familiesQuery = query(collection(db, "families"));
+                        const familiesSnap = await getDocs(familiesQuery);
+                        const fams = familiesSnap.docs.map(d => d.data());
+
+                        const headers = [
+                          "Full Name",
+                          "Mobile Number",
+                          "Email Address",
+                          "Unit Type",
+                          "Building",
+                          "Section",
+                          "Flat",
+                          "Household Information Available"
+                        ];
+
+                        const csvRows = [headers.join(",")];
+
+                        activeResidents.forEach(res => {
+                          let bldg = "";
+                          let sec = "";
+                          let flt = "";
+                          
+                          const type = res.unitType || "Apartment";
+                          const display = res.displayUnitNumber || "";
+
+                          if (type === "Apartment") {
+                            const parts = display.split('-');
+                            if (parts.length === 3) {
+                              bldg = parts[0];
+                              sec = parts[1];
+                              flt = parts[2];
+                            } else {
+                              flt = display;
+                            }
+                          } else {
+                            flt = display.replace(/^(VILLA\-|TH\-)/i, '');
+                          }
+
+                          const hasFam = fams.some(f => f.primaryMemberGmkId === res.gmkId);
+                          
+                          const escapeCsv = (str) => {
+                            if (str === null || str === undefined) return '""';
+                            const strVal = String(str);
+                            if (strVal.includes(',') || strVal.includes('"') || strVal.includes('\n')) {
+                              return `"${strVal.replace(/"/g, '""')}"`;
+                            }
+                            return strVal;
+                          };
+
+                          const row = [
+                            escapeCsv(res.fullName),
+                            escapeCsv(res.phone),
+                            escapeCsv(res.email),
+                            escapeCsv(type),
+                            escapeCsv(bldg),
+                            escapeCsv(sec),
+                            escapeCsv(flt),
+                            hasFam ? "YES" : "NO"
+                          ];
+
+                          csvRows.push(row.join(","));
+                        });
+
+                        const csvContent = csvRows.join("\n");
+                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                        const link = document.createElement("a");
+                        const url = URL.createObjectURL(blob);
+                        link.setAttribute("href", url);
+                        link.setAttribute("download", "GMK_Resident_Directory.csv");
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      } catch (err) {
+                        console.error("Download failed:", err);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#125831] text-white text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Download Resident Directory</span>
+                  </button>
                 </div>
                 
                 {filteredActiveResidents.length === 0 ? (
@@ -2836,6 +2885,43 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                                   value={editCompany}
                                   onChange={(e) => setEditCompany(e.target.value)}
                                   placeholder="Ministry/PDO/etc."
+                                  className="block w-full px-2.5 py-1.5 border border-[#ced4da] rounded-lg text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Section D-1: Spouse updates */}
+                          <div className="bg-white border border-stone-200 p-3.5 rounded-xl space-y-3">
+                            <label className="block text-[9.5px] uppercase font-extrabold text-stone-600 tracking-wider">Spouse details (Optional)</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <span className="text-[9.5px] text-stone-600 block mb-0.5">Spouse Name</span>
+                                <input
+                                  type="text"
+                                  value={editSpouseName}
+                                  onChange={(e) => setEditSpouseName(e.target.value)}
+                                  placeholder="Full Name (leave empty to remove)"
+                                  className="block w-full px-2.5 py-1.5 border border-[#ced4da] rounded-lg text-xs"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[9.5px] text-stone-600 block mb-0.5">Phone Number</span>
+                                <input
+                                  type="text"
+                                  value={editSpousePhone}
+                                  onChange={(e) => setEditSpousePhone(e.target.value)}
+                                  placeholder="+968..."
+                                  className="block w-full px-2.5 py-1.5 border border-[#ced4da] rounded-lg text-xs"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[9.5px] text-stone-600 block mb-0.5">Email Address</span>
+                                <input
+                                  type="email"
+                                  value={editSpouseEmail}
+                                  onChange={(e) => setEditSpouseEmail(e.target.value)}
+                                  placeholder="Email"
                                   className="block w-full px-2.5 py-1.5 border border-[#ced4da] rounded-lg text-xs"
                                 />
                               </div>
@@ -3635,6 +3721,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       )}
 
       {/* DELETE RESIDENT WORKFLOW MODAL */}
+
       {confirmDeleteResident && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/40 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white border border-stone-300 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5">

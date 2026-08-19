@@ -184,6 +184,7 @@ export default function FinanceWorkspace({
     return (
       (r.primaryMemberGmkId && r.primaryMemberGmkId.toLowerCase().includes(q)) ||
       (r.primaryMemberEmail && r.primaryMemberEmail.toLowerCase().includes(q)) ||
+      (r.participants && r.participants.some(p => p.toLowerCase().includes(q))) ||
       (r.id && r.id.toLowerCase().includes(q))
     );
   });
@@ -741,7 +742,7 @@ export default function FinanceWorkspace({
                     type="text"
                     value={finSearchQuery}
                     onChange={(e) => setFinSearchQuery(e.target.value)}
-                    placeholder="Search by GMK ID or email..."
+                    placeholder="Search by GMK ID, name, or email..."
                     className="w-full pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                   />
                 </div>
@@ -772,7 +773,7 @@ export default function FinanceWorkspace({
                         const due = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
                         return (
                           <tr key={reg.id} className="border-b border-stone-100 hover:bg-stone-50/50">
-                            <td className="p-3 font-semibold text-stone-900">{reg.primaryMemberEmail}</td>
+                            <td className="p-3 font-semibold text-stone-900">{(reg.participants && reg.participants.length > 0) ? reg.participants[0] : reg.primaryMemberEmail}</td>
                             <td className="p-3 font-mono text-[10px]">{reg.primaryMemberGmkId}</td>
                             <td className="p-3">
                               <span className="px-2 py-0.5 bg-stone-100 text-stone-700 text-[9px] font-black uppercase rounded-md">

@@ -545,7 +545,6 @@ export default function RegistrationReportingWorkspace({
                     </td>
                     <td className="p-3">
                       <span className="text-stone-900 font-black block">{primaryName}</span>
-                      <span className="text-[10px] text-stone-500 font-medium font-mono">{reg.primaryMemberEmail}</span>
                     </td>
                     <td className="p-3 font-mono text-[11px] text-emerald-800 font-bold">{unit}</td>
                     <td className="p-3 text-center font-black text-stone-900">{reg.totalParticipants || 1}</td>

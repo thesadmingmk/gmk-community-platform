@@ -1920,15 +1920,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
 
             {/* Statistics Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              <GMKCard className="p-5 border border-stone-200/85 bg-white">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-600">Pending Approvals</span>
-                  <div className="text-3xl font-serif font-bold text-amber-700">
-                    {pendingRegs.length}
-                  </div>
-                  <p className="text-[10px] text-stone-400 font-sans">Resident verification queue</p>
-                </div>
-              </GMKCard>
+
 
               <GMKCard className="p-5 border border-stone-200/85 bg-white">
                 <div className="space-y-1">

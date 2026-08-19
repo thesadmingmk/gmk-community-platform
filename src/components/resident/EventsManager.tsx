@@ -64,6 +64,8 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
   const { profile } = useAuth();
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
   const [loading, setLoading] = useState(true);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registrationSuccessData, setRegistrationSuccessData] = useState<{ evt: CommunityEvent; count: number; reg?: EventRegistration } | null>(null);
   const [events, setEvents] = useState<CommunityEvent[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
@@ -465,6 +467,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
     }
 
     setLoading(true);
+    setIsRegistering(true);
 
     try {
       // Identity & Ownership Gate: Enforce that the registration belongs to the authenticated resident
@@ -899,6 +902,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         setActiveEventForReg(null);
         setLivePricing(null);
         setSuccessMsg(`✓ Successfully registered ${totalParticipantsCount} member(s) of your family for ${savedEventTitle}!`);
+        setRegistrationSuccessData({ evt: activeEventForReg, count: totalParticipantsCount, reg: regPayload as any });
         console.log("[RTCO-024L STEP 10] UI state update SUCCESS");
         console.log("[RTCO-024L COMPLETE] REGISTRATION SUCCESS");
       } catch (uiErr: any) {
@@ -920,6 +924,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       );
     } finally {
       setLoading(false);
+      setIsRegistering(false);
     }
   };
 
@@ -1882,6 +1887,56 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      
+      {/* SUCCESS POPUP MODAL */}
+      {registrationSuccessData && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[60] animate-fadeIn">
+          <div className="bg-white border border-stone-220 rounded-3xl max-w-sm w-full shadow-2xl p-6 relative space-y-4 text-center animate-scaleUp">
+            <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mb-2 shadow-inner">
+              <Check className="w-8 h-8 stroke-[3]" />
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
+                Registration Completed!
+              </h3>
+              <p className="text-xs text-stone-600 font-semibold mt-2 px-2">
+                ✓ Successfully registered {registrationSuccessData.count} member(s) of your family for {registrationSuccessData.evt.title}.
+              </p>
+            </div>
+            
+            <div className="pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                   setShowingPaymentModalEvent({ evt: registrationSuccessData.evt, reg: registrationSuccessData.reg });
+                   setRegistrationSuccessData(null);
+                }}
+                className="w-full bg-[#0f4c2a] text-white py-3 px-4 rounded-xl font-bold text-xs tracking-wide hover:bg-[#125831] focus:ring-4 focus:ring-emerald-500/20 shadow-md flex items-center justify-center"
+              >
+                PAYMENT OPTIONS & TRANSFER DETAILS
+              </button>
+              <button
+                type="button"
+                onClick={() => setRegistrationSuccessData(null)}
+                className="w-full bg-stone-100 text-stone-700 py-3 px-4 rounded-xl font-bold text-xs tracking-wide hover:bg-stone-200"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REGISTERING SPINNER MODAL */}
+      {isRegistering && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[60] animate-fadeIn">
+          <div className="bg-white border border-stone-220 rounded-3xl p-8 flex flex-col items-center shadow-2xl space-y-4 animate-scaleUp">
+            <div className="w-12 h-12 border-4 border-[#0f4c2a] border-t-[#d4af37] rounded-full animate-spin"></div>
+            <p className="font-extrabold text-[#0f4c2a] tracking-wide text-sm">Registering...</p>
           </div>
         </div>
       )}

@@ -7651,7 +7651,7 @@ const handleDownloadPDF = () => {
                                     <div className="flex items-center justify-between">
                                       <h5 className="text-xs font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
                                         <Check className="w-4 h-4 text-emerald-600" />
-                                        <span>Financially Approved Food List ({approvedRegs.length})</span>
+                                        <span>Finance Approved Food List ({approvedRegs.length})</span>
                                       </h5>
                                     </div>
                                     {approvedRegs.length === 0 ? (
@@ -7681,7 +7681,6 @@ const handleDownloadPDF = () => {
                                                 <tr key={reg.id} className="hover:bg-emerald-50/20">
                                                   <td className="p-3">
                                                     <span className="text-stone-900 font-black block">{pName}</span>
-                                                    <span className="text-[10px] text-stone-500 font-mono">{reg.primaryMemberEmail}</span>
                                                   </td>
                                                   <td className="p-3 font-mono font-bold text-emerald-800">{unit}</td>
                                                   <td className="p-3 text-center font-mono font-black text-base text-[#0f4c2a]">
