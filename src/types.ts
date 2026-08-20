@@ -322,6 +322,9 @@ export interface EventCommitteeMember {
   fullName: string;
   email: string;
   role: 'Lead' | 'Volunteer' | 'Coordinator';
+  phone?: string;
+  unitDisplay?: string;
+  dutyRole?: string;
 }
 
 export interface EventCommitteeExpense {

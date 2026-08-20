@@ -608,7 +608,8 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
         actionType: 'prune' | 'heal_drift' | 'delete_doc';
         metadata?: any;
       }) => {
-        const key = `${anomaly.collection}_${anomaly.docId}_${anomaly.field.replace(/[\[\]\.]/g, '_')}`;
+        const fieldKey = anomaly.field ? anomaly.field.replace(/[\[\]\.]/g, '_') : 'field';
+        const key = `${anomaly.collection}_${anomaly.docId}_${fieldKey}`;
         anomaliesList.push({ id: key, ...anomaly });
         
         if (anomaly.severity === 'Critical') {
@@ -955,8 +956,14 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
   useEffect(() => {
     if (residents.length > 0) {
       const numericIds = residents
-        .map(r => parseInt(r.gmkId.replace('GMK-', ''), 10))
-        .filter(id => !isNaN(id));
+        .map(r => {
+          const rawId = r?.gmkId || (r as any)?.id || '';
+          const match = String(rawId).match(/GMK-(\d+)/);
+          if (match) return parseInt(match[1], 10);
+          const num = parseInt(String(rawId).replace('GMK-', ''), 10);
+          return !isNaN(num) ? num : null;
+        })
+        .filter((id): id is number => id !== null && !isNaN(id));
       const maxId = numericIds.length > 0 ? Math.max(...numericIds) : 1000;
       const nextId = String(maxId + 1).padStart(4, '0');
       setGmkId(`GMK-${nextId}`);
@@ -2811,7 +2818,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
             GMK Governance Console • Developed by Elite IT
           </div>
           <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.2 (Release Notes)</button>
+            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.3 (Release Notes)</button>
           </div>
         </div>
       </div>

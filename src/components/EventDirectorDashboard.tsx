@@ -336,6 +336,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   // Finance Committee Workspace & Payment Processing States
   const [financeTab, setFinanceTab] = useState<'registrations' | 'expenses' | 'reports' | 'refunds'>('registrations');
   const [financeLeadsExpanded, setFinanceLeadsExpanded] = useState<boolean>(false);
+  const [workspaceVolunteersExpanded, setWorkspaceVolunteersExpanded] = useState<boolean>(false);
+  const [workspaceVolSearchQuery, setWorkspaceVolSearchQuery] = useState<string>('');
+  const [workspaceVolRoleInput, setWorkspaceVolRoleInput] = useState<string>('Volunteer');
   const [finEventFilter, setFinEventFilter] = useState<string>('all');
   const [finStatusFilter, setFinStatusFilter] = useState<string>('all');
   const [finSearchQuery, setFinSearchQuery] = useState<string>('');
@@ -3325,12 +3328,14 @@ const handleDownloadPDF = () => {
           updatedAt: new Date().toISOString()
         });
 
-        transaction.set(doc(db, "residents", resident.gmkId), {
-          committee: committee.name,
-          committeeType: committeeType,
-          eventId: selectedEventId,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+        if (!resident.gmkId.startsWith('mem_')) {
+          transaction.set(doc(db, "residents", resident.gmkId), {
+            committee: committee.name,
+            committeeType: committeeType,
+            eventId: selectedEventId,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
 
         let safeCommitteeKey = committee.name.replace(/\s+/g, '_').toLowerCase();
         if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
@@ -3474,10 +3479,12 @@ const handleDownloadPDF = () => {
           updatedAt: new Date().toISOString()
         });
 
-        transaction.set(doc(db, "residents", residentId), {
-          committee: "",
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+        if (!residentId.startsWith('mem_')) {
+          transaction.set(doc(db, "residents", residentId), {
+            committee: "",
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
 
         transaction.delete(doc(db, "roleAssignments", assignmentId));
         transaction.delete(doc(db, "roleAssignments", emailAssignmentId));
@@ -3516,6 +3523,127 @@ const handleDownloadPDF = () => {
       setLastErrorMessage(msg);
       setLastFirestoreWriteStatus('ERROR: ' + code);
       setErrorMsg(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Add committee volunteer (Applicable to all committees)
+  const handleAddCommitteeVolunteer = async (
+    committeeName: string, 
+    volunteer: { residentId: string; fullName: string; email: string; phone?: string; unitDisplay?: string; dutyRole?: string }
+  ) => {
+    const committee = activeCommittees.find(c => c.name === committeeName);
+    if (!committee) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const committeeRef = doc(db, "eventCommittees", committee.id);
+      const committeeSnap = await getDoc(committeeRef);
+      if (!committeeSnap.exists()) {
+        throw new Error("Committee document could not be found.");
+      }
+      const committeeData = committeeSnap.data() as EventCommittee;
+      const currentMembers = committeeData.members || [];
+
+      // Check if already a volunteer or lead of this committee
+      const isAlreadyMember = currentMembers.some(m => 
+        m.residentId === volunteer.residentId || 
+        (volunteer.email && volunteer.email !== 'manual@external.com' && m.email && m.email.toLowerCase().trim() === volunteer.email.toLowerCase().trim())
+      );
+
+      if (isAlreadyMember) {
+        setErrorMsg(`'${volunteer.fullName}' is already assigned to the ${committee.name}.`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const newMember: EventCommitteeMember = {
+        residentId: volunteer.residentId,
+        fullName: volunteer.fullName,
+        email: volunteer.email,
+        role: 'Volunteer',
+        phone: volunteer.phone,
+        unitDisplay: volunteer.unitDisplay,
+        dutyRole: volunteer.dutyRole || 'Volunteer'
+      };
+
+      const updatedMembers = [...currentMembers, newMember];
+
+      await updateDoc(committeeRef, {
+        members: updatedMembers,
+        updatedAt: new Date().toISOString()
+      });
+
+      await createAuditLog(
+        'COMMITTEE_MEMBER_ADDED',
+        profile?.email || 'event_director',
+        'committee',
+        committee.id,
+        `Added volunteer ${volunteer.fullName} (${volunteer.dutyRole || 'Volunteer'}) to ${committee.name}`
+      );
+
+      // Force reload latest committee document
+      const reloadedSnap = await getDoc(committeeRef);
+      if (reloadedSnap.exists()) {
+        const reloadedData = reloadedSnap.data() as EventCommittee;
+        setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
+      }
+
+      setSuccessMsg(`✓ Successfully added volunteer ${volunteer.fullName} to ${committee.name}.`);
+      setWorkspaceVolSearchQuery('');
+    } catch (err: any) {
+      console.error("Error adding committee volunteer:", err);
+      setErrorMsg(err.message || "Failed to add committee volunteer");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Remove committee volunteer
+  const handleRemoveCommitteeVolunteer = async (residentId: string, committeeName: string) => {
+    const committee = activeCommittees.find(c => c.name === committeeName);
+    if (!committee) return;
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const committeeRef = doc(db, "eventCommittees", committee.id);
+      const committeeSnap = await getDoc(committeeRef);
+      if (!committeeSnap.exists()) {
+        throw new Error("Committee document could not be found.");
+      }
+      const committeeData = committeeSnap.data() as EventCommittee;
+      const updatedMembers = (committeeData.members || []).filter(m => m.residentId !== residentId);
+
+      await updateDoc(committeeRef, {
+        members: updatedMembers,
+        updatedAt: new Date().toISOString()
+      });
+
+      await createAuditLog(
+        'COMMITTEE_MEMBER_REMOVED',
+        profile?.email || 'event_director',
+        'committee',
+        committee.id,
+        `Removed volunteer with ID ${residentId} from ${committee.name}`
+      );
+
+      const reloadedSnap = await getDoc(committeeRef);
+      if (reloadedSnap.exists()) {
+        const reloadedData = reloadedSnap.data() as EventCommittee;
+        setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
+      }
+
+      setSuccessMsg(`✓ Volunteer removed from ${committee.name}.`);
+    } catch (err: any) {
+      console.error("Error removing committee volunteer:", err);
+      setErrorMsg(err.message || "Failed to remove volunteer");
     } finally {
       setIsSubmitting(false);
     }
@@ -4905,7 +5033,7 @@ const handleDownloadPDF = () => {
       fullName: cand.fullName,
       email: cand.email,
       displayUnitNumber: cand.displayUnitNumber,
-      unitKey: cand.displayUnitNumber.replace(/[^a-zA-Z0-9]/g, ''),
+      unitKey: String(cand.displayUnitNumber || '').replace(/[^a-zA-Z0-9]/g, ''),
       phone: cand.phone || '',
       status: 'active',
       createdAt: new Date().toISOString(),
@@ -7456,7 +7584,9 @@ const handleDownloadPDF = () => {
                     }
 
                     const commLeads = (currentComm.members || []).filter(m => m.role === 'Lead');
+                    const commVolunteers = (currentComm.members || []).filter(m => m.role === 'Volunteer');
                     const leadCount = commLeads.length;
+                    const volunteerCount = commVolunteers.length;
 
                     const isProgramComm = activeCommitteeToConfigure.toLowerCase().includes('program');
 
@@ -7467,9 +7597,9 @@ const handleDownloadPDF = () => {
 
                     return (
                       <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-6 animate-fadeIn">
-                        {/* HEADER WITH COLLAPSIBLE LEADS */}
+                        {/* HEADER WITH COLLAPSIBLE LEADS & VOLUNTEERS */}
                         {!activeProgForManagement && (
-<div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+                        <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-2">
                               <span className="text-base">
@@ -7503,6 +7633,18 @@ const handleDownloadPDF = () => {
                               >
                                 <span>{financeLeadsExpanded ? 'Hide Leads' : 'Manage Leads'}</span>
                                 {financeLeadsExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <span className="px-2.5 py-1 bg-blue-100 border border-blue-200 text-blue-900 text-xs font-black rounded-xl font-mono">
+                                {volunteerCount} Volunteers
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setWorkspaceVolunteersExpanded(!workspaceVolunteersExpanded)}
+                                className="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-250 text-stone-700 text-[10px] font-bold uppercase rounded-xl transition-all flex items-center space-x-1 cursor-pointer"
+                              >
+                                <span>{workspaceVolunteersExpanded ? 'Hide Volunteers' : 'Manage Volunteers'}</span>
+                                {workspaceVolunteersExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                               </button>
                             </div>
                           </div>
@@ -7547,38 +7689,272 @@ const handleDownloadPDF = () => {
                                     type="text"
                                     value={workspaceSearchQuery}
                                     onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
-                                    placeholder="Search resident name or flat number..."
+                                    placeholder="Search resident name, flat number, or spouse..."
                                     className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
                                   />
                                 </div>
                                 {workspaceSearchQuery && (
-                                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto">
+                                  <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto">
                                     {residents.filter(r => {
                                       if (r.status !== 'active') return false;
-                                      if (commLeads.some(l => l.residentId === r.gmkId)) return false;
+                                      if (commLeads.some(l => l.residentId === r.gmkId || l.residentId === `mem_${r.gmkId}_spouse`)) return false;
                                       const query = workspaceSearchQuery.toLowerCase().trim();
-                                      return r.fullName?.toLowerCase().includes(query) || r.displayUnitNumber?.toLowerCase().includes(query) || r.phone?.toLowerCase().includes(query) || r.email?.toLowerCase().includes(query);
-                                    }).map(res => (
-                                      <div key={res.gmkId} className="bg-white border border-stone-200 rounded-xl p-2.5 flex items-center justify-between">
-                                        <div className="min-w-0">
-                                          <span className="font-bold text-stone-900 text-xs block truncate">{res.fullName}</span>
-                                          <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                      const spouseMem = familyMembers.find(m => m.familyId === `fam_${r.gmkId}` && m.relationship === 'spouse');
+                                      const famDoc = families.find(f => f.primaryMemberGmkId === r.gmkId);
+                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
+                                      return r.fullName?.toLowerCase().includes(query) || 
+                                             r.displayUnitNumber?.toLowerCase().includes(query) || 
+                                             r.phone?.toLowerCase().includes(query) || 
+                                             r.email?.toLowerCase().includes(query) ||
+                                             (spouseName && spouseName.toLowerCase().includes(query));
+                                    }).map(res => {
+                                      const spouseMem = familyMembers.find(m => m.familyId === `fam_${res.gmkId}` && m.relationship === 'spouse');
+                                      const famDoc = families.find(f => f.primaryMemberGmkId === res.gmkId);
+                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
+                                      const spouseEmail = spouseMem?.email || famDoc?.spouseEmail || res.email;
+                                      const spousePhone = spouseMem?.phone || famDoc?.spousePhone || res.phone;
+
+                                      return (
+                                        <div key={res.gmkId} className="bg-white border border-stone-200 rounded-xl p-2.5 space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <div className="min-w-0">
+                                              <span className="font-bold text-stone-900 text-xs block truncate">{res.fullName}</span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                            </div>
+                                            <div className="flex items-center space-x-1.5 shrink-0">
+                                              <button
+                                                type="button"
+                                                disabled={isSubmitting}
+                                                onClick={() => {
+                                                  handleAssignLeadDirectly(res, activeCommitteeToConfigure);
+                                                  setWorkspaceSearchQuery('');
+                                                }}
+                                                className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                                              >
+                                                Assign Primary
+                                              </button>
+                                              {spouseName && (
+                                                <button
+                                                  type="button"
+                                                  disabled={isSubmitting}
+                                                  onClick={() => {
+                                                    handleAssignLeadDirectly({
+                                                      ...res,
+                                                      gmkId: `mem_${res.gmkId}_spouse`,
+                                                      fullName: spouseName,
+                                                      email: spouseEmail,
+                                                      phone: spousePhone
+                                                    }, activeCommitteeToConfigure);
+                                                    setWorkspaceSearchQuery('');
+                                                  }}
+                                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                                                  title={`Assign spouse ${spouseName} as Committee Lead`}
+                                                >
+                                                  Assign Spouse ({spouseName})
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* COLLAPSIBLE VOLUNTEERS MANAGEMENT PANEL (RTCO-074 Feature 2 & 3) */}
+                          {workspaceVolunteersExpanded && (
+                            <div className="pt-3 border-t border-stone-200 space-y-4 animate-fadeIn">
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <h5 className="text-[10px] uppercase font-black text-stone-600 tracking-wider">
+                                    Assigned Volunteers ({volunteerCount})
+                                  </h5>
+                                  <span className="text-[9px] text-stone-400 font-bold">
+                                    Operational support for {activeCommitteeToConfigure}
+                                  </span>
+                                </div>
+                                {commVolunteers.length === 0 ? (
+                                  <p className="text-xs text-stone-500 italic font-bold p-3 bg-white border border-dashed border-stone-200 rounded-xl text-center">
+                                    No volunteers added to {activeCommitteeToConfigure} Committee yet. Use the tool below to recruit volunteers.
+                                  </p>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {commVolunteers.map(vol => (
+                                      <div key={vol.residentId} className="flex items-center justify-between p-2.5 bg-white border border-stone-200 rounded-xl">
+                                        <div className="min-w-0 pr-2">
+                                          <div className="flex items-center space-x-1.5">
+                                            <span className="text-xs font-black text-stone-850 truncate">{vol.fullName}</span>
+                                            {vol.dutyRole && (
+                                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-800 text-[8px] font-black uppercase rounded border border-blue-100 shrink-0">
+                                                {vol.dutyRole}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <span className="text-[9px] text-stone-500 font-bold block truncate">
+                                            {vol.unitDisplay ? `Flat: ${vol.unitDisplay}` : ''} {vol.phone ? `• Tel: ${vol.phone}` : ''} {vol.email && vol.email !== 'manual@external.com' ? `• ${vol.email}` : ''}
+                                          </span>
                                         </div>
                                         <button
                                           type="button"
                                           disabled={isSubmitting}
-                                          onClick={() => {
-                                            handleAssignLeadDirectly(res, activeCommitteeToConfigure);
-                                            setWorkspaceSearchQuery('');
-                                          }}
-                                          className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shrink-0"
+                                          onClick={() => handleRemoveCommitteeVolunteer(vol.residentId, activeCommitteeToConfigure)}
+                                          className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer shrink-0"
+                                          title="Remove Volunteer"
                                         >
-                                          Assign
+                                          <X className="w-4 h-4" />
                                         </button>
                                       </div>
                                     ))}
                                   </div>
                                 )}
+                              </div>
+
+                              {/* RECRUIT / ADD VOLUNTEERS */}
+                              <div className="space-y-3 pt-2 border-t border-dashed border-stone-200">
+                                <h5 className="text-[10px] uppercase font-black text-stone-600 tracking-wider">
+                                  Add Volunteer to {activeCommitteeToConfigure} Committee
+                                </h5>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                  <div className="md:col-span-2 relative">
+                                    <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#0f4c2a]" />
+                                    <input
+                                      type="text"
+                                      value={workspaceVolSearchQuery}
+                                      onChange={(e) => setWorkspaceVolSearchQuery(e.target.value)}
+                                      placeholder="Search resident or family member name / flat / phone..."
+                                      className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div>
+                                    <input
+                                      type="text"
+                                      value={workspaceVolRoleInput}
+                                      onChange={(e) => setWorkspaceVolRoleInput(e.target.value)}
+                                      placeholder="Volunteer Duty / Role (e.g. Stage Setup)"
+                                      className="w-full px-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                    />
+                                  </div>
+                                </div>
+
+                                {workspaceVolSearchQuery && (() => {
+                                  const query = workspaceVolSearchQuery.toLowerCase().trim();
+                                  
+                                  // Find matching primary residents
+                                  const matchingResidents = residents.filter(r => {
+                                    if (r.status !== 'active') return false;
+                                    if (commVolunteers.some(v => v.residentId === r.gmkId)) return false;
+                                    return r.fullName?.toLowerCase().includes(query) ||
+                                           r.displayUnitNumber?.toLowerCase().includes(query) ||
+                                           r.phone?.toLowerCase().includes(query) ||
+                                           r.email?.toLowerCase().includes(query);
+                                  });
+
+                                  // Find matching family members
+                                  const matchingFamily = familyMembers.filter(fm => {
+                                    if (commVolunteers.some(v => v.residentId === fm.id)) return false;
+                                    const pId = fm.familyId ? String(fm.familyId).replace('fam_', '') : '';
+                                    const primaryRes = pId ? residents.find(r => r.gmkId === pId) : null;
+                                    return fm.name?.toLowerCase().includes(query) ||
+                                           fm.phone?.toLowerCase().includes(query) ||
+                                           (primaryRes && primaryRes.displayUnitNumber?.toLowerCase().includes(query));
+                                  });
+
+                                  return (
+                                    <div className="space-y-2">
+                                      <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto">
+                                        {matchingResidents.map(res => (
+                                          <div key={res.gmkId} className="bg-white border border-stone-200 rounded-xl p-2.5 flex items-center justify-between">
+                                            <div className="min-w-0">
+                                              <span className="font-bold text-stone-900 text-xs block truncate">
+                                                {res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded">Primary</span>
+                                              </span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • Tel: {res.phone}</span>
+                                            </div>
+                                            <button
+                                              type="button"
+                                              disabled={isSubmitting}
+                                              onClick={() => {
+                                                handleAddCommitteeVolunteer(activeCommitteeToConfigure, {
+                                                  residentId: res.gmkId,
+                                                  fullName: res.fullName,
+                                                  email: res.email,
+                                                  phone: res.phone,
+                                                  unitDisplay: res.displayUnitNumber,
+                                                  dutyRole: workspaceVolRoleInput || 'Volunteer'
+                                                });
+                                              }}
+                                              className="px-2.5 py-1 bg-blue-700 hover:bg-blue-800 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shrink-0"
+                                            >
+                                              Add Volunteer
+                                            </button>
+                                          </div>
+                                        ))}
+
+                                        {matchingFamily.map(fm => {
+                                          const pId = fm.familyId ? String(fm.familyId).replace('fam_', '') : '';
+                                          const primaryRes = pId ? residents.find(r => r.gmkId === pId) : null;
+                                          return (
+                                            <div key={fm.id} className="bg-white border border-stone-200 rounded-xl p-2.5 flex items-center justify-between">
+                                              <div className="min-w-0">
+                                                <span className="font-bold text-stone-900 text-xs block truncate">
+                                                  {fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded capitalize">{fm.relationship || 'Family'}</span>
+                                                </span>
+                                                <span className="text-[9px] text-stone-500 font-medium">
+                                                  Flat: {primaryRes?.displayUnitNumber || 'N/A'} • Tel: {fm.phone || primaryRes?.phone || 'N/A'}
+                                                </span>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                disabled={isSubmitting}
+                                                onClick={() => {
+                                                  handleAddCommitteeVolunteer(activeCommitteeToConfigure, {
+                                                    residentId: fm.id,
+                                                    fullName: fm.name,
+                                                    email: fm.email || primaryRes?.email || 'family@resident.com',
+                                                    phone: fm.phone || primaryRes?.phone || '',
+                                                    unitDisplay: primaryRes?.displayUnitNumber || '',
+                                                    dutyRole: workspaceVolRoleInput || 'Volunteer'
+                                                  });
+                                                }}
+                                                className="px-2.5 py-1 bg-blue-700 hover:bg-blue-800 text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shrink-0"
+                                              >
+                                                Add Volunteer
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+
+                                      {/* Option to add manual volunteer */}
+                                      <div className="pt-2 flex items-center justify-between bg-stone-100 p-2 rounded-xl text-xs">
+                                        <span className="text-[10px] text-stone-600 font-bold">
+                                          Cannot find person in directory? Add as external volunteer:
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={isSubmitting}
+                                          onClick={() => {
+                                            handleAddCommitteeVolunteer(activeCommitteeToConfigure, {
+                                              residentId: `vol_ext_${Date.now()}`,
+                                              fullName: workspaceVolSearchQuery.trim(),
+                                              email: 'manual@external.com',
+                                              phone: '',
+                                              unitDisplay: 'External',
+                                              dutyRole: workspaceVolRoleInput || 'Volunteer'
+                                            });
+                                          }}
+                                          className="px-3 py-1 bg-stone-800 hover:bg-black text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                                        >
+                                          Add &quot;{workspaceVolSearchQuery}&quot; Manually
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )}
@@ -7747,6 +8123,13 @@ const handleDownloadPDF = () => {
                               >
                                 Reports
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setAttendanceTab('registration_status')}
+                                className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all ${attendanceTab === 'registration_status' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                              >
+                                Reg Status
+                              </button>
                             </div>
                             </div>
                             
@@ -7757,7 +8140,7 @@ const handleDownloadPDF = () => {
                                 attendances={activeAttendances}
                                 families={families}
                                 familyMembers={familyMembers}
-                                activeTab={attendanceTab}
+                                activeTab={attendanceTab as any}
                                 committeeName={activeCommitteeToConfigure}
                               />
                             )}

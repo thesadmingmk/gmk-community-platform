@@ -31,6 +31,7 @@ import { ResidentLifecycleService, VerificationReport } from '../services/Reside
 import { classifyResidentRoleAssignments } from '../utils/governanceLifecycle';
 import LogCenter from './LogCenter';
 import ReleaseNotesModal from './ReleaseNotesModal';
+import AttendanceReport from './shared/AttendanceReport';
 import { 
   Users, 
   UserCheck, 
@@ -595,7 +596,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         actionType: 'prune' | 'heal_drift' | 'delete_doc';
         metadata?: any;
       }) => {
-        const key = `${anomaly.collection}_${anomaly.docId}_${anomaly.field.replace(/[\[\]\.]/g, '_')}`;
+        const fieldKey = anomaly.field ? anomaly.field.replace(/[\[\]\.]/g, '_') : 'field';
+        const key = `${anomaly.collection}_${anomaly.docId}_${fieldKey}`;
         anomaliesList.push({ id: key, ...anomaly });
         
         if (anomaly.severity === 'Critical') {
@@ -1059,7 +1061,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
     if (residents.length > 0) {
       const numericIds = residents
         .map(r => {
-          const match = r.gmkId.match(/GMK-(\d+)/);
+          const rawId = r?.gmkId || (r as any)?.id || '';
+          const match = String(rawId).match(/GMK-(\d+)/);
           return match ? parseInt(match[1], 10) : null;
         })
         .filter((id): id is number => id !== null);
@@ -1338,7 +1341,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       // Find maximum numeric index across all residents to generate a sequential unique code
       const numericIds = residents
         .map(r => {
-          const match = r.gmkId.match(/GMK-(\d+)/);
+          const rawId = r?.gmkId || (r as any)?.id || '';
+          const match = String(rawId).match(/GMK-(\d+)/);
           return match ? parseInt(match[1], 10) : null;
         })
         .filter((id): id is number => id !== null);
@@ -1916,7 +1920,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Expertise");
-    XLSX.writeFile(wb, "Expertise_Services_Report.xlsx");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Expertise_Services_Report_${dateStr}.xlsx`);
   };
 
   const exportExpertisePDF = () => {
@@ -1953,7 +1958,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       styles: { fontSize: 9, cellPadding: 3 },
       headStyles: { fillColor: [15, 76, 42] } // Emerald GMK color
     });
-    doc.save("Expertise_Services_Report.pdf");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    doc.save(`Expertise_Services_Report_${dateStr}.pdf`);
   };
 
   // Helper selectors and lists
@@ -2181,6 +2187,20 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                 }`}
               >
                 Add Resident
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('events' as any);
+                  setIsCreating(false);
+                  setHighlightedPendingUid(null);
+                }}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer ${
+                  activeTab === ('events' as any)
+                    ? 'bg-emerald-50 text-[#0f4c2a] border border-emerald-250 shadow-2xs'
+                    : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200'
+                }`}
+              >
+                Events
               </button>
 
               <div className="relative group z-40">
@@ -3793,13 +3813,20 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         </div>
       )}
 
+      {/* E. EVENTS TAB */}
+      {!loading && mainTab === 'administration' && activeTab === ('events' as any) && (
+        <div className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+          <AttendanceReport />
+        </div>
+      )}
+
       {/* Unified Platform Version Footer */}
       <footer className="py-6 border-t border-stone-250 text-center text-xs font-sans text-stone-500 shrink-0 space-y-1">
         <div>
           Resident Administration Portal • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.2 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.3 (Release Notes)</button>
         </div>
       </footer>
 
