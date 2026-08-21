@@ -19,6 +19,37 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.4",
+    title: "Standardized Event Creation, Committee Configuration & Volunteer Architecture Correction (GMK RTCO-075)",
+    releaseDate: "2026-08-21",
+    author: "Core Platform Team",
+    notes: [
+      "Added 'Committee Needed' and 'Activate Registrations' toggles explicitly during event creation.",
+      "Replaced hardcoded standard committee loops with dynamic selection (Finance, Food, Attendance, Program, General, Custom).",
+      "Events can now be designated as 'Information Only' (registration disabled) and published without pricing rules.",
+      "Added an inline editor to modify the title of active programs directly in the workspace.",
+      "Added irreversible confirmation prompts for archiving events.",
+      "Corrected universal Volunteer Management architecture: volunteer search now properly supports Primary residents, Spouses/family members, and Manual external volunteers across all fixed and custom event committees."
+    ]
+  },
+  {
+    version: "v1.5.3",
+    title: "Committee Volunteers, Spouse Lead Selection & Resident Account Controls (GMK RTCO-074)",
+    releaseDate: "2026-08-19",
+    author: "Core Platform Team",
+    notes: [
+      "Added a read-only Event Registration Status Report for authorized Attendance Committee Leads and Admin users. The report provides a family-level view of event registration status, distinguishing Registered — Paid, Registered — Not Paid and Not Registered families, with participant counts, filtering, search and PDF/Excel export.",
+      "Added volunteer management capability across all committees, including newly created committees.",
+      "Added resident/family database search for assigning spouses as Committee Leads.",
+      "Added manual/external volunteer entry.",
+      "Volunteers receive NO application/RBAC access.",
+      "Enabled Primary Residents to edit their own phone/mobile number.",
+      "Added secure Change Password capability using the existing Firebase Authentication architecture.",
+      "Preserved CP05 spouse synchronization and family-member integrity.",
+      "Preserved existing event registration, pricing, payment, governance and RBAC architecture."
+    ]
+  },
+  {
     version: "v1.5.2",
     title: "Core Heads Pricing Engine & Policy Revision Auditability (RTCO-072, RTCO-073)",
     releaseDate: "2026-08-16",

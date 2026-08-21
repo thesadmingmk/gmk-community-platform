@@ -406,6 +406,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [newEventType, setNewEventType] = useState('Onam');
   const [newEventYear, setNewEventYear] = useState<number>(new Date().getFullYear());
   const [newEventDescription, setNewEventDescription] = useState('');
+  const [newCommitteeNeeded, setNewCommitteeNeeded] = useState(true);
+  const [newSelectedCommittees, setNewSelectedCommittees] = useState<string[]>(['Finance', 'Food', 'Attendance', 'Program', 'General']);
+  const [newActivateRegistrations, setNewActivateRegistrations] = useState(false);
+
 
   // Form states: Configuration
   const [configEventName, setConfigEventName] = useState('');
@@ -760,7 +764,8 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       
       const settings = activeEvent.registrationSettings as any;
       if (settings) {
-        setConfigRegEnabled(settings.registrationEnabled || false);
+        // Default to true for older payloads if missing
+        setConfigRegEnabled(settings.registrationEnabled !== undefined ? settings.registrationEnabled : true);
         setConfigIndividualFee(settings.individualFee || 0);
         setConfigCoupleFee(settings.coupleFee || 0);
         setConfigFamilyFee(settings.familyFee || 0);
@@ -769,7 +774,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         setConfigEventStart(settings.eventStart || activeEvent.date || '');
         setConfigEventEnd(settings.eventEnd || activeEvent.date || '');
       } else {
-        setConfigRegEnabled(activeEvent.status === 'registration_open');
+        setConfigRegEnabled(true);
         setConfigIndividualFee(activeEvent.pricing?.singleRate || 0);
         setConfigCoupleFee(activeEvent.pricing?.coupleRate || 0);
         setConfigFamilyFee(activeEvent.pricing?.familyRate || 0);
@@ -842,8 +847,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         Poster: '',
         Thumbnail: '',
         Venue: '',
+        committeeNeeded: newCommitteeNeeded,
         registrationSettings: {
-          registrationEnabled: false,
+          registrationEnabled: newActivateRegistrations,
           individualFee: 0,
           coupleFee: 0,
           familyFee: 0,
@@ -873,9 +879,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
       await setDoc(doc(db, "events", eventId), eventPayload);
 
-      // Create standard operational committees for the event
-      const defaultCommittees = ['Attendance', 'Finance', 'Food', 'Cultural', 'Sports', 'Sponsorship', 'Sourcing'];
-      for (const commName of defaultCommittees) {
+      // Create selected operational committees for the event
+      if (newCommitteeNeeded) {
+        for (const commName of newSelectedCommittees) {
         const commDocId = `${eventId}_${commName.replace(/\s+/g, '_')}`;
         const canonicalType = (['finance', 'food', 'attendance', 'sourcing', 'sponsorship', 'program', 'events_&_programs'].includes(commName.toLowerCase()) ? (commName.toLowerCase() === 'events_&_programs' || commName.toLowerCase() === 'programs') ? 'program' : commName.toLowerCase() : 'general') as any;
         const committeePayload: EventCommittee = {
@@ -888,6 +894,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           updatedAt: new Date().toISOString()
         };
         await setDoc(doc(db, "eventCommittees", commDocId), committeePayload);
+        }
       }
 
       // Add simple audit log
@@ -904,6 +911,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       // Cleanup inputs and redirect
       setNewEventName('');
       setNewEventDescription('');
+      setNewCommitteeNeeded(true);
+      setNewSelectedCommittees(['Finance', 'Food', 'Attendance', 'Program', 'General']);
+      setNewActivateRegistrations(false);
       setShowNewEventForm(false);
       setSelectedEventId(eventId);
       setActiveTab('configuration');
@@ -917,6 +927,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
   // GEAS Compliant Archive Event action
   const handleArchiveEvent = async (eventId: string, eventName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently archive "${eventName}"?\n\nArchived events cannot be restored to active status.`)) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -2702,14 +2713,19 @@ const handleDownloadPDF = () => {
     }
 
     // Registration Dates
-    if (!configRegStart) {
-      errors.push("Registration Opens date is required.");
-    }
-    if (!configRegEnd) {
-      errors.push("Registration Closes date is required.");
-    }
-    if (configRegStart && configRegEnd && new Date(configRegStart) >= new Date(configRegEnd)) {
-      errors.push("Registration Opens date must be before Registration Closes date.");
+    if (configRegEnabled) {
+      if (!configRegStart) {
+        errors.push("Registration Opens date is required when registrations are enabled.");
+      }
+      if (!configRegEnd) {
+        errors.push("Registration Closes date is required when registrations are enabled.");
+      }
+      if (configRegStart && configRegEnd && new Date(configRegStart) >= new Date(configRegEnd)) {
+        errors.push("Registration Opens date must be before Registration Closes date.");
+      }
+      if (configRegEnd && configEventStart && new Date(configRegEnd) > new Date(configEventStart)) {
+        errors.push("Registration Closes date must be before or equal to the Event Start date.");
+      }
     }
 
     // Event Dates
@@ -2722,9 +2738,7 @@ const handleDownloadPDF = () => {
     if (configEventStart && configEventEnd && new Date(configEventStart) >= new Date(configEventEnd)) {
       errors.push("Event Start date must be before Event End date.");
     }
-    if (configRegEnd && configEventStart && new Date(configRegEnd) > new Date(configEventStart)) {
-      errors.push("Registration Closes date must be before or equal to the Event Start date.");
-    }
+
 
     // Poster and Thumbnail
     const posterUrl = activeEvent?.Poster || activeEvent?.posterUrl;
@@ -2748,28 +2762,17 @@ const handleDownloadPDF = () => {
       }
     }
 
-    // Committee structure validation (Sprint 8)
-    const standardCommittees = ["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"];
-    const missingCommittees = standardCommittees.filter(scName => {
-      return !activeCommittees.some(ac => {
-        const nameLower = ac.name.toLowerCase();
-        if (scName === "Program" || scName === "Program") {
-          return nameLower === "program committee" || nameLower === "programs" || nameLower === "program";
+    // Committee structure validation (RTCO-075)
+    if (activeEvent?.committeeNeeded !== false) {
+      // We no longer mandate 'all standard' committees. We only validate the ones that exist.
+      // Check if each committee has at least 1 Lead assigned
+      activeCommittees.forEach(comm => {
+        const leads = (comm.members || []).filter(m => m.role === 'Lead');
+        if (leads.length === 0) {
+          errors.push(`Committee '${comm.name}' must have at least one Lead assigned.`);
         }
-        return nameLower === scName.toLowerCase();
       });
-    });
-    if (missingCommittees.length > 0) {
-      errors.push(`Committee Structure is incomplete. Missing committees: ${missingCommittees.join(", ")}.`);
     }
-
-    // Check if each committee has at least 1 Lead assigned
-    activeCommittees.forEach(comm => {
-      const leads = (comm.members || []).filter(m => m.role === 'Lead');
-      if (leads.length === 0) {
-        errors.push(`Committee '${comm.name}' must have at least one Lead assigned.`);
-      }
-    });
 
     return errors;
   };
@@ -4554,6 +4557,7 @@ const handleDownloadPDF = () => {
 
       // Update the program doc
       await updateDoc(doc(db, "eventPrograms", programId), sanitizeFirestorePayload({
+        title: workingProgram.title?.trim() || originalProg.title,
         coordinators: workingProgram.coordinators || [],
         volunteers: workingProgram.volunteers || [],
         participants: workingProgram.participants || [],
@@ -5694,7 +5698,83 @@ const handleDownloadPDF = () => {
                       />
                     </div>
 
-                    <div className="flex justify-end space-x-2 pt-2">
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-stone-200 pt-4">
+                      <div>
+                        <label className="block text-[10px] uppercase font-black text-stone-500 mb-2">Is a Committee Needed?</label>
+                        <div className="flex space-x-4">
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={newCommitteeNeeded}
+                              onChange={() => setNewCommitteeNeeded(true)}
+                              className="w-3.5 h-3.5 text-[#0f4c2a] focus:ring-[#0f4c2a]"
+                            />
+                            <span className="font-bold text-stone-700">Yes</span>
+                          </label>
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={!newCommitteeNeeded}
+                              onChange={() => setNewCommitteeNeeded(false)}
+                              className="w-3.5 h-3.5 text-[#0f4c2a] focus:ring-[#0f4c2a]"
+                            />
+                            <span className="font-bold text-stone-700">No</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-black text-stone-500 mb-2">Activate Registrations?</label>
+                        <div className="flex space-x-4">
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={newActivateRegistrations}
+                              onChange={() => setNewActivateRegistrations(true)}
+                              className="w-3.5 h-3.5 text-[#0f4c2a] focus:ring-[#0f4c2a]"
+                            />
+                            <span className="font-bold text-stone-700">Yes</span>
+                          </label>
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={!newActivateRegistrations}
+                              onChange={() => setNewActivateRegistrations(false)}
+                              className="w-3.5 h-3.5 text-[#0f4c2a] focus:ring-[#0f4c2a]"
+                            />
+                            <span className="font-bold text-stone-700">No (Information Only)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {newCommitteeNeeded && (
+                      <div className="border-t border-stone-200 pt-4">
+                        <label className="block text-[10px] uppercase font-black text-stone-500 mb-2">Select Committees</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {['Finance', 'Food', 'Attendance', 'Program', 'General'].map(comm => (
+                            <label key={comm} className="flex items-center space-x-2 cursor-pointer bg-stone-50 border border-stone-200 rounded-lg p-2">
+                              <input
+                                type="checkbox"
+                                checked={newSelectedCommittees.includes(comm)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setNewSelectedCommittees(prev => [...prev, comm]);
+                                  } else {
+                                    setNewSelectedCommittees(prev => prev.filter(c => c !== comm));
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 text-[#0f4c2a] focus:ring-[#0f4c2a] rounded"
+                              />
+                              <span className="font-bold text-stone-700">{comm}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end space-x-2 pt-2 mt-4">
                       <button
                         type="button"
                         onClick={() => setShowNewEventForm(false)}
@@ -6704,23 +6784,14 @@ const handleDownloadPDF = () => {
                       const validationErrors = validateEventForPublish();
                       const isReadyToPublish = validationErrors.length === 0;
 
-                      // Calculate 8 categories
-                      const checklist = [
+                      const checklist: Array<{label: string, valid: boolean}> = [
                         {
                           label: 'Event name, description, and venue configured',
                           valid: !!configEventName.trim() && !!configDescription.trim() && !!configVenue.trim()
                         },
                         {
-                          label: 'Registration opens & closes schedule set',
-                          valid: !!configRegStart && !!configRegEnd && new Date(configRegStart) < new Date(configRegEnd)
-                        },
-                        {
                           label: 'Event starts & ends schedule set',
                           valid: !!configEventStart && !!configEventEnd && new Date(configEventStart) < new Date(configEventEnd)
-                        },
-                        {
-                          label: 'Registration closes before Event starts',
-                          valid: !!configRegEnd && !!configEventStart && new Date(configRegEnd) <= new Date(configEventStart)
                         },
                         {
                           label: 'Event Poster uploaded',
@@ -6729,37 +6800,33 @@ const handleDownloadPDF = () => {
                         {
                           label: 'Event Thumbnail uploaded',
                           valid: !!activeEvent?.Thumbnail
-                        },
-                        {
-                          label: 'Pricing structure configured',
-                          valid: !configRegEnabled || (
-                            configIndividualFee > 0 &&
-                            configFreeChildAge >= 0 &&
-                            (!configAllowExternal || configExternalRate >= 0)
-                          )
-                        },
-                        {
-                          label: 'All standard committees have active leads',
-                          valid: (() => {
-                            const standardCommittees = ["Attendance", "Finance", "Food", "Program", "Sponsorship", "Sourcing"];
-                            const missing = standardCommittees.filter(scName => {
-                              return !activeCommittees.some(ac => {
-                                const nameLower = ac.name.toLowerCase();
-                                if (scName === "Program" || scName === "Program") {
-                                  return nameLower === "program committee" || nameLower === "programs" || nameLower === "program";
-                                }
-                                return nameLower === scName.toLowerCase();
-                              });
-                            });
-                            if (missing.length > 0) return false;
-                            
-                            return activeCommittees.every(comm => {
-                              const leads = (comm.members || []).filter(m => m.role === 'Lead');
-                              return leads.length > 0;
-                            });
-                          })()
                         }
                       ];
+                      
+                      if (configRegEnabled) {
+                        checklist.push({
+                          label: 'Registration opens & closes schedule set',
+                          valid: !!configRegStart && !!configRegEnd && new Date(configRegStart) < new Date(configRegEnd)
+                        });
+                        checklist.push({
+                          label: 'Registration closes before Event starts',
+                          valid: !!configRegEnd && !!configEventStart && new Date(configRegEnd) <= new Date(configEventStart)
+                        });
+                        checklist.push({
+                          label: 'Pricing structure configured',
+                          valid: configIndividualFee > 0 && configFreeChildAge >= 0 && (!configAllowExternal || configExternalRate >= 0)
+                        });
+                      }
+                      
+                      if (activeEvent?.committeeNeeded !== false) {
+                        checklist.push({
+                          label: 'All active committees have leads assigned',
+                          valid: activeCommittees.length === 0 || activeCommittees.every(comm => {
+                            const leads = (comm.members || []).filter(m => m.role === 'Lead');
+                            return leads.length > 0;
+                          })
+                        });
+                      }
 
                       const completedCount = checklist.filter(item => item.valid).length;
                       const totalCount = checklist.length;
@@ -7860,7 +7927,9 @@ const handleDownloadPDF = () => {
                                     const primaryRes = pId ? residents.find(r => r.gmkId === pId) : null;
                                     return fm.name?.toLowerCase().includes(query) ||
                                            fm.phone?.toLowerCase().includes(query) ||
-                                           (primaryRes && primaryRes.displayUnitNumber?.toLowerCase().includes(query));
+                                           (primaryRes && primaryRes.displayUnitNumber?.toLowerCase().includes(query)) ||
+                                           (primaryRes && primaryRes.fullName?.toLowerCase().includes(query)) ||
+                                           (primaryRes && primaryRes.email?.toLowerCase().includes(query));
                                   });
 
                                   return (
@@ -8608,7 +8677,19 @@ const handleDownloadPDF = () => {
                                       )}
                                       <span className="text-[9px] font-mono text-stone-400">ID: {prog.id}</span>
                                     </div>
-                                    <h4 className="text-base font-extrabold text-stone-900 mt-1 capitalize font-heading">{prog.title}</h4>
+                                    {isEditingProgram ? (
+                                      <input
+                                        type="text"
+                                        value={workingProgram?.title || ''}
+                                        onChange={(e) => {
+                                          setWorkingProgram((prev: any) => ({ ...prev, title: e.target.value }));
+                                          setIsProgramDirty(true);
+                                        }}
+                                        className="font-extrabold text-stone-900 capitalize font-heading text-base bg-white border border-stone-300 rounded px-2 py-1 w-full mt-1 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                      />
+                                    ) : (
+                                      <h4 className="text-base font-extrabold text-stone-900 mt-1 capitalize font-heading">{prog.title}</h4>
+                                    )}
                                     {prog.description && (
                                       <p className="text-stone-500 text-[10px] font-medium mt-0.5">{prog.description}</p>
                                     )}
@@ -8810,64 +8891,110 @@ const handleDownloadPDF = () => {
                                       </div>
                                     </div>
 
-                                    {progVolSearchQuery && (
-                                      <div className="border border-stone-200 rounded-xl bg-white shadow-md max-h-36 overflow-y-auto divide-y divide-stone-100">
-                                        {(() => {
-                                          const filtered = residents.filter(r => {
-                                            if (r.status !== 'active') return false;
-                                            if (volunteers.some(v => v.residentId === r.gmkId || v.email === r.email)) return false;
-                                            const q = progVolSearchQuery.toLowerCase().trim();
-                                            return r.fullName?.toLowerCase().includes(q) || r.displayUnitNumber?.toLowerCase().includes(q) || r.email?.toLowerCase().includes(q);
-                                          });
-                                          if (filtered.length === 0) {
-                                            return (
-                                              <div className="p-3 text-center space-y-2">
-                                                <p className="text-stone-450 italic text-[10px] font-bold">No matching registered candidates found.</p>
+                                    {progVolSearchQuery && (() => {
+                                      const q = progVolSearchQuery.toLowerCase().trim();
+                                      const matchingResidents = residents.filter(r => {
+                                        if (r.status !== 'active') return false;
+                                        if (volunteers.some(v => v.residentId === r.gmkId || v.email === r.email)) return false;
+                                        return r.fullName?.toLowerCase().includes(q) || r.displayUnitNumber?.toLowerCase().includes(q) || r.email?.toLowerCase().includes(q);
+                                      });
+
+                                      const matchingFamily = familyMembers.filter(fm => {
+                                        if (volunteers.some(v => v.residentId === fm.id)) return false;
+                                        const pId = fm.familyId ? String(fm.familyId).replace('fam_', '') : '';
+                                        const primaryRes = pId ? residents.find(r => r.gmkId === pId) : null;
+                                        return fm.name?.toLowerCase().includes(q) ||
+                                               fm.phone?.toLowerCase().includes(q) ||
+                                               (primaryRes && primaryRes.displayUnitNumber?.toLowerCase().includes(q)) ||
+                                               (primaryRes && primaryRes.fullName?.toLowerCase().includes(q)) ||
+                                               (primaryRes && primaryRes.email?.toLowerCase().includes(q));
+                                      });
+
+                                      return (
+                                        <div className="space-y-2">
+                                          <div className="border border-stone-200 rounded-xl bg-white shadow-md max-h-36 overflow-y-auto divide-y divide-stone-100">
+                                            {matchingResidents.map(res => (
+                                              <div key={res.gmkId} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
+                                                <div>
+                                                  <span className="font-extrabold text-stone-900 block">{res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded ml-1">Primary</span></span>
+                                                  <span className="text-[9px] text-stone-500 block">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                                </div>
                                                 <button
                                                   type="button"
+                                                  disabled={isSubmitting}
                                                   onClick={() => {
-                                                    const manualVol = {
-                                                      gmkId: `manual_vol_${Date.now()}`,
-                                                      fullName: progVolSearchQuery.trim(),
-                                                      email: 'manual@external.com',
-                                                      phone: 'N/A',
-                                                      displayUnitNumber: 'External'
-                                                    };
-                                                    localAssignVolunteer(manualVol, progVolRoleInput);
+                                                    localAssignVolunteer(res, progVolRoleInput);
                                                     setProgVolSearchQuery('');
                                                     setProgVolRoleInput('');
                                                   }}
-                                                  className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black shadow-xs cursor-pointer inline-flex items-center space-x-1"
+                                                  className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black cursor-pointer shadow-xs shrink-0"
                                                 >
-                                                  <Plus className="w-3.5 h-3.5" />
-                                                  <span>Add Manually: {progVolSearchQuery}</span>
+                                                  Add
                                                 </button>
                                               </div>
-                                            );
-                                          }
-                                          return filtered.map(res => (
-                                          <div key={res.gmkId} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
-                                            <div>
-                                              <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
-                                              <span className="text-[9px] text-stone-500 block">Unit {res.displayUnitNumber} • {res.email}</span>
-                                            </div>
+                                            ))}
+                                            {matchingFamily.map(fm => {
+                                              const pId = fm.familyId ? String(fm.familyId).replace('fam_', '') : '';
+                                              const primaryRes = pId ? residents.find(r => r.gmkId === pId) : null;
+                                              return (
+                                                <div key={fm.id} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
+                                                  <div>
+                                                    <span className="font-extrabold text-stone-900 block">{fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded ml-1 capitalize">{fm.relationship || 'Family'}</span></span>
+                                                    <span className="text-[9px] text-stone-500 block">Flat: {primaryRes?.displayUnitNumber || 'N/A'} • {fm.email || primaryRes?.email || 'N/A'}</span>
+                                                  </div>
+                                                  <button
+                                                    type="button"
+                                                    disabled={isSubmitting}
+                                                    onClick={() => {
+                                                      const familyVol = {
+                                                        gmkId: fm.id,
+                                                        fullName: fm.name,
+                                                        email: fm.email || primaryRes?.email || 'family@resident.com',
+                                                        phone: fm.phone || primaryRes?.phone || '',
+                                                        displayUnitNumber: primaryRes?.displayUnitNumber || ''
+                                                      };
+                                                      localAssignVolunteer(familyVol, progVolRoleInput);
+                                                      setProgVolSearchQuery('');
+                                                      setProgVolRoleInput('');
+                                                    }}
+                                                    className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black cursor-pointer shadow-xs shrink-0"
+                                                  >
+                                                    Add
+                                                  </button>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                          
+                                          {/* Option to add manual volunteer */}
+                                          <div className="pt-2 flex items-center justify-between bg-stone-100 p-2 rounded-xl text-xs">
+                                            <span className="text-[10px] text-stone-600 font-bold">
+                                              Add external volunteer:
+                                            </span>
                                             <button
                                               type="button"
                                               disabled={isSubmitting}
                                               onClick={() => {
-                                                localAssignVolunteer(res, progVolRoleInput);
+                                                const manualVol = {
+                                                  gmkId: `manual_vol_${Date.now()}`,
+                                                  fullName: progVolSearchQuery.trim(),
+                                                  email: 'manual@external.com',
+                                                  phone: 'N/A',
+                                                  displayUnitNumber: 'External'
+                                                };
+                                                localAssignVolunteer(manualVol, progVolRoleInput);
                                                 setProgVolSearchQuery('');
                                                 setProgVolRoleInput('');
                                               }}
-                                              className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black cursor-pointer shadow-xs"
+                                              className="px-3 py-1 bg-stone-800 hover:bg-black text-white font-black text-[9px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs inline-flex items-center space-x-1"
                                             >
-                                              Add
+                                              <Plus className="w-3.5 h-3.5" />
+                                              <span>Add &quot;{progVolSearchQuery}&quot; Manually</span>
                                             </button>
                                           </div>
-                                        ));
-                                        })()}
-                                      </div>
-                                    )}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                   )}
                                 </div>

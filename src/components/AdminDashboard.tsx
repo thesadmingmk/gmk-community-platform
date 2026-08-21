@@ -93,6 +93,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [residentFilter, setResidentFilter] = useState<'all' | 'registered' | 'pending'>('all');
 
   // Database Integrity Scan States
@@ -915,64 +916,10 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
   };
 
   // Predictive Search States
-  const [predictiveQuery, setPredictiveQuery] = useState('');
-  const [showPredictiveDropdown, setShowPredictiveDropdown] = useState(false);
+
   const [highlightedPendingUid, setHighlightedPendingUid] = useState<string | null>(null);
 
-  // Filter suggestions across active, archived, and pending
-  const getPredictiveSuggestions = () => {
-    if (!predictiveQuery.trim()) return [];
-    const query = predictiveQuery.toLowerCase().trim();
-    const matches: Array<{
-      type: 'active' | 'archived' | 'pending';
-      id: string;
-      name: string;
-      email: string;
-      unit: string;
-      original: any;
-    }> = [];
 
-    // 1. Pending Approvals
-    pendingRegs.forEach(p => {
-      if (
-        p.fullName.toLowerCase().includes(query) ||
-        p.email.toLowerCase().includes(query) ||
-        p.displayUnitNumber.toLowerCase().includes(query)
-      ) {
-        matches.push({
-          type: 'pending',
-          id: p.uid,
-          name: p.fullName,
-          email: p.email,
-          unit: p.displayUnitNumber,
-          original: p
-        });
-      }
-    });
-
-    // 2. Active & Archived Residents
-    residents.forEach(r => {
-      if (r.status === 'active' || r.status === 'archived') {
-        if (
-          r.fullName.toLowerCase().includes(query) ||
-          r.email.toLowerCase().includes(query) ||
-          r.displayUnitNumber.toLowerCase().includes(query) ||
-          (r.gmkId && r.gmkId.toLowerCase().includes(query))
-        ) {
-          matches.push({
-            type: r.status as 'active' | 'archived',
-            id: r.gmkId,
-            name: r.fullName,
-            email: r.email,
-            unit: r.displayUnitNumber,
-            original: r
-          });
-        }
-      }
-    });
-
-    return matches.slice(0, 8);
-  };
 
   // Selected resident details
   const [selectedResident, setSelectedResident] = useState<ResidentProfile | null>(null);
@@ -2221,93 +2168,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               </div>
             </div>
 
-            {/* Compact Autocomplete/Autosuggest Predictive Search */}
-            <div className="relative w-full md:w-80">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={predictiveQuery}
-                  onChange={(e) => {
-                    setPredictiveQuery(e.target.value);
-                    setShowPredictiveDropdown(true);
-                  }}
-                  onFocus={() => setShowPredictiveDropdown(true)}
-                  placeholder="Predictive Search (Name, Unit, Email, GMK ID)..."
-                  className="w-full bg-stone-50 text-stone-900 pl-9 pr-8 py-1.5 text-xs font-semibold border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a]"
-                />
-                {predictiveQuery && (
-                  <button
-                    onClick={() => {
-                      setPredictiveQuery('');
-                      setShowPredictiveDropdown(false);
-                    }}
-                    className="absolute right-2.5 top-2 hover:text-stone-900 text-stone-400 p-0.5"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-              {/* Autocomplete / Autosuggest Suggestions Dropdown */}
-              {showPredictiveDropdown && getPredictiveSuggestions().length > 0 && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-30" 
-                    onClick={() => setShowPredictiveDropdown(false)} 
-                  />
-                  <div className="absolute top-full right-0 left-0 mt-1 bg-white border border-stone-250 rounded-xl shadow-lg z-40 max-h-64 overflow-y-auto py-1 divide-y divide-stone-100">
-                    {getPredictiveSuggestions().map((suggestion) => (
-                      <button
-                        key={`${suggestion.type}-${suggestion.id}`}
-                        onClick={() => {
-                          setSearchTerm(''); // reset manual search filters to avoid state collision
-                          
-                            setActiveTab(suggestion.type === 'active' ? 'residents' : 'archived');
-                            setSelectedResident(suggestion.original);
-                            setIsCreating(false);
-                            setIsEditing(false);
-                          
-                          setPredictiveQuery('');
-                          setShowPredictiveDropdown(false);
-                        }}
-                        className="w-full text-left px-3 py-2 hover:bg-stone-50 flex items-start gap-2 transition-colors cursor-pointer"
-                      >
-                        <div className="mt-0.5 shrink-0">
-                          {suggestion.type === 'pending' ? (
-                            <Clock className="w-3.5 h-3.5 text-amber-500" />
-                          ) : suggestion.type === 'archived' ? (
-                            <Archive className="w-3.5 h-3.5 text-stone-400" />
-                          ) : (
-                            <UserCheck className="w-3.5 h-3.5 text-[#0f4c2a]" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1.5">
-                            <span className="text-xs font-extrabold text-stone-900 truncate">
-                              {suggestion.name}
-                            </span>
-                            <span className={`text-[8px] font-extrabold uppercase px-1 rounded shrink-0 ${
-                              suggestion.type === 'pending' ? 'bg-amber-50 text-amber-800 border border-amber-200' :
-                              suggestion.type === 'archived' ? 'bg-stone-100 text-stone-600 font-bold' :
-                              'bg-emerald-50 text-emerald-800 border border-emerald-150 font-bold'
-                            }`}>
-                              {suggestion.type === 'pending' ? 'Pending' : suggestion.type}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] text-stone-500 font-mono mt-0.5">
-                            <span className="truncate">{suggestion.unit}</span>
-                            {suggestion.type !== 'pending' && (
-                              <span className="shrink-0 font-bold">{suggestion.id}</span>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            
             </div>
           </div>
         )}
@@ -2319,8 +2180,8 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               <Search className="w-4 h-4 text-stone-600 absolute left-3.5 top-3" />
               <input
                 type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder={
                   activeTab === 'residents' ? "Search Active Residents database by Name, Email, Unit, GMK ID..." :
                   activeTab === 'units' ? "Filter Units by Unit Number, Unit Type, Status, or Assigned Owner Name..." :
@@ -2329,10 +2190,21 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                 className="w-full bg-stone-50/50 pl-10 pr-4 py-2 text-stone-900 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs font-medium"
               />
             </div>
-            {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm(searchInput)}
+              className="px-4 py-2 bg-[#0f4c2a] text-white text-xs font-bold rounded-xl hover:bg-[#0c3e22] transition-colors shrink-0 cursor-pointer"
+            >
+              Search
+            </button>
+            {(searchTerm || searchInput) && (
               <button 
-                onClick={() => setSearchTerm('')}
-                className="text-stone-600 hover:text-stone-900 font-bold text-xs"
+                type="button"
+                onClick={() => {
+                  setSearchInput('');
+                  setSearchTerm('');
+                }}
+                className="text-stone-600 hover:text-stone-900 font-bold text-xs shrink-0 cursor-pointer"
               >
                 Clear
               </button>
