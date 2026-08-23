@@ -99,6 +99,8 @@ export default function FinanceWorkspace({
   const [expenseDateInput, setExpenseDateInput] = useState<string>(new Date().toISOString().split('T')[0]);
   const [expensePayeeInput, setExpensePayeeInput] = useState<string>('');
   const [selectedCommitteeFilter, setSelectedCommitteeFilter] = useState<string>('all');
+  const [isSponsorshipModalOpen, setIsSponsorshipModalOpen] = useState(false);
+  const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
 
   const userEmailLower = profile?.email?.toLowerCase().trim() || '';
   const userGmkIdUpper = profile?.gmkId?.toUpperCase().trim() || '';
@@ -132,10 +134,13 @@ export default function FinanceWorkspace({
     sponsorName: string;
     tier?: string;
     amount: number;
+    assuredAmount?: number;
+    paymentMode?: string;
     date?: string;
     notes?: string;
   }>;
   const sponsorshipIncome = sponsorshipIncomeList.reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+  const sponsorshipAssuredAmount = sponsorshipIncomeList.reduce((acc: number, curr: any) => acc + (Number(curr.assuredAmount) || Number(curr.amount) || 0), 0);
   
   const openingBalance = eventFinance?.openingBalance !== undefined ? Number(eventFinance.openingBalance) : 0;
   
@@ -417,7 +422,8 @@ export default function FinanceWorkspace({
       styles: { fontSize: 9, cellPadding: 3 }
     });
 
-    doc.save(`Financial_Summary_${title.replace(/\s+/g, '_')}.pdf`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    doc.save(`Financial_Summary_${title.replace(/\s+/g, '_')}_${dateStr}.pdf`);
     setSuccessMsg("✓ Financial Summary PDF generated successfully.");
   };
 
@@ -459,7 +465,8 @@ export default function FinanceWorkspace({
       styles: { fontSize: 9, cellPadding: 4 }
     });
 
-    doc.save(`Committee_Budgets_${title.replace(/\s+/g, '_')}.pdf`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    doc.save(`Committee_Budgets_${title.replace(/\s+/g, '_')}_${dateStr}.pdf`);
     setSuccessMsg("✓ Committee Budgets PDF generated successfully.");
   };
 
@@ -727,79 +734,36 @@ export default function FinanceWorkspace({
                 <p className="text-[10px] text-amber-800 font-bold">Registration + Sponsorship</p>
               </div>
             </div>
-
-            {/* Section A: Registration Income Breakdown */}
+            
+            {/* Section A: Registration Income Summary */}
             <div className="p-5 bg-white border border-stone-200 rounded-2xl shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-150 pb-3">
+              <div className="flex items-center justify-between border-b border-stone-150 pb-3">
                 <div>
-                  <h4 className="font-black text-[#0f4c2a] uppercase tracking-wider text-sm">Registration Income Breakdown</h4>
-                  <p className="text-stone-500 text-[10px] font-bold">Collected registration payments for {activeEvent?.title || 'active event'}.</p>
-                </div>
-
-                <div className="relative max-w-xs w-full">
-                  <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={finSearchQuery}
-                    onChange={(e) => setFinSearchQuery(e.target.value)}
-                    placeholder="Search by GMK ID, name, or email..."
-                    className="w-full pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
-                  />
+                  <h4 className="font-black text-[#0f4c2a] uppercase tracking-wider text-sm">Registration Income</h4>
+                  <p className="text-stone-500 text-[10px] font-bold">Summary of collected registration payments.</p>
                 </div>
               </div>
-
-              {filteredIncomeRegs.length === 0 ? (
-                <div className="text-center py-10 bg-stone-50 rounded-xl border border-dashed border-stone-200">
-                  <Receipt className="w-8 h-8 text-stone-300 mx-auto mb-2" />
-                  <p className="text-stone-600 font-black text-xs uppercase tracking-wider">No Collected Registration Payments Yet</p>
-                  <p className="text-[10px] text-stone-400 font-bold mt-1">Registration income automatically calculates as residents make payments.</p>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <span className="text-[10px] uppercase font-black text-emerald-800 tracking-widest block mb-1">Total Collected Registration Income</span>
+                    <span className="text-lg font-black font-mono text-emerald-700">OMR {totalRegistrationRec.toFixed(3)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl">
+                    <span className="text-[10px] uppercase font-black text-stone-500 tracking-widest block mb-1">Number of Confirmed/Paying Records</span>
+                    <span className="text-lg font-black font-mono text-stone-800">{payingRegistrationsCount}</span>
+                  </div>
                 </div>
-              ) : (
-                <div className="overflow-x-auto hide-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[650px]">
-                    <thead>
-                      <tr className="bg-stone-50 text-[10px] font-black text-stone-500 uppercase tracking-widest border-b border-stone-200">
-                        <th className="p-3">Primary Registrant</th>
-                        <th className="p-3">GMK ID</th>
-                        <th className="p-3">Type</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3 text-right">Amount Due</th>
-                        <th className="p-3 text-right">Collected (OMR)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-xs font-bold text-stone-700">
-                      {filteredIncomeRegs.map((reg) => {
-                        const collected = getRegistrationCollectedAmount(reg);
-                        const due = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
-                        return (
-                          <tr key={reg.id} className="border-b border-stone-100 hover:bg-stone-50/50">
-                            <td className="p-3 font-semibold text-stone-900">{(reg.participants && reg.participants.length > 0) ? reg.participants[0] : reg.primaryMemberEmail}</td>
-                            <td className="p-3 font-mono text-[10px]">{reg.primaryMemberGmkId}</td>
-                            <td className="p-3">
-                              <span className="px-2 py-0.5 bg-stone-100 text-stone-700 text-[9px] font-black uppercase rounded-md">
-                                {reg.registrationType || 'Family'}
-                              </span>
-                            </td>
-                            <td className="p-3">
-                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase rounded-md">
-                                {reg.paymentStatus || 'Paid'}
-                              </span>
-                            </td>
-                            <td className="p-3 text-right font-mono text-[11px] text-stone-500">OMR {due.toFixed(3)}</td>
-                            <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">OMR {collected.toFixed(3)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-emerald-50/50 font-black text-xs text-[#0f4c2a] border-t border-emerald-200">
-                        <td colSpan={5} className="p-3 text-right uppercase tracking-wider">Total Registration Income:</td>
-                        <td className="p-3 text-right font-mono text-sm">OMR {totalRegistrationRec.toFixed(3)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsRegistrationModalOpen(true)}
+                    className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                  >
+                    VIEW REGISTRATION DETAILS
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Section B: Sponsorship Income (Read-Only) */}
@@ -809,9 +773,6 @@ export default function FinanceWorkspace({
                   <h4 className="font-black text-blue-900 uppercase tracking-wider text-sm">Sponsorship Income</h4>
                   <p className="text-stone-500 text-[10px] font-bold">Contributions recorded by the Sponsorship Committee (Read-only).</p>
                 </div>
-                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-black uppercase tracking-wider border border-blue-200">
-                  Total: OMR {sponsorshipIncome.toFixed(3)}
-                </span>
               </div>
 
               {sponsorshipIncomeList.length === 0 ? (
@@ -823,29 +784,30 @@ export default function FinanceWorkspace({
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto hide-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[600px]">
-                    <thead>
-                      <tr className="bg-stone-50 text-[10px] font-black text-stone-500 uppercase tracking-widest border-b border-stone-200">
-                        <th className="p-3">Sponsor Name</th>
-                        <th className="p-3">Tier / Category</th>
-                        <th className="p-3">Date</th>
-                        <th className="p-3">Notes</th>
-                        <th className="p-3 text-right">Amount (OMR)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-xs font-bold text-stone-700">
-                      {sponsorshipIncomeList.map((sponsor, idx) => (
-                        <tr key={sponsor.id || idx} className="border-b border-stone-100 hover:bg-stone-50/50">
-                          <td className="p-3 font-semibold text-stone-900">{sponsor.sponsorName}</td>
-                          <td className="p-3"><span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px] font-black uppercase">{sponsor.tier || 'General'}</span></td>
-                          <td className="p-3 font-mono text-[10px] text-stone-500">{sponsor.date || '-'}</td>
-                          <td className="p-3 text-[10px] text-stone-500">{sponsor.notes || '-'}</td>
-                          <td className="p-3 text-right font-mono font-black text-blue-700">OMR {(Number(sponsor.amount) || 0).toFixed(3)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-widest block mb-1">Total Assured</span>
+                      <span className="text-lg font-black font-mono text-stone-800">OMR {sponsorshipAssuredAmount.toFixed(3)}</span>
+                    </div>
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                      <span className="text-[10px] uppercase font-black text-blue-800 tracking-widest block mb-1">Total Received</span>
+                      <span className="text-lg font-black font-mono text-blue-700">OMR {sponsorshipIncome.toFixed(3)}</span>
+                    </div>
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl">
+                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-widest block mb-1">Number of Contributions</span>
+                      <span className="text-lg font-black font-mono text-stone-800">{sponsorshipIncomeList.length}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsSponsorshipModalOpen(true)}
+                      className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                    >
+                      VIEW SPONSORSHIP DETAILS
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1251,7 +1213,7 @@ export default function FinanceWorkspace({
                 </div>
                 <button 
                   onClick={generateFinancialSummaryPDF}
-                  className="px-4 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors w-full flex items-center justify-center space-x-2"
+                  className="px-4 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4 text-[#d4af37]" />
                   <span>Download Statement PDF</span>
@@ -1268,7 +1230,7 @@ export default function FinanceWorkspace({
                 </div>
                 <button 
                   onClick={generateCommitteeBudgetPDF}
-                  className="px-4 py-2.5 bg-blue-700 text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-blue-800 transition-colors w-full flex items-center justify-center space-x-2"
+                  className="px-4 py-2.5 bg-blue-700 text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-blue-800 transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4 text-[#d4af37]" />
                   <span>Download Budgets PDF</span>
@@ -1544,6 +1506,161 @@ export default function FinanceWorkspace({
                 className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-sm disabled:opacity-50"
               >
                 {isFinanceSubmitting ? 'Recording...' : 'Record Expense'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Registration Details Modal */}
+      {isRegistrationModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-5xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-stone-150 pb-3 shrink-0">
+              <div className="flex items-center space-x-2">
+                <Receipt className="w-5 h-5 text-[#0f4c2a]" />
+                <h4 className="font-black text-[#0f4c2a] uppercase tracking-wider text-sm">Registration Income Breakdown</h4>
+              </div>
+              <button onClick={() => setIsRegistrationModalOpen(false)} className="text-stone-400 hover:text-stone-600 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between gap-3 pb-2 shrink-0">
+              <p className="text-stone-500 text-[10px] font-bold">Collected registration payments for {activeEvent?.title || 'active event'}.</p>
+              <div className="relative max-w-xs w-full">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={finSearchQuery}
+                  onChange={(e) => setFinSearchQuery(e.target.value)}
+                  placeholder="Search by GMK ID, name, or email..."
+                  className="w-full pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-y-auto hide-scrollbar flex-1">
+              {filteredIncomeRegs.length === 0 ? (
+                <div className="text-center py-10 bg-stone-50 rounded-xl border border-dashed border-stone-200 h-full flex flex-col items-center justify-center">
+                  <Receipt className="w-8 h-8 text-stone-300 mx-auto mb-2" />
+                  <p className="text-stone-600 font-black text-xs uppercase tracking-wider">No Collected Registration Payments Yet</p>
+                  <p className="text-[10px] text-stone-400 font-bold mt-1">Registration income automatically calculates as residents make payments.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[650px]">
+                    <thead className="sticky top-0 bg-stone-50 z-10">
+                      <tr className="bg-stone-50 text-[10px] font-black text-stone-500 uppercase tracking-widest border-b border-stone-200">
+                        <th className="p-3">Primary Registrant</th>
+                        <th className="p-3">GMK ID</th>
+                        <th className="p-3">Type</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-right">Amount Due</th>
+                        <th className="p-3 text-right">Collected (OMR)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-xs font-bold text-stone-700">
+                      {filteredIncomeRegs.map((reg) => {
+                        const collected = getRegistrationCollectedAmount(reg);
+                        const due = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+                        return (
+                          <tr key={reg.id} className="border-b border-stone-100 hover:bg-stone-50/50">
+                            <td className="p-3 font-semibold text-stone-900">{(reg.participants && reg.participants.length > 0) ? reg.participants[0] : reg.primaryMemberEmail}</td>
+                            <td className="p-3 font-mono text-[10px]">{reg.primaryMemberGmkId}</td>
+                            <td className="p-3">
+                              <span className="px-2 py-0.5 bg-stone-100 text-stone-700 text-[9px] font-black uppercase rounded-md">
+                                {reg.registrationType || 'Family'}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded-md ${collected >= due ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                {collected >= due ? 'PAID' : 'PENDING'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-mono text-[11px] text-stone-500">OMR {due.toFixed(3)}</td>
+                            <td className="p-3 text-right font-mono font-black text-[#0f4c2a]">OMR {collected.toFixed(3)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="sticky bottom-0 bg-emerald-50/90 backdrop-blur z-10">
+                      <tr className="font-black text-xs text-[#0f4c2a] border-t border-emerald-200">
+                        <td colSpan={5} className="p-3 text-right uppercase tracking-wider">Total Registration Income:</td>
+                        <td className="p-3 text-right font-mono text-sm">OMR {totalRegistrationRec.toFixed(3)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 flex justify-end border-t border-stone-150 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsRegistrationModalOpen(false)}
+                className="px-6 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sponsorship Details Modal */}
+      {isSponsorshipModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-stone-150 pb-3 shrink-0">
+              <div className="flex items-center space-x-2">
+                <DollarSign className="w-5 h-5 text-blue-700" />
+                <h4 className="font-black text-stone-900 uppercase tracking-wider text-sm">Sponsorship Details</h4>
+              </div>
+              <button 
+                onClick={() => setIsSponsorshipModalOpen(false)}
+                className="text-stone-400 hover:text-stone-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto hide-scrollbar flex-1">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="bg-stone-50 text-[10px] font-black text-stone-500 uppercase tracking-widest border-b border-stone-200">
+                      <th className="p-3">Sponsor Name</th>
+                      <th className="p-3">Payment Mode</th>
+                      <th className="p-3">Date</th>
+                      <th className="p-3">Notes</th>
+                      <th className="p-3 text-right">Assured Amount</th>
+                      <th className="p-3 text-right">Received Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-bold text-stone-700">
+                    {sponsorshipIncomeList.map((sponsor, idx) => (
+                      <tr key={sponsor.id || idx} className="border-b border-stone-100 hover:bg-stone-50/50">
+                        <td className="p-3 font-semibold text-stone-900">{sponsor.sponsorName}</td>
+                        <td className="p-3"><span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px] font-black uppercase">{sponsor.paymentMode || sponsor.tier || 'N/A'}</span></td>
+                        <td className="p-3 font-mono text-[10px] text-stone-500">{sponsor.date || '-'}</td>
+                        <td className="p-3 text-[10px] text-stone-500">{sponsor.notes || '-'}</td>
+                        <td className="p-3 text-right font-mono font-black text-stone-500">{(Number(sponsor.assuredAmount) || Number(sponsor.amount) || 0).toFixed(3)}</td>
+                        <td className="p-3 text-right font-mono font-black text-blue-700">{(Number(sponsor.amount) || 0).toFixed(3)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div className="pt-4 flex justify-end border-t border-stone-150 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsSponsorshipModalOpen(false)}
+                className="px-6 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

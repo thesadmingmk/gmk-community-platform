@@ -43,17 +43,16 @@ export default function RegistrationReportingWorkspace({
   const getDerivedStatus = (r: EventRegistration) => {
     const due = r.amountDue ?? r.paymentAmount ?? r.paymentSummary?.totalAmount ?? 0;
     const rec = r.amountReceived ?? (r.paymentStatus === 'paid' || r.paymentStatus === 'approved' ? due : 0);
-    let status = r.paymentStatus;
+    let rawStatus = r.paymentStatus || 'pending';
+    let status = rawStatus;
     
-    // Explicit dynamic derivations if missing or pending
-    if (!status || status === 'pending') {
+    // UI Presentation Rule: Ignore PARTIALLY_PAID, use strict math
+    if (rawStatus === 'partially_paid' || rawStatus === 'pending') {
       if (due === 0) status = 'waived';
-      else if (rec > 0 && rec < due) status = 'partially_paid';
       else if (rec >= due && due > 0) status = 'paid';
       else status = 'pending';
     }
     
-    // Normalize approved to paid for consistency if needed, but let's keep it as is
     return { due, rec, bal: Math.max(0, due - rec), status };
   };
 
@@ -281,7 +280,8 @@ export default function RegistrationReportingWorkspace({
     XLSX.utils.book_append_sheet(wb, wsSummary, "SUMMARY");
     XLSX.utils.book_append_sheet(wb, ws, "REGISTRATIONS");
     
-    XLSX.writeFile(wb, "Event_Registration_Report.xlsx");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Event_Registration_Report_${dateStr}.xlsx`);
   };
 
   const exportPDF = () => {
@@ -329,7 +329,8 @@ export default function RegistrationReportingWorkspace({
       headStyles: { fillColor: [15, 76, 42] }
     });
 
-    doc.save("Event_Registration_Report.pdf");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    doc.save(`Event_Registration_Report_${dateStr}.pdf`);
   };
 
   return (
@@ -351,14 +352,14 @@ export default function RegistrationReportingWorkspace({
         <div className="flex items-center space-x-2">
           <button
             onClick={exportPDF}
-            className="px-4 py-2 rounded-xl bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-xs"
+            className="px-4 py-2 rounded-xl bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
           >
             <FileText className="w-4 h-4" />
             <span>Export PDF</span>
           </button>
           <button
             onClick={exportExcel}
-            className="px-4 py-2 rounded-xl bg-[#0f4c2a] text-white hover:bg-[#0c3e22] text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-sm"
+            className="px-4 py-2 rounded-xl bg-[#0f4c2a] text-white hover:bg-[#0c3e22] text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer"
           >
             <Download className="w-4 h-4" />
             <span>Export Excel</span>
@@ -416,7 +417,6 @@ export default function RegistrationReportingWorkspace({
                 <option value="all">All</option>
                 <option value="paid">Paid</option>
                 <option value="pending">Pending</option>
-                <option value="partially_paid">Partial</option>
                 <option value="waived">Waived</option>
                 <option value="refunded">Refunded</option>
                 <option value="cancelled">Cancelled</option>

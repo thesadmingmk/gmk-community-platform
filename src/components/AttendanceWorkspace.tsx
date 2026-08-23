@@ -7,6 +7,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import AttendanceReport from './shared/AttendanceReport';
 
 interface Props {
   activeEvent: CommunityEvent;
@@ -36,6 +37,7 @@ export default function AttendanceWorkspace({
   
   // Attendance List State
   const [selectedReg, setSelectedReg] = useState<EventRegistration | null>(null);
+  const [selectedParticipants, setSelectedParticipants] = useState<Record<string, boolean>>({});
 
   const handleScan = (detectedCodes: any[]) => {
     if (detectedCodes && detectedCodes.length > 0) {
@@ -51,8 +53,12 @@ export default function AttendanceWorkspace({
     setErrorMsg('');
     setSuccessMsg('');
     setScannedReg(null);
+    setSelectedParticipants({});
     
-    const searchCode = code.trim().toUpperCase();
+    let searchCode = code.trim().toUpperCase();
+    if (!isNaN(Number(searchCode)) && searchCode !== '') {
+        searchCode = `GMK-${searchCode}`;
+    }
         
     let reg = registrations.find(r => {
       const storedPass = (r.entryPassNumber || '').trim().toUpperCase();
@@ -70,7 +76,7 @@ export default function AttendanceWorkspace({
     if (reg) {
       setScannedReg(reg);
     } else {
-      setErrorMsg(`INVALID / ERROR — No registration found for Entry Pass: ${code}`);
+      setErrorMsg(`INVALID / ERROR — No registration found for Entry Pass or GMK ID: ${code}`);
     }
   };
 
@@ -92,8 +98,13 @@ export default function AttendanceWorkspace({
     const attRef = doc(db, "eventAttendance", `att_${gmkId}_${activeEvent.id}`);
     const existing = attendances.find(a => (a as any).primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${activeEvent.id}`);
     
-    if (existing && (existing.status === 'attended' || existing.status === 'checked_in')) {
-      setErrorMsg(`Household ${gmkId} is ALREADY CHECKED IN.`);
+    const { adults, children } = getParticipantDetails(reg);
+    const allParticipants = [...adults, ...children];
+    
+    const newlySelected = allParticipants.filter(p => selectedParticipants[p.name]);
+    
+    if (newlySelected.length === 0) {
+      setErrorMsg("Please select at least one attendee to check in.");
       return;
     }
     
@@ -102,23 +113,34 @@ export default function AttendanceWorkspace({
     try {
       const nowStr = new Date().toISOString();
       const adminEmail = auth.currentUser?.email || 'Gate Attendance Officer';
+      
+      const existingArrivedDetails = (existing as any)?.arrivedDetails || [];
+      const newArrivedDetails = newlySelected.map(p => ({
+        name: p.name,
+        category: p.category,
+        arrivedAt: nowStr,
+        scannedBy: adminEmail
+      }));
+      
+      const combinedArrivedDetails = [...existingArrivedDetails, ...newArrivedDetails];
+      const isFullyEntered = combinedArrivedDetails.length >= (reg.totalParticipants || 1);
+      
       await setDoc(attRef, {
         id: `att_${gmkId}_${activeEvent.id}`,
         eventId: activeEvent.id,
         committeeKey: 'attendance',
         primaryMemberGmkId: gmkId,
-        status: 'attended',
+        status: isFullyEntered ? 'attended' : 'checked_in',
         attendedAt: nowStr,
         scannedBy: adminEmail,
         totalParticipants: reg.totalParticipants || 1,
-        entryPassNumber: reg.entryPassNumber || `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${gmkId}`
+        totalAttended: combinedArrivedDetails.length,
+        entryPassNumber: reg.entryPassNumber || `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${gmkId}`,
+        arrivedDetails: combinedArrivedDetails
       }, { merge: true });
       
-      setSuccessMsg(`Gate check-in CONFIRMED for ${gmkId}. Gate entry granted.`);
-      // Update local view if it was opened from attendance list
-      if (selectedReg && selectedReg.id === reg.id) {
-        // We just let the snapshot update handle it, but can close or refresh
-      }
+      setSuccessMsg(`Gate entry recorded for ${newlySelected.length} attendees.`);
+      setSelectedParticipants({});
     } catch (err: any) {
       setErrorMsg(`Gate check-in failed: ${err.message || err}`);
     } finally {
@@ -135,6 +157,57 @@ export default function AttendanceWorkspace({
     return { adultsCount, childrenCount };
   };
 
+  const getParticipantDetails = (reg: EventRegistration) => {
+    const fam = families.find(f => f.id === reg.familyId);
+    const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+    const currentYear = new Date().getFullYear();
+    const participants = reg.participants || [];
+    
+    const adults: { name: string, category: string, age: number }[] = [];
+    const children: { name: string, category: string, age: number }[] = [];
+    
+    participants.forEach(name => {
+      let category = 'Adult';
+      let age = 30; // default adult
+      
+      const isPrimary = (name.trim().toLowerCase() === (fam?.fullName || reg.primaryMemberEmail).trim().toLowerCase());
+      if (isPrimary) {
+        category = 'Adult';
+      } else {
+        const mem = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
+        if (mem && mem.relationship === 'child') {
+          if (mem.yearOfBirth) {
+            const yob = parseInt(mem.yearOfBirth);
+            if (!isNaN(yob)) {
+              age = currentYear - yob;
+              if (age <= 3) category = 'Kids 0-3';
+              else if (age <= 9) category = 'Kids 4-9';
+              else if (age < 18) category = 'Kids 10+';
+              else category = 'Adult'; 
+            } else {
+              category = 'Kids 10+'; 
+            }
+          } else {
+            category = 'Kids 10+';
+          }
+        }
+      }
+      
+      if (category === 'Adult') {
+        adults.push({ name, category, age });
+      } else {
+        children.push({ name, category, age });
+      }
+    });
+    
+    const externalCount = (reg.totalParticipants || 0) - participants.length;
+    for (let i = 0; i < externalCount; i++) {
+      adults.push({ name: `Guest/External ${i+1}`, category: 'Adult', age: 30 });
+    }
+    
+    return { adults, children };
+  };
+
   // Filter valid registrations for Attendance
   const validRegs = registrations.filter(r => {
     const st = r.paymentStatus || 'pending';
@@ -144,16 +217,20 @@ export default function AttendanceWorkspace({
   const getAttendanceStatus = (reg: EventRegistration) => {
     const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1];
     const att = attendances.find(a => (a as any).primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${activeEvent.id}`);
-    if (!att) return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att };
-    if (att.status === 'attended' || att.status === 'checked_in') {
-      // For simplicity in micro-fix, if we have granular data we check it, but currently it's just 'attended'
-      const attTotal = att.totalAttended || (att as any).totalParticipants || 0;
+    
+    if (!att) return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att, arrivedNames: [] };
+    
+    const arrivedDetails = (att as any).arrivedDetails || [];
+    const arrivedNames = arrivedDetails.map((d: any) => d.name);
+    let attTotal = arrivedNames.length > 0 ? arrivedNames.length : ((att as any).totalAttended || (att as any).totalParticipants || 0);
+    
+    if (att.status === 'attended' || att.status === 'checked_in' || attTotal > 0) {
       if (attTotal > 0 && attTotal < (reg.totalParticipants || 0)) {
-         return { label: `${attTotal} / ${reg.totalParticipants} CHECKED IN`, color: 'bg-amber-100 text-amber-800', checkedIn: false, partially: true, att };
+         return { label: `${attTotal} / ${reg.totalParticipants} CHECKED IN`, color: 'bg-amber-100 text-amber-800', checkedIn: false, partially: true, att, arrivedNames };
       }
-      return { label: 'CHECKED IN', color: 'bg-emerald-100 text-emerald-800', checkedIn: true, partially: false, att };
+      return { label: 'FULLY ENTERED', color: 'bg-emerald-100 text-emerald-800', checkedIn: true, partially: false, att, arrivedNames };
     }
-    return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att };
+    return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att, arrivedNames: [] };
   };
 
   const generatePDFReport = () => {
@@ -172,7 +249,7 @@ export default function AttendanceWorkspace({
     let totalPartially = 0;
     let totalNotChecked = 0;
 
-    const tableData = validRegs.map(reg => {
+    const tableData = validRegs.map((reg, index) => {
       const { adultsCount, childrenCount } = getCounts(reg);
       totalAttendees += reg.totalParticipants || 0;
       totalAdults += adultsCount;
@@ -188,6 +265,7 @@ export default function AttendanceWorkspace({
       const name = fam?.fullName || reg.primaryMemberEmail;
 
       return [
+        (index + 1).toString(),
         reg.entryPassNumber || `PASS-${reg.id.slice(-4)}`,
         reg.primaryMemberGmkId || 'N/A',
         name,
@@ -206,13 +284,14 @@ export default function AttendanceWorkspace({
 
     (doc as any).autoTable({
       startY: 60,
-      head: [['Pass #', 'GMK', 'Name', 'Unit', 'Adults', 'Children', 'Total', 'Status', 'Time']],
+      head: [['#', 'Pass #', 'GMK', 'Name', 'Unit', 'Adults', 'Children', 'Total', 'Status', 'Time']],
       body: tableData,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [15, 76, 42] }
     });
 
-    doc.save(`Attendance_Report_${activeEvent.id}.pdf`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    doc.save(`Attendance_Report_${activeEvent.id}_${dateStr}.pdf`);
   };
 
   const generateExcelReport = () => {
@@ -224,7 +303,7 @@ export default function AttendanceWorkspace({
     let totalPartially = 0;
     let totalNotChecked = 0;
 
-    const exportData = validRegs.map(reg => {
+    const exportData = validRegs.map((reg, index) => {
       const { adultsCount, childrenCount } = getCounts(reg);
       totalAttendees += reg.totalParticipants || 0;
       totalAdults += adultsCount;
@@ -237,6 +316,7 @@ export default function AttendanceWorkspace({
 
       const fam = families.find(f => f.id === reg.familyId);
       return {
+        'Sl. No.': index + 1,
         'Entry Pass Number': reg.entryPassNumber || `PASS-${reg.id.slice(-4)}`,
         'GMK ID': reg.primaryMemberGmkId || 'N/A',
         'Primary Registrant': fam?.fullName || reg.primaryMemberEmail,
@@ -266,7 +346,8 @@ export default function AttendanceWorkspace({
     XLSX.utils.book_append_sheet(wb, wsData, "Attendance");
     XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
     
-    XLSX.writeFile(wb, `Attendance_Report_${activeEvent.id}.xlsx`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Attendance_Report_${activeEvent.id}_${dateStr}.xlsx`);
   };
 
   return (
@@ -320,17 +401,18 @@ export default function AttendanceWorkspace({
 
               <div className="mt-6">
                 <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider mb-2 text-center">
-                  OR ENTER PASS MANUALLY
+                  OR FIND BY GMK ID
                 </p>
                 <form onSubmit={handleManualSearch} className="flex items-center space-x-2">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-stone-400" />
+                  <div className="relative flex-1 flex items-center bg-white border border-stone-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-[#0f4c2a]">
+                    <Search className="ml-3 w-4 h-4 text-stone-400" />
+                    <span className="pl-2 font-bold text-stone-500 text-xs">GMK-</span>
                     <input
                       type="text"
                       value={scanInput}
-                      onChange={(e) => setScanInput(e.target.value)}
-                      placeholder="Entry Pass / Reg ID / GMK ID"
-                      className="w-full pl-9 pr-3 py-2 font-bold bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#0f4c2a]"
+                      onChange={(e) => setScanInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="1001"
+                      className="w-full pl-1 pr-3 py-2 font-bold text-stone-900 text-xs focus:outline-none"
                     />
                   </div>
                   <button
@@ -372,18 +454,23 @@ export default function AttendanceWorkspace({
               const isApproved = status === 'paid' || status === 'approved' || status === 'waived' || status === 'partially_paid' || status === 'overpaid';
               const isBlocked = !isApproved;
               const attStatus = getAttendanceStatus(scannedReg);
-              const isUtilized = attStatus.checkedIn || attStatus.partially;
+              const isFullyEntered = attStatus.checkedIn;
+              const isPartiallyEntered = attStatus.partially;
               
               const fam = families.find(f => f.id === scannedReg.familyId);
               const primaryName = fam ? fam.fullName : (scannedReg.primaryMemberEmail ? scannedReg.primaryMemberEmail.split('@')[0] : 'Unknown');
               
+              const { adults, children } = getParticipantDetails(scannedReg);
+              const alreadyArrived = attStatus.arrivedNames || [];
+              const showCheckboxes = isApproved && !isFullyEntered;
+              
               return (
                 <div className={`p-5 border-2 rounded-2xl animate-fadeIn ${
-                  isUtilized ? 'bg-amber-50 border-amber-500' : (isApproved ? 'bg-emerald-50 border-emerald-500' : 'bg-rose-50 border-rose-500')
+                  isFullyEntered ? 'bg-amber-50 border-amber-500' : (isApproved ? 'bg-emerald-50 border-emerald-500' : 'bg-rose-50 border-rose-500')
                 }`}>
                   <div className="flex items-start justify-between border-b border-stone-200/50 pb-3 mb-3">
                     <div className="flex items-center space-x-3">
-                      {isUtilized ? (
+                      {isFullyEntered ? (
                         <CheckCircle className="w-8 h-8 text-amber-600" />
                       ) : isApproved ? (
                         <CheckCircle className="w-8 h-8 text-emerald-600" />
@@ -392,12 +479,12 @@ export default function AttendanceWorkspace({
                       )}
                       <div>
                         <h5 className="font-extrabold text-lg uppercase tracking-wider font-heading text-stone-900">
-                          {isUtilized ? 'PASS UTILIZED' : (isApproved ? 'ACCESS GRANTED' : 'ACCESS DENIED')}
+                          {isFullyEntered ? 'ALL REGISTERED ATTENDEES HAVE ALREADY ENTERED' : (isApproved ? 'ACCESS GRANTED' : 'ACCESS DENIED')}
                         </h5>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                          isUtilized ? 'bg-amber-200 text-amber-900' : (isApproved ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900')
+                          isFullyEntered ? 'bg-amber-200 text-amber-900' : (isPartiallyEntered ? 'bg-emerald-200 text-emerald-900' : (isApproved ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'))
                         }`}>
-                          STATUS: {isUtilized ? attStatus.label : status}
+                          STATUS: {attStatus.label !== 'NOT CHECKED IN' ? attStatus.label : status}
                         </span>
                       </div>
                     </div>
@@ -420,7 +507,7 @@ export default function AttendanceWorkspace({
                       </div>
                     </div>
                     
-                    {isBlocked && !isUtilized && (
+                    {isBlocked && (
                       <div className="p-3 bg-white/60 rounded-xl mt-3">
                         <p className="text-xs font-bold text-rose-800">
                           {status === 'pending' && "Payment is pending. Attendee must complete payment at Finance desk."}
@@ -430,28 +517,101 @@ export default function AttendanceWorkspace({
                       </div>
                     )}
 
-                    {isUtilized && (
+                    {isFullyEntered && (
                       <div className="p-3 bg-white/60 rounded-xl mt-3">
                         <p className="text-xs font-bold text-amber-800">
-                          This Entry Pass has already been used for entry.
-                          {attStatus.att && (attStatus.att as any).attendedAt || attStatus.att.checkedInAt && (
-                             <span className="block mt-1">Checked in at: {new Date((attStatus.att as any).attendedAt || attStatus.att.checkedInAt).toLocaleString()}</span>
-                          )}
+                          This Entry Pass has already been fully used for entry.
                         </p>
                       </div>
                     )}
 
-                    {isApproved && !isUtilized && (
-                      <div className="mt-4 pt-3 border-t border-emerald-200/50">
+                    {showCheckboxes && (
+                      <div className="mt-4 pt-4 border-t border-emerald-200/50 space-y-4">
+                        <div className="flex justify-between items-center mb-4 p-3 bg-white/60 rounded-xl border border-stone-200">
+                          <div className="text-center">
+                            <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Registered</p>
+                            <p className="text-lg font-black text-stone-900">{scannedReg.totalParticipants}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Entered</p>
+                            <p className="text-lg font-black text-emerald-700">{alreadyArrived.length}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Remaining</p>
+                            <p className="text-lg font-black text-amber-700">{(scannedReg.totalParticipants || 0) - alreadyArrived.length}</p>
+                          </div>
+                        </div>
+
+                        <p className="text-xs font-bold text-stone-600 mb-2">Select who has arrived:</p>
+                        {adults.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Adults — {adults.length}</p>
+                            {adults.map(p => {
+                              const arrived = alreadyArrived.includes(p.name);
+                              return (
+                                <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
+                                  <input 
+                                    type="checkbox" 
+                                    disabled={arrived}
+                                    checked={arrived || selectedParticipants[p.name] || false}
+                                    onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
+                                    className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                                  />
+                                  <span className="text-xs font-bold text-stone-800">{p.name}</span>
+                                  {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {children.length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Children — {children.length}</p>
+                            {children.map(p => {
+                              const arrived = alreadyArrived.includes(p.name);
+                              return (
+                                <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
+                                  <input 
+                                    type="checkbox" 
+                                    disabled={arrived}
+                                    checked={arrived || selectedParticipants[p.name] || false}
+                                    onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
+                                    className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                                  />
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-stone-800">{p.name}</span>
+                                    <span className="text-[9px] font-bold text-stone-500 uppercase">{p.category}</span>
+                                  </div>
+                                  {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
                         <button 
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || !Object.values(selectedParticipants).some(v => v)}
                           onClick={() => handleCheckIn(scannedReg)}
-                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+                          className="w-full mt-4 py-3 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer"
                         >
                           Confirm Check-In
                         </button>
                       </div>
                     )}
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-stone-200">
+                    <button 
+                      onClick={() => {
+                        setScannedReg(null);
+                        setScanInput('');
+                        setErrorMsg('');
+                        setSuccessMsg('');
+                        setSelectedParticipants({});
+                      }}
+                      className="w-full py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-sm cursor-pointer border border-stone-200"
+                    >
+                      Back to Lookup
+                    </button>
                   </div>
                 </div>
               );
@@ -522,11 +682,15 @@ export default function AttendanceWorkspace({
               const stat = getAttendanceStatus(selectedReg);
               const fam = families.find(f => f.id === selectedReg.familyId);
               const { adultsCount, childrenCount } = getCounts(selectedReg);
-
+              
+              const { adults, children } = getParticipantDetails(selectedReg);
+              const alreadyArrived = stat.arrivedNames || [];
+              const isFullyEntered = stat.checkedIn;
+              
               return (
                 <div className="p-5 border-2 border-[#0f4c2a] rounded-2xl bg-white shadow-lg relative animate-fadeIn">
                   <button 
-                    onClick={() => setSelectedReg(null)}
+                    onClick={() => { setSelectedReg(null); setSelectedParticipants({}); }}
                     className="absolute top-4 right-4 text-stone-400 hover:text-stone-800"
                   >
                     <XCircle className="w-5 h-5" />
@@ -550,7 +714,7 @@ export default function AttendanceWorkspace({
                     </div>
                     <div>
                       <span className="block text-[9px] uppercase font-bold text-stone-500">Status</span>
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${stat.color}`}>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${stat.color}`}>
                         {stat.label}
                       </span>
                     </div>
@@ -578,14 +742,77 @@ export default function AttendanceWorkspace({
                     <div className="mb-4 text-xs font-bold text-emerald-600 bg-emerald-50 p-2 rounded-lg">{successMsg}</div>
                   )}
 
-                  {!stat.checkedIn && (
-                    <button 
-                      onClick={() => handleCheckIn(selectedReg)}
-                      disabled={isSubmitting}
-                      className="w-full py-3 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
-                    >
-                      Confirm Check-In Now
-                    </button>
+                  {!isFullyEntered && (
+                    <div className="mt-4 pt-4 border-t border-stone-200 space-y-4">
+                      <div className="flex justify-between items-center mb-4 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                        <div className="text-center flex-1 border-r border-stone-200">
+                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Registered</p>
+                          <p className="text-lg font-black text-stone-900">{selectedReg.totalParticipants}</p>
+                        </div>
+                        <div className="text-center flex-1 border-r border-stone-200">
+                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Entered</p>
+                          <p className="text-lg font-black text-emerald-700">{alreadyArrived.length}</p>
+                        </div>
+                        <div className="text-center flex-1">
+                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Remaining</p>
+                          <p className="text-lg font-black text-amber-700">{(selectedReg.totalParticipants || 0) - alreadyArrived.length}</p>
+                        </div>
+                      </div>
+
+                      <p className="text-xs font-bold text-stone-600 mb-2">Select who has arrived:</p>
+                      {adults.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Adults — {adults.length}</p>
+                          {adults.map(p => {
+                            const arrived = alreadyArrived.includes(p.name);
+                            return (
+                              <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
+                                <input 
+                                  type="checkbox" 
+                                  disabled={arrived}
+                                  checked={arrived || selectedParticipants[p.name] || false}
+                                  onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
+                                  className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                                />
+                                <span className="text-xs font-bold text-stone-800">{p.name}</span>
+                                {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {children.length > 0 && (
+                        <div className="space-y-2 mt-4">
+                          <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Children — {children.length}</p>
+                          {children.map(p => {
+                            const arrived = alreadyArrived.includes(p.name);
+                            return (
+                              <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
+                                <input 
+                                  type="checkbox" 
+                                  disabled={arrived}
+                                  checked={arrived || selectedParticipants[p.name] || false}
+                                  onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
+                                  className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                                />
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-stone-800">{p.name}</span>
+                                  <span className="text-[9px] font-bold text-stone-500 uppercase">{p.category}</span>
+                                </div>
+                                {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <button 
+                        disabled={isSubmitting || !Object.values(selectedParticipants).some(v => v)}
+                        onClick={() => handleCheckIn(selectedReg)}
+                        className="w-full py-3 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+                      >
+                        Confirm Check-In Now
+                      </button>
+                    </div>
                   )}
                 </div>
               );
@@ -596,6 +823,7 @@ export default function AttendanceWorkspace({
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black tracking-wider text-stone-500">
                   <tr>
+                    <th className="px-3 py-3 text-center w-10">#</th>
                     <th className="px-4 py-3">Pass #</th>
                     <th className="px-4 py-3">GMK ID</th>
                     <th className="px-4 py-3">Name</th>
@@ -607,7 +835,7 @@ export default function AttendanceWorkspace({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
-                  {validRegs.map(reg => {
+                  {validRegs.map((reg, index) => {
                     const stat = getAttendanceStatus(reg);
                     const fam = families.find(f => f.id === reg.familyId);
                     const { adultsCount, childrenCount } = getCounts(reg);
@@ -620,6 +848,9 @@ export default function AttendanceWorkspace({
                         }}
                         className="hover:bg-stone-50 cursor-pointer transition-colors"
                       >
+                        <td className="px-3 py-3 font-mono font-bold text-stone-400 text-center">
+                          {index + 1}
+                        </td>
                         <td className="px-4 py-3 font-mono font-bold text-stone-600">
                           {reg.entryPassNumber || reg.id.slice(-6)}
                         </td>
@@ -696,6 +927,11 @@ export default function AttendanceWorkspace({
             </ul>
           </div>
         </div>
+      )}
+
+      {/* REGISTRATION STATUS REPORT TAB */}
+      {activeTab === ('registration_status' as any) && (
+        <AttendanceReport initialEventId={activeEvent.id} />
       )}
     </div>
   );

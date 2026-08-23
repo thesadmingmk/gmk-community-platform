@@ -528,6 +528,14 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [commExpenseDate, setCommExpenseDate] = useState('');
   const [commExpenseDesc, setCommExpenseDesc] = useState('');
   const [commExpenseAmount, setCommExpenseAmount] = useState('');
+  
+  // Sponsorship States
+  const [sponCompanyName, setSponCompanyName] = useState('');
+  const [sponAssuredAmount, setSponAssuredAmount] = useState('');
+  const [sponAmountGiven, setSponAmountGiven] = useState('');
+  const [sponPaymentMode, setSponPaymentMode] = useState('Cash');
+  const [sponRemarks, setSponRemarks] = useState('');
+
   const [activeProgForManagement, setActiveProgForManagement] = useState<string | null>(null);
   const [workingProgram, setWorkingProgram] = useState<any>(null);
   const [isEditingProgram, setIsEditingProgram] = useState(false);
@@ -3456,8 +3464,7 @@ const handleDownloadPDF = () => {
           throw new Error("Committee document could not be found.");
         }
         const latestCommittee = committeeDoc.data() as EventCommittee;
-
-        const updatedMembers = (latestCommittee.members || []).filter(m => m.residentId !== residentId);
+        const updatedMembers = (latestCommittee.members || []).filter(m => !(m.residentId === residentId && m.role === 'Lead'));
 
         // Prepare user roles updates inside transaction to avoid race conditions
         const userRolesUpdates: Array<{ ref: any; roles: string[] }> = [];
@@ -3551,9 +3558,10 @@ const handleDownloadPDF = () => {
       }
       const committeeData = committeeSnap.data() as EventCommittee;
       const currentMembers = committeeData.members || [];
+      const commVolunteers = currentMembers.filter(m => m.role === 'Volunteer');
 
-      // Check if already a volunteer or lead of this committee
-      const isAlreadyMember = currentMembers.some(m => 
+      // Check if already a volunteer of this committee
+      const isAlreadyMember = commVolunteers.some(m => 
         m.residentId === volunteer.residentId || 
         (volunteer.email && volunteer.email !== 'manual@external.com' && m.email && m.email.toLowerCase().trim() === volunteer.email.toLowerCase().trim())
       );
@@ -3622,7 +3630,7 @@ const handleDownloadPDF = () => {
         throw new Error("Committee document could not be found.");
       }
       const committeeData = committeeSnap.data() as EventCommittee;
-      const updatedMembers = (committeeData.members || []).filter(m => m.residentId !== residentId);
+      const updatedMembers = (committeeData.members || []).filter(m => !(m.residentId === residentId && m.role === 'Volunteer'));
 
       await updateDoc(committeeRef, {
         members: updatedMembers,
@@ -4426,6 +4434,95 @@ const handleDownloadPDF = () => {
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove committee expense: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Add Sponsorship Record
+  const handleAddSponsorship = async () => {
+    if (!selectedEventId || !eventFinance) {
+      setErrorMsg("Finance record not found for this event.");
+      return;
+    }
+    if (!sponCompanyName.trim()) {
+      setErrorMsg("Please enter the Company Name.");
+      return;
+    }
+    
+    const amountNum = parseFloat(sponAmountGiven);
+    const assuredNum = parseFloat(sponAssuredAmount);
+    
+    if (isNaN(amountNum) || amountNum < 0) {
+      setErrorMsg("Please enter a valid received amount.");
+      return;
+    }
+    
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    
+    try {
+      const currentSponsorships = eventFinance.sponsorshipIncome || [];
+      const newSponsorship = {
+        id: `spon_${Date.now()}`,
+        sponsorName: sponCompanyName.trim(),
+        assuredAmount: isNaN(assuredNum) ? 0 : assuredNum,
+        amount: amountNum,
+        paymentMode: sponPaymentMode,
+        date: new Date().toISOString().split('T')[0],
+        notes: sponRemarks.trim()
+      };
+      
+      const finRef = doc(db, "eventFinance", eventFinance.id);
+      await updateDoc(finRef, {
+        sponsorshipIncome: [...currentSponsorships, newSponsorship],
+        updatedAt: new Date().toISOString()
+      });
+      
+      await createAuditLog(
+        'SPONSORSHIP_ADDED',
+        profile?.email || 'event_director',
+        'eventFinance',
+        eventFinance.id,
+        `Added sponsorship from '${sponCompanyName.trim()}' for OMR ${amountNum.toFixed(3)}.`
+      );
+      
+      setSuccessMsg(`✓ Successfully recorded sponsorship from ${sponCompanyName.trim()}.`);
+      
+      // Reset form
+      setSponCompanyName('');
+      setSponAssuredAmount('');
+      setSponAmountGiven('');
+      setSponPaymentMode('Cash');
+      setSponRemarks('');
+      
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to add sponsorship: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRemoveSponsorship = async (sponId: string) => {
+    if (!eventFinance) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const updatedSponsorships = (eventFinance.sponsorshipIncome || []).filter((s: any) => s.id !== sponId);
+      
+      const finRef = doc(db, "eventFinance", eventFinance.id);
+      await updateDoc(finRef, {
+        sponsorshipIncome: updatedSponsorships,
+        updatedAt: new Date().toISOString()
+      });
+      
+      setSuccessMsg(`✓ Sponsorship removed successfully.`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg("Failed to remove sponsorship: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -7661,6 +7758,7 @@ const handleDownloadPDF = () => {
                     const isFinanceComm = activeCommitteeToConfigure.toLowerCase().includes('finance');
                     const isFoodComm = activeCommitteeToConfigure.toLowerCase().includes('food');
                     const isAttendanceComm = activeCommitteeToConfigure.toLowerCase().includes('attendance');
+                    const isSponsorshipComm = activeCommitteeToConfigure.toLowerCase().includes('sponsorship');
 
                     return (
                       <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-6 animate-fadeIn">
@@ -7722,8 +7820,8 @@ const handleDownloadPDF = () => {
                               <div className="space-y-2">
                                 <h5 className="text-[10px] uppercase font-black text-stone-600 tracking-wider">Assigned Committee Leads</h5>
                                 {commLeads.length === 0 ? (
-                                  <p className="text-xs text-stone-500 italic font-bold p-3 bg-white border border-dashed border-stone-200 rounded-xl text-center">
-                                    No leads assigned yet. Use search below to appoint leads.
+                                  <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                    No leads assigned yet.
                                   </p>
                                 ) : (
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -7757,7 +7855,7 @@ const handleDownloadPDF = () => {
                                     value={workspaceSearchQuery}
                                     onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
                                     placeholder="Search resident name, flat number, or spouse..."
-                                    className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                    className="w-full pl-9 pr-3 py-2.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
                                   />
                                 </div>
                                 {workspaceSearchQuery && (
@@ -7768,8 +7866,7 @@ const handleDownloadPDF = () => {
                                       const query = workspaceSearchQuery.toLowerCase().trim();
                                       const spouseMem = familyMembers.find(m => m.familyId === `fam_${r.gmkId}` && m.relationship === 'spouse');
                                       const famDoc = families.find(f => f.primaryMemberGmkId === r.gmkId);
-                                      const rawSpouseName = spouseMem?.name || famDoc?.spouseName;
-const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
+                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
                                       return r.fullName?.toLowerCase().includes(query) || 
                                              r.displayUnitNumber?.toLowerCase().includes(query) || 
                                              r.phone?.toLowerCase().includes(query) || 
@@ -7778,8 +7875,7 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                     }).map(res => {
                                       const spouseMem = familyMembers.find(m => m.familyId === `fam_${res.gmkId}` && m.relationship === 'spouse');
                                       const famDoc = families.find(f => f.primaryMemberGmkId === res.gmkId);
-                                       const rawSpouseName = spouseMem?.name || famDoc?.spouseName;
-const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
+                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
                                       const spouseEmail = spouseMem?.email || famDoc?.spouseEmail || res.email;
                                       const spousePhone = spouseMem?.phone || famDoc?.spousePhone || res.phone;
 
@@ -7846,8 +7942,8 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   </span>
                                 </div>
                                 {commVolunteers.length === 0 ? (
-                                  <p className="text-xs text-stone-500 italic font-bold p-3 bg-white border border-dashed border-stone-200 rounded-xl text-center">
-                                    No volunteers added to {activeCommitteeToConfigure} Committee yet. Use the tool below to recruit volunteers.
+                                  <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                    No volunteers added to {activeCommitteeToConfigure} Committee yet.
                                   </p>
                                 ) : (
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -7887,24 +7983,24 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   Add Volunteer to {activeCommitteeToConfigure} Committee
                                 </h5>
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                  <div className="md:col-span-2 relative">
-                                    <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#0f4c2a]" />
-                                    <input
-                                      type="text"
-                                      value={workspaceVolSearchQuery}
-                                      onChange={(e) => setWorkspaceVolSearchQuery(e.target.value)}
-                                      placeholder="Search resident or family member name / flat / phone..."
-                                      className="w-full pl-9 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
-                                    />
-                                  </div>
+                                <div className="space-y-2">
                                   <div>
                                     <input
                                       type="text"
                                       value={workspaceVolRoleInput}
                                       onChange={(e) => setWorkspaceVolRoleInput(e.target.value)}
                                       placeholder="Volunteer Duty / Role (e.g. Stage Setup)"
-                                      className="w-full px-3 py-1.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                      className="w-full px-3 py-2.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="relative">
+                                    <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-[#0f4c2a]" />
+                                    <input
+                                      type="text"
+                                      value={workspaceVolSearchQuery}
+                                      onChange={(e) => setWorkspaceVolSearchQuery(e.target.value)}
+                                      placeholder="Search resident or family member name / flat / phone..."
+                                      className="w-full pl-9 pr-3 py-2.5 font-bold bg-white border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
                                     />
                                   </div>
                                 </div>
@@ -8082,82 +8178,137 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                 </button>
                               </div>
                               </div>
-                              {foodTab === 'events' && (
-                                <div className="space-y-5 animate-fadeIn">
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-left">
-                                      <span className="text-[9px] uppercase font-bold text-emerald-800 block">Approved Households</span>
-                                      <span className="text-lg font-black font-mono text-[#0f4c2a] mt-0.5 block">{approvedRegs.length}</span>
-                                    </div>
-                                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-left">
-                                      <span className="text-[9px] uppercase font-bold text-emerald-800 block">Total Approved Meals</span>
-                                      <span className="text-lg font-black font-mono text-[#0f4c2a] mt-0.5 block">{totalApprovedMeals}</span>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2 text-left">
+                              {foodTab === 'events' && (() => {
+                                const preEventCounts = { adults: 0, k0_3: 0, k4_9: 0, k10: 0 };
+                                const eventCounts = { adults: 0, k0_3: 0, k4_9: 0, k10: 0 };
+                                
+                                const currentYear = new Date().getFullYear();
+
+                                // Pre-Event calculation based on approvedRegs
+                                approvedRegs.forEach(reg => {
+                                  const fam = families.find(f => f.id === reg.familyId);
+                                  const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+                                  const participants = reg.participants || [];
+                                  
+                                  participants.forEach(name => {
+                                    let category = 'Adult';
+                                    let age = 30; // default adult
+                                    
+                                    const isPrimary = (name.trim().toLowerCase() === (fam?.fullName || reg.primaryMemberEmail).trim().toLowerCase());
+                                    if (isPrimary) {
+                                      category = 'Adult';
+                                    } else {
+                                      const mem = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
+                                      if (mem && mem.relationship === 'child') {
+                                        if (mem.yearOfBirth) {
+                                          const yob = parseInt(mem.yearOfBirth);
+                                          if (!isNaN(yob)) {
+                                            age = currentYear - yob;
+                                            if (age <= 3) category = 'Kids 0-3';
+                                            else if (age <= 9) category = 'Kids 4-9';
+                                            else if (age < 18) category = 'Kids 10+';
+                                            else category = 'Adult'; 
+                                          } else {
+                                            category = 'Kids 10+'; 
+                                          }
+                                        } else {
+                                          category = 'Kids 10+';
+                                        }
+                                      }
+                                    }
+                                    
+                                    if (category === 'Adult') preEventCounts.adults++;
+                                    else if (category === 'Kids 0-3') preEventCounts.k0_3++;
+                                    else if (category === 'Kids 4-9') preEventCounts.k4_9++;
+                                    else if (category === 'Kids 10+') preEventCounts.k10++;
+                                  });
+                                  
+                                  const externalCount = (reg.totalParticipants || 0) - participants.length;
+                                  if (externalCount > 0) {
+                                    preEventCounts.adults += externalCount;
+                                  }
+                                });
+
+                                // Event calculation based on actual gate entries
+                                activeAttendances.forEach(att => {
+                                  const details = (att as any).arrivedDetails || [];
+                                  details.forEach((p: any) => {
+                                    if (p.category === 'Adult') eventCounts.adults++;
+                                    else if (p.category === 'Kids 0-3') eventCounts.k0_3++;
+                                    else if (p.category === 'Kids 4-9') eventCounts.k4_9++;
+                                    else if (p.category === 'Kids 10+') eventCounts.k10++;
+                                    else eventCounts.adults++; // fallback
+                                  });
+                                });
+
+                                const preTotal = preEventCounts.adults + preEventCounts.k0_3 + preEventCounts.k4_9 + preEventCounts.k10;
+                                const eventTotal = eventCounts.adults + eventCounts.k0_3 + eventCounts.k4_9 + eventCounts.k10;
+
+                                return (
+                                  <div className="space-y-6 animate-fadeIn text-left">
                                     <div className="flex items-center justify-between">
-                                      <h5 className="text-xs font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
-                                        <Check className="w-4 h-4 text-emerald-600" />
-                                        <span>Finance Approved Food List ({approvedRegs.length})</span>
+                                      <h5 className="text-sm font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-2">
+                                        <span>Food Headcount</span>
                                       </h5>
                                     </div>
-                                    {approvedRegs.length === 0 ? (
-                                      <div className="p-6 text-center text-stone-450 italic font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl">
-                                        No registrations have been financially approved for food coupons yet.
+                                    <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider mb-2">Pre-event approved registrations vs actual gate entries</p>
+                                    
+                                    <div className="flex space-x-4 mb-4">
+                                      <div className="bg-stone-50 border border-stone-200 rounded-lg px-4 py-2">
+                                        <span className="block text-[9px] uppercase font-bold text-stone-500">Expected</span>
+                                        <span className="block text-lg font-black text-stone-900">{preTotal}</span>
                                       </div>
-                                    ) : (
-                                      <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white shadow-xs">
-                                        <table className="w-full text-left border-collapse">
-                                          <thead>
-                                            <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
-                                              <th className="p-3">Primary Registrant</th>
-                                              <th className="p-3">Flat #</th>
-                                              <th className="p-3 text-center">Meals</th>
-                                              <th className="p-3">Children Information</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-stone-150 text-stone-800 font-bold font-sans text-xs">
-                                            {approvedRegs.map(reg => {
-                                              const fam = families.find(f => f.id === reg.familyId);
-                                              const pName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
-                                              const unit = fam ? fam.displayUnitNumber : 'Unknown';
-                                              const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
-                                              const childrenList = famMembers.filter(m => m.relationship === 'child' && (reg.participants || []).some(p => p.toLowerCase().trim() === m.name.toLowerCase().trim()));
-                                              
-                                              return (
-                                                <tr key={reg.id} className="hover:bg-emerald-50/20">
-                                                  <td className="p-3">
-                                                    <span className="text-stone-900 font-black block">{pName}</span>
-                                                  </td>
-                                                  <td className="p-3 font-mono font-bold text-emerald-800">{unit}</td>
-                                                  <td className="p-3 text-center font-mono font-black text-base text-[#0f4c2a]">
-                                                    {reg.totalParticipants || 1}
-                                                  </td>
-                                                  <td className="p-3">
-                                                    {childrenList.length > 0 ? (
-                                                      <div className="space-y-1">
-                                                        <span className="text-[10px] font-black uppercase text-stone-500 block">Children: {childrenList.length}</span>
-                                                        <ul className="list-disc pl-4 text-[10px] text-stone-700">
-                                                          {childrenList.map((c, i) => {
-                                                            const age = c.yearOfBirth ? new Date().getFullYear() - parseInt(c.yearOfBirth, 10) : 'Age Unknown';
-                                                            return <li key={i}>{c.name} — {age} years</li>;
-                                                          })}
-                                                        </ul>
-                                                      </div>
-                                                    ) : (
-                                                      <span className="text-[10px] text-stone-400 italic">No registered children</span>
-                                                    )}
-                                                  </td>
-                                                </tr>
-                                              );
-                                            })}
-                                          </tbody>
-                                        </table>
+                                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">
+                                        <span className="block text-[9px] uppercase font-bold text-emerald-800">Entered</span>
+                                        <span className="block text-lg font-black text-[#0f4c2a]">{eventTotal}</span>
                                       </div>
-                                    )}
+                                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+                                        <span className="block text-[9px] uppercase font-bold text-amber-800">Remaining</span>
+                                        <span className="block text-lg font-black text-amber-900">{Math.max(0, preTotal - eventTotal)}</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="overflow-x-auto border border-stone-200 rounded-xl bg-white shadow-xs max-w-lg">
+                                      <table className="w-full text-left border-collapse">
+                                        <thead>
+                                          <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
+                                            <th className="p-3">Category</th>
+                                            <th className="p-3 text-center">Pre-Event</th>
+                                            <th className="p-3 text-center">Event</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-stone-150 text-stone-800 font-bold text-xs">
+                                          <tr className="hover:bg-stone-50">
+                                            <td className="p-3">Adults</td>
+                                            <td className="p-3 text-center font-mono">{preEventCounts.adults}</td>
+                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.adults}</td>
+                                          </tr>
+                                          <tr className="hover:bg-stone-50">
+                                            <td className="p-3">Kids 0–3</td>
+                                            <td className="p-3 text-center font-mono">{preEventCounts.k0_3}</td>
+                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k0_3}</td>
+                                          </tr>
+                                          <tr className="hover:bg-stone-50">
+                                            <td className="p-3">Kids 4–9</td>
+                                            <td className="p-3 text-center font-mono">{preEventCounts.k4_9}</td>
+                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k4_9}</td>
+                                          </tr>
+                                          <tr className="hover:bg-stone-50">
+                                            <td className="p-3">Kids 10+</td>
+                                            <td className="p-3 text-center font-mono">{preEventCounts.k10}</td>
+                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k10}</td>
+                                          </tr>
+                                          <tr className="bg-stone-100 border-t-2 border-stone-200">
+                                            <td className="p-3 font-black uppercase tracking-wider">Total</td>
+                                            <td className="p-3 text-center font-mono font-black">{preTotal}</td>
+                                            <td className="p-3 text-center font-mono font-black text-[#0f4c2a]">{eventTotal}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                );
+                              })()}
                             </div>
                           );
                         })()}
@@ -8218,6 +8369,111 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                           </div>
                         )}
 
+                        {isSponsorshipComm && (
+                          <div className="pt-4 border-t border-stone-100 space-y-4 text-left">
+                            <h5 className="text-xs uppercase font-black text-[#0f4c2a] tracking-wider font-heading">
+                              Sponsorship Intake
+                            </h5>
+                            <div className="bg-stone-50 border border-stone-200 rounded-xl p-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Company Name <span className="text-rose-600">*</span></label>
+                                  <input
+                                    type="text"
+                                    value={sponCompanyName}
+                                    onChange={(e) => setSponCompanyName(e.target.value)}
+                                    placeholder="e.g. Acme Corp"
+                                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-blue-600"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Payment Mode</label>
+                                  <select
+                                    value={sponPaymentMode}
+                                    onChange={(e) => setSponPaymentMode(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-blue-600"
+                                  >
+                                    <option value="Cash">Cash</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="Cheque">Cheque</option>
+                                    <option value="In-Kind">In-Kind</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Assured Amount (OMR)</label>
+                                  <input
+                                    type="number"
+                                    value={sponAssuredAmount}
+                                    onChange={(e) => setSponAssuredAmount(e.target.value)}
+                                    placeholder="0.000"
+                                    step="0.1"
+                                    min="0"
+                                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-blue-600"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Amount Given (OMR) <span className="text-rose-600">*</span></label>
+                                  <input
+                                    type="number"
+                                    value={sponAmountGiven}
+                                    onChange={(e) => setSponAmountGiven(e.target.value)}
+                                    placeholder="0.000"
+                                    step="0.1"
+                                    min="0"
+                                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-blue-600"
+                                  />
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Remarks</label>
+                                  <input
+                                    type="text"
+                                    value={sponRemarks}
+                                    onChange={(e) => setSponRemarks(e.target.value)}
+                                    placeholder="Notes..."
+                                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-blue-600"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={handleAddSponsorship}
+                                  disabled={isSubmitting || !sponCompanyName.trim() || !sponAmountGiven.trim()}
+                                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                                >
+                                  Record Sponsorship
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {(eventFinance?.sponsorshipIncome || []).length > 0 && (
+                              <div className="mt-4">
+                                <h5 className="text-[10px] uppercase font-black text-stone-500 tracking-wider mb-2">Recorded Sponsorships</h5>
+                                <div className="space-y-2">
+                                  {(eventFinance?.sponsorshipIncome || []).map((spon: any, idx: number) => (
+                                    <div key={spon.id || idx} className="bg-white border border-stone-200 p-3 rounded-lg flex items-center justify-between">
+                                      <div>
+                                        <div className="text-xs font-bold text-stone-900">{spon.sponsorName} <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 uppercase">{spon.paymentMode || 'Cash'}</span></div>
+                                        <div className="text-[10px] text-stone-500 mt-0.5">Assured: OMR {(Number(spon.assuredAmount) || Number(spon.amount) || 0).toFixed(3)} | Given: OMR {(Number(spon.amount) || 0).toFixed(3)}</div>
+                                        {spon.notes && <div className="text-[10px] text-stone-400 italic mt-0.5">{spon.notes}</div>}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={isSubmitting}
+                                        onClick={() => handleRemoveSponsorship(spon.id)}
+                                        className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Remove Sponsorship"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {!isFinanceComm && (!isFoodComm || foodTab === 'expenses') && (!isAttendanceComm || attendanceTab === 'expenses') && (
                           <div className="pt-4 border-t border-stone-100 space-y-4 text-left">
                             <div className="flex items-center justify-between">
@@ -8235,8 +8491,8 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                             </div>
 
                             {(currentComm?.expenses || []).length === 0 ? (
-                              <p className="text-xs text-stone-500 italic font-bold p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center">
-                                No expenses recorded for this committee yet. Use the form below to log an expense.
+                              <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                No expenses recorded for this committee yet.
                               </p>
                             ) : (
                               <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150 bg-white">
@@ -8758,9 +9014,9 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   </div>
 
                                   {coordinators.length === 0 ? (
-                                    <div className="p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center text-xs text-stone-500 font-bold">
-                                      No coordinators assigned. Search below to add a coordinator.
-                                    </div>
+                                    <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                      No coordinators assigned.
+                                    </p>
                                   ) : (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                       {coordinators.map(coord => (
@@ -8792,7 +9048,7 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                         value={progCoordSearchQuery}
                                         onChange={(e) => setProgCoordSearchQuery(e.target.value)}
                                         placeholder="Search members to add as coordinator..."
-                                        className="w-full pl-8 pr-3 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        className="w-full pl-8 pr-3 py-2.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
                                       />
                                     </div>
 
@@ -8844,9 +9100,9 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   </div>
 
                                   {volunteers.length === 0 ? (
-                                    <div className="p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center text-xs text-stone-500 font-bold">
-                                      No volunteers assigned yet. Search below to add volunteers.
-                                    </div>
+                                    <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                      No volunteers assigned yet.
+                                    </p>
                                   ) : (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                       {volunteers.map(vol => (
@@ -8871,24 +9127,24 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   {/* Search & Add Volunteer */}
                                   {isEditingProgram && (
                                   <div className="space-y-2 pt-1">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                      <div className="sm:col-span-2 relative">
-                                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-stone-400" />
-                                        <input
-                                          type="text"
-                                          value={progVolSearchQuery}
-                                          onChange={(e) => setProgVolSearchQuery(e.target.value)}
-                                          placeholder="Search members to add as volunteer..."
-                                          className="w-full pl-8 pr-3 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                        />
-                                      </div>
+                                    <div className="space-y-2">
                                       <div>
                                         <input
                                           type="text"
                                           value={progVolRoleInput}
                                           onChange={(e) => setProgVolRoleInput(e.target.value)}
                                           placeholder="Role (e.g. Stage Setup)"
-                                          className="w-full px-3 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                          className="w-full px-3 py-2.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        />
+                                      </div>
+                                      <div className="relative">
+                                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-stone-400" />
+                                        <input
+                                          type="text"
+                                          value={progVolSearchQuery}
+                                          onChange={(e) => setProgVolSearchQuery(e.target.value)}
+                                          placeholder="Search members to add as volunteer..."
+                                          className="w-full pl-8 pr-3 py-2.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
                                         />
                                       </div>
                                     </div>
@@ -9011,9 +9267,9 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   </div>
 
                                   {participants.length === 0 ? (
-                                    <div className="p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center text-xs text-stone-500 font-bold">
-                                      No participants enrolled yet. Use search below to enroll community residents or children.
-                                    </div>
+                                    <p className="text-[11px] text-stone-500 italic font-bold mb-2">
+                                      No participants enrolled yet.
+                                    </p>
                                   ) : (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                       {participants.map(part => {
@@ -9084,7 +9340,7 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                         value={progParticipantSearchQuery}
                                         onChange={(e) => setProgParticipantSearchQuery(e.target.value)}
                                         placeholder={`Search residents or children for ${prog.programType || prog.category || 'Adults'} program...`}
-                                        className="w-full pl-8 pr-3 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        className="w-full pl-8 pr-3 py-2.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
                                       />
                                     </div>
 
@@ -9179,9 +9435,9 @@ const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                   </div>
 
                                   {expenses.length === 0 ? (
-                                    <div className="p-3 bg-stone-50 border border-dashed border-stone-200 rounded-xl text-center text-xs text-stone-500 font-bold">
+                                    <p className="text-[11px] text-stone-500 italic font-bold mb-2">
                                       No expenses recorded for this program yet.
-                                    </div>
+                                    </p>
                                   ) : (
                                     <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150 bg-white">
                                       <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
