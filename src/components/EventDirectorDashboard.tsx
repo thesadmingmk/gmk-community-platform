@@ -7866,7 +7866,8 @@ const handleDownloadPDF = () => {
                                       const query = workspaceSearchQuery.toLowerCase().trim();
                                       const spouseMem = familyMembers.find(m => m.familyId === `fam_${r.gmkId}` && m.relationship === 'spouse');
                                       const famDoc = families.find(f => f.primaryMemberGmkId === r.gmkId);
-                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
+                                      const rawSpouseName = spouseMem?.name || famDoc?.spouseName;
+                                      const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                       return r.fullName?.toLowerCase().includes(query) || 
                                              r.displayUnitNumber?.toLowerCase().includes(query) || 
                                              r.phone?.toLowerCase().includes(query) || 
@@ -7875,7 +7876,8 @@ const handleDownloadPDF = () => {
                                     }).map(res => {
                                       const spouseMem = familyMembers.find(m => m.familyId === `fam_${res.gmkId}` && m.relationship === 'spouse');
                                       const famDoc = families.find(f => f.primaryMemberGmkId === res.gmkId);
-                                      const spouseName = spouseMem?.name || famDoc?.spouseName;
+                                      const rawSpouseName = spouseMem?.name || famDoc?.spouseName;
+                                      const spouseName = typeof rawSpouseName === 'string' ? rawSpouseName : '';
                                       const spouseEmail = spouseMem?.email || famDoc?.spouseEmail || res.email;
                                       const spousePhone = spouseMem?.phone || famDoc?.spousePhone || res.phone;
 

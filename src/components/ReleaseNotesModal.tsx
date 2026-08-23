@@ -19,6 +19,22 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.5",
+    title: "Sponsorship & Finance Integration, Attendance Workflow Enhancements",
+    releaseDate: "2026-08-23",
+    author: "Core Platform Team",
+    notes: [
+      "Sponsorship Committee recording and Finance income integration",
+      "Finance Income dashboard summary and drill-down",
+      "Registration PAID/PENDING display correction",
+      "Attendance Gate Pass / QR entry verification",
+      "GMK ID manual Gate Pass lookup",
+      "Partial household attendance/check-in",
+      "Food Committee aggregate headcount dashboard",
+      "BACK TO LOOKUP for Attendance Gate Pass"
+    ]
+  },
+  {
     version: "v1.5.4",
     title: "Standardized Event Creation, Committee Configuration & Volunteer Architecture Correction (GMK RTCO-075)",
     releaseDate: "2026-08-21",
@@ -224,11 +240,10 @@ export default function ReleaseNotesModal({ isOpen, onClose }: ReleaseNotesModal
           setNotesList(DEFAULT_NOTES);
           
           try {
-            await setDoc(doc(db, "releaseNotes", "v1_0_0"), DEFAULT_NOTES[4]);
-            await setDoc(doc(db, "releaseNotes", "v1_1_0"), DEFAULT_NOTES[3]);
-            await setDoc(doc(db, "releaseNotes", "v1_2_0"), DEFAULT_NOTES[2]);
-            await setDoc(doc(db, "releaseNotes", "v1_3_0"), DEFAULT_NOTES[1]);
-            await setDoc(doc(db, "releaseNotes", "v1_4_0"), DEFAULT_NOTES[0]);
+            await Promise.all(DEFAULT_NOTES.map(note => {
+              const docId = note.version.replace(/\./g, '_');
+              return setDoc(doc(db, "releaseNotes", docId), note);
+            }));
             console.log("🌱 Successfully seeded default release notes to Firestore.");
           } catch (err) {
             console.log("ℹ️ Skipping auto-seed: ", err);
