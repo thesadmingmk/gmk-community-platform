@@ -1,5 +1,7 @@
 export interface UserProfile {
   uid: string;
+  categoryId?: string;
+  categoryName?: string;
   email: string;
   roles: string[];
   isActive: boolean;
@@ -117,6 +119,7 @@ export interface CommunityEvent {
   Poster?: string;
   Thumbnail?: string;
   Venue?: string;
+  committeeNeeded?: boolean;
   registrationSettings?: any;
   configurationStatus?: string;
   paymentTransferAccounts?: PaymentAccount[];
@@ -169,6 +172,7 @@ export interface EventRegistration {
   amountDue?: number;
   balanceDue?: number;
   refundDue?: number;
+  refundedAmount?: number;
   financeRemarks?: string;
   paymentProcessedAt?: string;
   paymentProcessedBy?: string;
@@ -327,13 +331,55 @@ export interface EventCommitteeMember {
   dutyRole?: string;
 }
 
+export interface EventCommitteeExpenseRefund {
+  refundId: string;
+  voucherNumber?: string;
+  amount: number;
+  date: string;
+  refundedBy: string;
+  refundMethod?: string;
+  referenceNumber?: string;
+  remarks?: string;
+}
+
 export interface EventCommitteeExpense {
   id: string;
+  categoryId?: string;
+  categoryName?: string;
   date: string;
   description: string;
   amount: number;
   createdAt: string;
   createdBy?: string;
+  payee?: string;
+  paidByType?: 'event_treasury' | 'event_direct' | 'resident' | 'sponsor';
+  isPersonalPayment?: boolean;
+  paidByResidentId?: string; // GMK ID e.g. GMK-001234
+  paidByName?: string;       // Full name of resident or sponsor
+  paidByUnit?: string;       // Display unit number
+  paidByPhone?: string;
+  paidByEmail?: string;
+  paidBySponsorId?: string;  // Sponsor ID from eventFinance.sponsorshipIncome
+  payableStatus?: 'pending' | 'partially_refunded' | 'refunded';
+  refundedAmount?: number;
+  refundHistory?: EventCommitteeExpenseRefund[];
+  financeStatus?: 'pending' | 'accepted' | 'rejected';
+  acceptedAt?: string;
+  acceptedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
+  rejectionReason?: string;
+  resubmittedAt?: string;
+  resubmittedBy?: string;
+  settlementStatus?: 'pending' | 'settled';
+  settledAt?: string;
+  settledBy?: string;
+  settlementRemarks?: string;
+  settlementMethod?: string;
+  settlementReference?: string;
+  createdScope?: 'finance' | 'committee';
+  lastEditedBy?: string;
+  lastEditedAt?: string;
 }
 
 export interface EventCommittee {
@@ -462,3 +508,11 @@ export interface EventCommunication {
   updatedAt: string;
 }
 
+
+export interface SponsorMaster {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}

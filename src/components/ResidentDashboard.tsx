@@ -22,6 +22,7 @@ import ProfessionalSearch from './resident/ProfessionalSearch';
 import AdminDashboard from './AdminDashboard';
 import GovernancePanel from './GovernancePanel';
 import EventDirectorDashboard from './EventDirectorDashboard';
+import ChangePasswordModal from './resident/ChangePasswordModal';
 import { normalizeName } from '../utils/nameNormalization';
 import { NotificationService } from '../services/NotificationService';
 
@@ -41,7 +42,8 @@ import {
   Clock,
   X,
   Check,
-  Edit
+  Edit,
+  Lock
 } from 'lucide-react';
 
 export default function ResidentDashboard({ activeEmail }: { activeEmail: string }) {
@@ -69,6 +71,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
   // Page level state
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const effectiveProfile = residentProfile;
 
@@ -727,6 +730,33 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
             </GMKCard>
           )}
 
+          {/* Account Security GMKCard */}
+          <GMKCard className="space-y-4">
+            <h4 className="text-xs font-extrabold text-[#0f4c2a] uppercase tracking-wider flex items-center space-x-1.5 font-heading border-b border-stone-100 pb-3">
+              <Lock className="w-4 h-4 text-[#d4af37]" />
+              <span>Account Security</span>
+            </h4>
+            <div className="flex items-center justify-between p-4 bg-stone-50 border border-stone-150 rounded-2xl">
+              <div>
+                <span className="text-stone-900 font-extrabold text-xs block">Firebase Authentication</span>
+                <span className="text-stone-600 text-[10px] font-semibold mt-1 block max-w-sm">
+                  Manage your secure login credentials. Your password is encrypted and authenticated directly via Firebase identity services.
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <GMKButton
+                  variant="outline"
+                  size="md"
+                  onClick={() => setIsChangePasswordOpen(true)}
+                  className="flex items-center space-x-2 font-bold shadow-sm px-4 py-2 text-xs rounded-xl"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Change Password</span>
+                </GMKButton>
+              </div>
+            </div>
+          </GMKCard>
+
         </div>
       )}
 
@@ -757,6 +787,13 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
       {activeTab === 'governance' && (profile?.roles.includes('president') || profile?.roles.includes('vp') || profile?.roles.includes('vice_president')) && (
         <GovernancePanel activeEmail={effectiveProfile.email} />
       )}
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal 
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        userEmail={effectiveProfile.email}
+      />
 
       {viewingEventDetails && (() => {
         const reg = registrations.find(r => r.eventId === viewingEventDetails.id);

@@ -10,7 +10,7 @@ import {
   where 
 } from 'firebase/firestore';
 import { db } from '../context/AuthContext';
-import { ResidentProfile, UserProfile, GovernanceAssignment, CommunityEvent, AuditLog } from '../types';
+import { ResidentProfile, UserProfile, GovernanceAssignment, CommunityEvent, AuditLog, Family, FamilyMember } from '../types';
 import { validateGovernanceAssignment } from '../utils/governanceExclusivity';
 import { NotificationService } from '../services/NotificationService';
 import { GMKCard, GMKBadge, GMKPageHeader } from './gmk/DesignSystem';
@@ -88,6 +88,9 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
   const [selectedCommitteeGmkId, setSelectedCommitteeGmkId] = useState('');
   const [selectedCommittee, setSelectedCommittee] = useState('');
   const [committeeRemarks, setCommitteeRemarks] = useState('');
+  const [leadAssigneeType, setLeadAssigneeType] = useState<'primary' | 'spouse'>('primary');
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
 
   // Finances Submissions State
   const [newStmtTitle, setNewStmtTitle] = useState('');
@@ -247,6 +250,34 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       }
     );
 
+    const unsubFamilies = onSnapshot(
+      collection(db, "families"),
+      (snapshot) => {
+        const list: Family[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Family);
+        });
+        setFamilies(list);
+      },
+      (err) => {
+        console.error("❌ GovernancePanel Families Snapshot Error:", err);
+      }
+    );
+
+    const unsubFamilyMembers = onSnapshot(
+      collection(db, "familyMembers"),
+      (snapshot) => {
+        const list: FamilyMember[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as FamilyMember);
+        });
+        setFamilyMembers(list);
+      },
+      (err) => {
+        console.error("❌ GovernancePanel FamilyMembers Snapshot Error:", err);
+      }
+    );
+
     return () => {
       unsubResidents();
       unsubUsers();
@@ -256,6 +287,8 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       unsubAudit();
       unsubBalance();
       unsubStatements();
+      unsubFamilies();
+      unsubFamilyMembers();
     };
   }, []);
 
@@ -493,12 +526,21 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
 
     const normEmail = targetRes.email.toLowerCase().trim();
 
+    // Check spouse details if spouse is selected (RTCO-074 Feature 2B)
+    const isSpouseSelected = leadAssigneeType === 'spouse';
+    const spouseMember = familyMembers.find(m => m.familyId === `fam_${targetRes.gmkId}` && m.relationship === 'spouse');
+    const targetFam = families.find(f => f.primaryMemberGmkId === targetRes.gmkId);
+    const spouseName = spouseMember?.name || targetFam?.spouseName;
+    const finalLeadName = isSpouseSelected && spouseName ? spouseName : targetRes.fullName;
+    const finalLeadId = isSpouseSelected && spouseName ? `mem_${targetRes.gmkId}_spouse` : targetRes.gmkId;
+    const finalLeadEmail = isSpouseSelected && spouseMember?.email ? spouseMember.email.toLowerCase().trim() : normEmail;
+
     // Exclusivity Checks: Cannot hold another governance role (Admin, Super Admin, President, VP, Event Director)
-    const holdsGovRole = govAssignments.some(ra => (ra.gmkId === targetRes.gmkId || ra.email === normEmail)) ||
-                        roleAssignments.some(ra => (ra.gmkId === targetRes.gmkId || ra.email === normEmail));
+    const holdsGovRole = govAssignments.some(ra => (ra.gmkId === finalLeadId || ra.gmkId === targetRes.gmkId || ra.email === finalLeadEmail)) ||
+                        roleAssignments.some(ra => (ra.gmkId === finalLeadId || ra.gmkId === targetRes.gmkId || ra.email === finalLeadEmail));
 
     if (holdsGovRole) {
-      setErrorMsg(`REJECTED: '${targetRes.fullName}' already holds a governance position. Under GOV-01A safeguards, governance stakeholders may hold exactly one governance role simultaneously.`);
+      setErrorMsg(`REJECTED: '${finalLeadName}' already holds a governance position. Under GOV-01A safeguards, governance stakeholders may hold exactly one governance role simultaneously.`);
       return;
     }
 
@@ -514,16 +556,19 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       
       let safeCommitteeKey = cType;
       if (safeCommitteeKey === 'events_&_programs' || safeCommitteeKey === 'programs') safeCommitteeKey = 'program';
-      const assignmentId = `${targetRes.gmkId}_committee_lead_${safeCommitteeKey}`;
-      const emailAssignmentId = `${normEmail}_committee_lead_${safeCommitteeKey}`;
+      const assignmentId = `${finalLeadId}_committee_lead_${safeCommitteeKey}`;
+      const emailAssignmentId = `${finalLeadEmail}_committee_lead_${safeCommitteeKey}`;
 
       const roleDocRef = doc(db, "roleAssignments", assignmentId);
       const roleEmailDocRef = doc(db, "roleAssignments", emailAssignmentId);
 
       const payload = {
         id: assignmentId,
-        gmkId: targetRes.gmkId,
-        email: normEmail,
+        gmkId: finalLeadId,
+        primaryGmkId: targetRes.gmkId,
+        fullName: finalLeadName,
+        isSpouse: isSpouseSelected,
+        email: finalLeadEmail,
         position: 'committee_lead',
         role: 'committee_lead',
         committee: selectedCommittee,
@@ -540,8 +585,8 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
       await setDoc(roleDocRef, payload);
       await setDoc(roleEmailDocRef, emailPayload);
 
-      // Sync to User roles
-      const userQ = query(collection(db, "users"), where("email", "==", normEmail));
+      // Sync to User roles if user doc exists
+      const userQ = query(collection(db, "users"), where("email", "==", finalLeadEmail));
       const userSnap = await getDocs(userQ);
       for (const uDoc of userSnap.docs) {
         const currentRoles: string[] = uDoc.data().roles || [];
@@ -557,15 +602,16 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
         action: 'CREATE_COMMITTEE_LEAD',
         actorEmail: activeEmail,
         entityType: 'role_assignment',
-        entityId: targetRes.gmkId,
-        details: `[${authorityType}] Appointed Committee Lead: ${targetRes.fullName} (${targetRes.gmkId}) for ${selectedCommittee}. Remarks: ${committeeRemarks || 'None'}.`,
-        targetName: targetRes.fullName
+        entityId: finalLeadId,
+        details: `[${authorityType}] Appointed Committee Lead: ${finalLeadName} (${isSpouseSelected ? `Spouse of ${targetRes.fullName} - ${targetRes.gmkId}` : targetRes.gmkId}) for ${selectedCommittee}. Remarks: ${committeeRemarks || 'None'}.`,
+        targetName: finalLeadName
       });
 
-      setSuccessMsg(`✓ Successfully appointed ${targetRes.fullName} as Committee Lead for ${selectedCommittee}!`);
+      setSuccessMsg(`✓ Successfully appointed ${finalLeadName} as Committee Lead for ${selectedCommittee}!`);
       setSelectedCommitteeGmkId('');
       setSelectedCommittee('');
       setCommitteeRemarks('');
+      setLeadAssigneeType('primary');
     } catch (err: any) {
       console.error("❌ Committee Lead Appointment Failed:", err);
       setErrorMsg(`Appointment failed: ${err.message}`);
@@ -1499,30 +1545,72 @@ export default function GovernancePanel({ activeEmail }: GovernancePanelProps) {
                   {selectedCommitteeGmkId && (() => {
                     const selectedRes = residents.find(r => r.gmkId === selectedCommitteeGmkId);
                     if (!selectedRes) return null;
+                    const spouseMember = familyMembers.find(m => m.familyId === `fam_${selectedRes.gmkId}` && m.relationship === 'spouse');
+                    const targetFam = families.find(f => f.primaryMemberGmkId === selectedRes.gmkId);
+                    const spouseName = spouseMember?.name || targetFam?.spouseName;
+
                     return (
-                      <div className="bg-emerald-50/40 border border-emerald-100 rounded-xl p-3.5 space-y-2 mt-2 animate-fadeIn text-xs relative z-10">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-bold text-[#0F4C2A] text-xs">{selectedRes.fullName}</div>
-                            <div className="text-[9px] text-[#A28114] font-extrabold uppercase mt-0.5 tracking-wider font-mono">SELECTED RESIDENT</div>
+                      <div className="space-y-2 mt-2 animate-fadeIn">
+                        <div className="bg-emerald-50/40 border border-emerald-100 rounded-xl p-3.5 space-y-2 text-xs relative z-10">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="font-bold text-[#0F4C2A] text-xs">{selectedRes.fullName}</div>
+                              <div className="text-[9px] text-[#A28114] font-extrabold uppercase mt-0.5 tracking-wider font-mono">SELECTED HOUSEHOLD</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCommitteeGmkId('');
+                                setCommitteeSearchQuery('');
+                                setLeadAssigneeType('primary');
+                              }}
+                              className="text-[10px] text-rose-600 font-extrabold uppercase hover:underline cursor-pointer"
+                            >
+                              Deselect
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedCommitteeGmkId('');
-                              setCommitteeSearchQuery('');
-                            }}
-                            className="text-[10px] text-rose-600 font-extrabold uppercase hover:underline cursor-pointer"
-                          >
-                            Deselect
-                          </button>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] pt-1.5 border-t border-emerald-100/60 text-stone-600 font-semibold">
+                            <div>ID: <span className="font-bold text-stone-850">{selectedRes.gmkId}</span></div>
+                            <div>Unit: <span className="font-bold text-stone-850">{selectedRes.displayUnitNumber}</span></div>
+                            <div>Phone: <span className="font-bold text-stone-850">{selectedRes.phone}</span></div>
+                            <div>Email: <span className="font-bold text-stone-850">{selectedRes.email}</span></div>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] pt-1.5 border-t border-emerald-100/60 text-stone-600 font-semibold">
-                          <div>ID: <span className="font-bold text-stone-850">{selectedRes.gmkId}</span></div>
-                          <div>Unit: <span className="font-bold text-stone-850">{selectedRes.displayUnitNumber}</span></div>
-                          <div>Phone: <span className="font-bold text-stone-850">{selectedRes.phone}</span></div>
-                          <div>Email: <span className="font-bold text-stone-850">{selectedRes.email}</span></div>
-                        </div>
+
+                        {/* RTCO-074 Feature 2B: Spouse Selection for Committee Lead */}
+                        {spouseName && (
+                          <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2">
+                            <label className="text-stone-700 font-extrabold uppercase tracking-wider text-[9px] block">
+                              Assignee (Primary Resident or Spouse)
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setLeadAssigneeType('primary')}
+                                className={`p-2.5 rounded-lg border text-left text-xs font-bold transition-all cursor-pointer ${
+                                  leadAssigneeType === 'primary'
+                                    ? 'bg-emerald-50 border-[#0f4c2a] text-[#0f4c2a]'
+                                    : 'bg-white border-stone-250 text-stone-700 hover:bg-stone-50'
+                                }`}
+                              >
+                                <div className="text-[8px] font-black uppercase text-stone-500">Primary Resident</div>
+                                <div className="truncate">{selectedRes.fullName}</div>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setLeadAssigneeType('spouse')}
+                                className={`p-2.5 rounded-lg border text-left text-xs font-bold transition-all cursor-pointer ${
+                                  leadAssigneeType === 'spouse'
+                                    ? 'bg-emerald-50 border-[#0f4c2a] text-[#0f4c2a]'
+                                    : 'bg-white border-stone-250 text-stone-700 hover:bg-stone-50'
+                                }`}
+                              >
+                                <div className="text-[8px] font-black uppercase text-rose-600">Spouse</div>
+                                <div className="truncate">{spouseName}</div>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

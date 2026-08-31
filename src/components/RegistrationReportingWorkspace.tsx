@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Download, Filter, FileText, Search, X } from 'lucide-react';
+import { Download, Filter, FileText, Search, X, Play } from 'lucide-react';
 import { CommunityEvent, EventRegistration, Family, FamilyMember } from '../types';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -16,6 +16,20 @@ interface RegistrationReportingWorkspaceProps {
   isSubmitting?: boolean;
 }
 
+interface FilterState {
+  filterEventId: string;
+  filterRegStatus: string;
+  filterPayStatus: string;
+  filterUnit: string;
+  filterRegType: string;
+  filterPayMethod: string;
+  searchQuery: string;
+  regDateFrom: string;
+  regDateTo: string;
+  payDateFrom: string;
+  payDateTo: string;
+}
+
 export default function RegistrationReportingWorkspace({
   events,
   registrations: allRegistrations,
@@ -26,19 +40,24 @@ export default function RegistrationReportingWorkspace({
   isSubmitting
 }: RegistrationReportingWorkspaceProps) {
   const [showFilters, setShowFilters] = useState(false);
-  const [filterEventId, setFilterEventId] = useState<string>(activeEvent?.id || 'all');
-  const [filterRegStatus, setFilterRegStatus] = useState<string>('all');
-  const [filterPayStatus, setFilterPayStatus] = useState<string>('all');
-  const [filterUnit, setFilterUnit] = useState<string>('all');
-  const [filterRegType, setFilterRegType] = useState<string>('all');
-  const [filterPayMethod, setFilterPayMethod] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Date filters
-  const [regDateFrom, setRegDateFrom] = useState('');
-  const [regDateTo, setRegDateTo] = useState('');
-  const [payDateFrom, setPayDateFrom] = useState('');
-  const [payDateTo, setPayDateTo] = useState('');
+
+  const initialFilters: FilterState = {
+    filterEventId: activeEvent?.id || 'all',
+    filterRegStatus: 'all',
+    filterPayStatus: 'all',
+    filterUnit: 'all',
+    filterRegType: 'all',
+    filterPayMethod: 'all',
+    searchQuery: '',
+    regDateFrom: '',
+    regDateTo: '',
+    payDateFrom: '',
+    payDateTo: ''
+  };
+
+  // Draft filters staged in the UI vs Applied filters active on data
+  const [draftFilters, setDraftFilters] = useState<FilterState>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(initialFilters);
 
   const getDerivedStatus = (r: EventRegistration) => {
     const due = r.amountDue ?? r.paymentAmount ?? r.paymentSummary?.totalAmount ?? 0;
@@ -56,87 +75,95 @@ export default function RegistrationReportingWorkspace({
     return { due, rec, bal: Math.max(0, due - rec), status };
   };
 
+  const handleRunReport = () => {
+    setAppliedFilters({ ...draftFilters });
+  };
+
   const handleClearFilters = () => {
-    setFilterEventId(activeEvent?.id || 'all');
-    setFilterRegStatus('all');
-    setFilterPayStatus('all');
-    setFilterUnit('all');
-    setFilterRegType('all');
-    setFilterPayMethod('all');
-    setSearchQuery('');
-    setRegDateFrom('');
-    setRegDateTo('');
-    setPayDateFrom('');
-    setPayDateTo('');
+    const resetState: FilterState = {
+      filterEventId: activeEvent?.id || 'all',
+      filterRegStatus: 'all',
+      filterPayStatus: 'all',
+      filterUnit: 'all',
+      filterRegType: 'all',
+      filterPayMethod: 'all',
+      searchQuery: '',
+      regDateFrom: '',
+      regDateTo: '',
+      payDateFrom: '',
+      payDateTo: ''
+    };
+    setDraftFilters(resetState);
+    setAppliedFilters(resetState);
   };
 
   const filteredRegistrations = useMemo(() => {
     let regs = [...allRegistrations];
 
-    if (filterEventId !== 'all') {
-      regs = regs.filter(r => r.eventId === filterEventId);
+    if (appliedFilters.filterEventId !== 'all') {
+      regs = regs.filter(r => r.eventId === appliedFilters.filterEventId);
     }
     
-    if (filterRegStatus !== 'all') {
+    if (appliedFilters.filterRegStatus !== 'all') {
       regs = regs.filter(r => {
         const { status: pStatus } = getDerivedStatus(r);
         const regStatus = (pStatus === 'cancelled' || pStatus === 'refunded') ? 'cancelled' : 
                           (pStatus === 'pending' ? 'pending' : 'registered');
-        if (filterRegStatus === 'refunded') return pStatus === 'refunded';
-        return regStatus === filterRegStatus;
+        if (appliedFilters.filterRegStatus === 'refunded') return pStatus === 'refunded';
+        return regStatus === appliedFilters.filterRegStatus;
       });
     }
 
-    if (filterUnit !== 'all') {
+    if (appliedFilters.filterUnit !== 'all') {
       regs = regs.filter(r => {
         const fam = families.find(f => f.id === r.familyId);
-        return fam && fam.displayUnitNumber === filterUnit;
+        return fam && fam.displayUnitNumber === appliedFilters.filterUnit;
       });
     }
     
-    if (filterRegType !== 'all') {
-      regs = regs.filter(r => r.registrationType === filterRegType);
+    if (appliedFilters.filterRegType !== 'all') {
+      regs = regs.filter(r => r.registrationType === appliedFilters.filterRegType);
     }
 
-    if (filterPayMethod !== 'all') {
+    if (appliedFilters.filterPayMethod !== 'all') {
       regs = regs.filter(r => {
         const method = r.financeRemarks?.toLowerCase() || '';
-        if (filterPayMethod === 'cash') return method.includes('cash');
-        if (filterPayMethod === 'bank_transfer') return method.includes('bank') || method.includes('transfer');
+        if (appliedFilters.filterPayMethod === 'cash') return method.includes('cash');
+        if (appliedFilters.filterPayMethod === 'bank_transfer') return method.includes('bank') || method.includes('transfer');
         return true;
       });
     }
 
-    if (filterPayStatus !== 'all') {
+    if (appliedFilters.filterPayStatus !== 'all') {
       regs = regs.filter(r => {
         const { status: pStatus } = getDerivedStatus(r);
-        if (filterPayStatus === 'paid') return pStatus === 'paid' || pStatus === 'approved';
-        return pStatus === filterPayStatus;
+        if (appliedFilters.filterPayStatus === 'paid') return pStatus === 'paid' || pStatus === 'approved';
+        return pStatus === appliedFilters.filterPayStatus;
       });
     }
 
-    if (regDateFrom) {
-      const fromDate = new Date(regDateFrom).getTime();
+    if (appliedFilters.regDateFrom) {
+      const fromDate = new Date(appliedFilters.regDateFrom).getTime();
       regs = regs.filter(r => new Date(r.createdAt).getTime() >= fromDate);
     }
     
-    if (regDateTo) {
-      const toDate = new Date(regDateTo).getTime();
+    if (appliedFilters.regDateTo) {
+      const toDate = new Date(appliedFilters.regDateTo).getTime();
       regs = regs.filter(r => new Date(r.createdAt).getTime() <= toDate + 86400000);
     }
     
-    if (payDateFrom) {
-      const fromDate = new Date(payDateFrom).getTime();
+    if (appliedFilters.payDateFrom) {
+      const fromDate = new Date(appliedFilters.payDateFrom).getTime();
       regs = regs.filter(r => r.paymentProcessedAt && new Date(r.paymentProcessedAt).getTime() >= fromDate);
     }
     
-    if (payDateTo) {
-      const toDate = new Date(payDateTo).getTime();
+    if (appliedFilters.payDateTo) {
+      const toDate = new Date(appliedFilters.payDateTo).getTime();
       regs = regs.filter(r => r.paymentProcessedAt && new Date(r.paymentProcessedAt).getTime() <= toDate + 86400000);
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    if (appliedFilters.searchQuery.trim()) {
+      const q = appliedFilters.searchQuery.toLowerCase().trim();
       regs = regs.filter(r => {
         const fam = families.find(f => f.id === r.familyId);
         const primaryName = fam ? fam.fullName.toLowerCase() : (r.primaryMemberEmail ? r.primaryMemberEmail.split('@')[0].toLowerCase() : '');
@@ -147,7 +174,7 @@ export default function RegistrationReportingWorkspace({
     }
 
     return regs;
-  }, [allRegistrations, filterEventId, filterRegStatus, filterPayStatus, filterUnit, filterRegType, filterPayMethod, regDateFrom, regDateTo, payDateFrom, payDateTo, searchQuery, families]);
+  }, [allRegistrations, appliedFilters, families]);
 
   // Totals for summary
   const summary = useMemo(() => {
@@ -259,7 +286,7 @@ export default function RegistrationReportingWorkspace({
     const summaryData = [
       { A: 'GREENS MALAYALEE KOOTAYAMA' },
       { A: 'EVENT REGISTRATION REPORT' },
-      { A: 'Event:', B: filterEventId === 'all' ? 'All Events' : (events.find(e => e.id === filterEventId)?.title || filterEventId) },
+      { A: 'Event:', B: appliedFilters.filterEventId === 'all' ? 'All Events' : (events.find(e => e.id === appliedFilters.filterEventId)?.title || appliedFilters.filterEventId) },
       { A: 'Report Generated:', B: new Date().toLocaleString() },
       { A: '' },
       { A: 'SUMMARY' },
@@ -293,7 +320,7 @@ export default function RegistrationReportingWorkspace({
     doc.text('EVENT REGISTRATION REPORT', 14, 22);
     
     doc.setFontSize(10);
-    const eventName = filterEventId === 'all' ? 'All Events' : (events.find(e => e.id === filterEventId)?.title || filterEventId);
+    const eventName = appliedFilters.filterEventId === 'all' ? 'All Events' : (events.find(e => e.id === appliedFilters.filterEventId)?.title || appliedFilters.filterEventId);
     doc.text(`Event: ${eventName}`, 14, 32);
     doc.text(`Report Generated: ${new Date().toLocaleString()}`, 14, 38);
     
@@ -340,7 +367,7 @@ export default function RegistrationReportingWorkspace({
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center space-x-2 transition-all ${showFilters ? 'bg-stone-100 border-stone-300 text-stone-800' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+            className={`px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${showFilters ? 'bg-stone-100 border-stone-300 text-stone-800' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
           >
             <Filter className="w-4 h-4" />
             <span>{showFilters ? 'Hide Filters' : 'Filters'}</span>
@@ -375,16 +402,21 @@ export default function RegistrationReportingWorkspace({
               <Filter className="w-4 h-4" />
               <span>Report Filters</span>
             </h4>
-            <button onClick={handleClearFilters} className="text-[10px] uppercase font-black text-stone-400 hover:text-stone-700">
-              Clear All
+            <button 
+              type="button"
+              onClick={handleClearFilters} 
+              className="px-3 py-1.5 text-xs font-black uppercase tracking-wider text-stone-700 bg-stone-100 hover:bg-stone-200 hover:text-stone-900 rounded-xl transition-colors border border-stone-300 shadow-xs cursor-pointer flex items-center space-x-1.5"
+            >
+              <X className="w-3.5 h-3.5 text-stone-600" />
+              <span>Clear All</span>
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Event</label>
               <select 
-                value={filterEventId} 
-                onChange={e => setFilterEventId(e.target.value)}
+                value={draftFilters.filterEventId} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterEventId: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All Events</option>
@@ -396,8 +428,8 @@ export default function RegistrationReportingWorkspace({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Reg Status</label>
               <select 
-                value={filterRegStatus} 
-                onChange={e => setFilterRegStatus(e.target.value)}
+                value={draftFilters.filterRegStatus} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterRegStatus: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All</option>
@@ -410,8 +442,8 @@ export default function RegistrationReportingWorkspace({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Payment Status</label>
               <select 
-                value={filterPayStatus} 
-                onChange={e => setFilterPayStatus(e.target.value)}
+                value={draftFilters.filterPayStatus} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterPayStatus: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All</option>
@@ -425,8 +457,8 @@ export default function RegistrationReportingWorkspace({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Unit / Building</label>
               <select 
-                value={filterUnit} 
-                onChange={e => setFilterUnit(e.target.value)}
+                value={draftFilters.filterUnit} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterUnit: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All Units</option>
@@ -438,8 +470,8 @@ export default function RegistrationReportingWorkspace({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Reg Type</label>
               <select 
-                value={filterRegType} 
-                onChange={e => setFilterRegType(e.target.value)}
+                value={draftFilters.filterRegType} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterRegType: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All</option>
@@ -451,8 +483,8 @@ export default function RegistrationReportingWorkspace({
             <div className="space-y-1.5">
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Payment Method</label>
               <select 
-                value={filterPayMethod} 
-                onChange={e => setFilterPayMethod(e.target.value)}
+                value={draftFilters.filterPayMethod} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, filterPayMethod: e.target.value }))}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               >
                 <option value="all">All</option>
@@ -464,8 +496,9 @@ export default function RegistrationReportingWorkspace({
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Reg Date From</label>
               <input 
                 type="date" 
-                value={regDateFrom} 
-                onChange={e => setRegDateFrom(e.target.value)}
+                value={draftFilters.regDateFrom} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, regDateFrom: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') handleRunReport(); }}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               />
             </div>
@@ -473,8 +506,9 @@ export default function RegistrationReportingWorkspace({
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Reg Date To</label>
               <input 
                 type="date" 
-                value={regDateTo} 
-                onChange={e => setRegDateTo(e.target.value)}
+                value={draftFilters.regDateTo} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, regDateTo: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') handleRunReport(); }}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               />
             </div>
@@ -482,8 +516,9 @@ export default function RegistrationReportingWorkspace({
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Pay Date From</label>
               <input 
                 type="date" 
-                value={payDateFrom} 
-                onChange={e => setPayDateFrom(e.target.value)}
+                value={draftFilters.payDateFrom} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, payDateFrom: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') handleRunReport(); }}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               />
             </div>
@@ -491,8 +526,9 @@ export default function RegistrationReportingWorkspace({
               <label className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Pay Date To</label>
               <input 
                 type="date" 
-                value={payDateTo} 
-                onChange={e => setPayDateTo(e.target.value)}
+                value={draftFilters.payDateTo} 
+                onChange={e => setDraftFilters(prev => ({ ...prev, payDateTo: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') handleRunReport(); }}
                 className="w-full text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
               />
             </div>
@@ -502,13 +538,26 @@ export default function RegistrationReportingWorkspace({
                 <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
                 <input 
                   type="text" 
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  value={draftFilters.searchQuery}
+                  onChange={e => setDraftFilters(prev => ({ ...prev, searchQuery: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleRunReport(); }}
                   placeholder="Search by name, GMK ID, email..."
                   className="w-full pl-9 text-xs font-bold bg-stone-50 border border-stone-200 p-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
                 />
               </div>
             </div>
+          </div>
+
+          {/* Centered RUN REPORT Action */}
+          <div className="flex items-center justify-center pt-3 border-t border-stone-100">
+            <button 
+              type="button"
+              onClick={handleRunReport}
+              className="px-8 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-sm flex items-center space-x-2 cursor-pointer"
+            >
+              <Play className="w-4 h-4 text-[#d4af37] fill-[#d4af37]" />
+              <span>Run Report</span>
+            </button>
           </div>
         </div>
       )}

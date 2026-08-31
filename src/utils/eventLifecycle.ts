@@ -5,14 +5,20 @@ export type RegistrationStatusType =
   | 'open' 
   | 'closing_soon' 
   | 'closed' 
-  | 'completed';
+  | 'completed'
+  | 'disabled';
 
 export function getEventRegistrationStatus(event: {
   status?: string;
   date?: string;
   registrationStart?: string;
   registrationEnd?: string;
+  registrationSettings?: any;
 }): RegistrationStatusType {
+  if (event.registrationSettings && event.registrationSettings.registrationEnabled === false) {
+    return 'disabled';
+  }
+
   // If explicitly completed
   if (event.status === 'completed' || event.status === 'closed') {
     return 'completed';
@@ -56,6 +62,8 @@ export function getEventRegistrationStatus(event: {
 
 export function getRegistrationStatusLabel(status: RegistrationStatusType): string {
   switch (status) {
+    case 'disabled':
+      return 'Information Only';
     case 'not_started':
       return 'Registration Not Started';
     case 'open':

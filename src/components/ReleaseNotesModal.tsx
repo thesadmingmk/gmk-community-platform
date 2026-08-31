@@ -19,6 +19,33 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.7",
+    title: "Finance & Workflow Polish, Filter Execution Controls & Sponsorship Editing (RTCO-086F)",
+    releaseDate: "2026-08-31",
+    author: "Core Platform Team",
+    notes: [
+      "Added explicit 'RUN' action controls for filtering in Expenses and Refunds & Payables Workspaces, preventing unintended re-filtering on keystroke.",
+      "Enhanced filter usability with dedicated 'RUN' trigger buttons and comprehensive 'Clear All' reset capabilities across finance ledger views.",
+      "Added edit capability for recorded sponsorships in the Sponsorship Committee workspace with form prepopulation and in-place updates.",
+      "Preserved full sponsorship audit logging, financial summary integrity, and existing deletion workflows.",
+      "Maintained zero-regression stability across all Finance, Refunds, and Committee workspaces."
+    ]
+  },
+  {
+    version: "v1.5.6",
+    title: "Finance & Expense Normalization, Refunds Reporting & Workspace Filter Controls (RTCO-086E)",
+    releaseDate: "2026-08-31",
+    author: "Core Platform Team",
+    notes: [
+      "Normalized finance expense entry terminology to 'Enter Expense' across all Finance modals and actions.",
+      "Defaulted Expense Category / Committee dropdown to neutral prompt 'Choose Committee / Category' without automatic preselection.",
+      "Added Centralized Expenses Ledger Export capabilities with comprehensive PDF & Excel formats respecting applied filters.",
+      "Added Refunds & Payables Workspace Export capabilities with comprehensive PDF & Excel reporting for non-treasury reimbursements and registration refunds.",
+      "Added Staged Filter execution with explicit 'RUN REPORT' and high-visibility 'Clear All' action controls across reporting consoles.",
+      "Preserved full Finance expense reassignment, governance review workflows, and committee deletion integrity."
+    ]
+  },
+  {
     version: "v1.5.5",
     title: "Sponsorship & Finance Integration, Attendance Workflow Enhancements",
     releaseDate: "2026-08-23",
