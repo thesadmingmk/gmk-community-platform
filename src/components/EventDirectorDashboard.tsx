@@ -639,7 +639,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as ResidentProfile));
       setResidents(list.filter(r => r.status === 'active'));
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] Residents snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] Residents snapshot permission-denied or blocked:", err);
     });
 
     const unsubFamilies = onSnapshot(collection(db, "families"), (snap) => {
@@ -647,7 +647,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as Family));
       setFamilies(list);
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] Families snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] Families snapshot permission-denied or blocked:", err);
     });
 
     const unsubFamilyMembers = onSnapshot(collection(db, "familyMembers"), (snap) => {
@@ -655,7 +655,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as FamilyMember));
       setFamilyMembers(list);
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] FamilyMembers snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] FamilyMembers snapshot permission-denied or blocked:", err);
     });
 
     return () => {
@@ -727,7 +727,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setLastFirestoreReadStatus('OK');
       setLastRefreshTimestamp(new Date().toLocaleTimeString());
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] EventCommittees snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] EventCommittees snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -738,7 +738,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setActivePrograms(list);
       setLastFirestoreReadStatus('OK');
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] EventPrograms snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] EventPrograms snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -749,7 +749,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setRegistrations(list);
       setLastFirestoreReadStatus('OK');
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] EventRegistrations snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] EventRegistrations snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -759,7 +759,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as EventAttendance));
       setActiveAttendances(list);
     }, (err) => {
-      console.warn("⚠️ [EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
+      console.warn("âš ï¸ [EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
     });
 
     return () => {
@@ -922,7 +922,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Created event master '${newEventName.trim()}'`
       );
 
-      setSuccessMsg(`✓ Successfully created event "${newEventName.trim()}"!`);
+      setSuccessMsg(`âœ“ Successfully created event "${newEventName.trim()}"!`);
       
       // Cleanup inputs and redirect
       setNewEventName('');
@@ -959,7 +959,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         eventId,
         `Archived event master '${eventName}'`
       );
-      setSuccessMsg(`✓ Event "${eventName}" has been archived successfully.`);
+      setSuccessMsg(`âœ“ Event "${eventName}" has been archived successfully.`);
     } catch (err: any) {
       console.error("Error archiving event:", err);
       setErrorMsg("Failed to archive event: " + (err.message || String(err)));
@@ -1048,7 +1048,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Permanently deleted draft event master '${eventName}'`
       );
 
-      setSuccessMsg(`✓ Draft Event "${eventName}" and associated committees deleted.`);
+      setSuccessMsg(`âœ“ Draft Event "${eventName}" and associated committees deleted.`);
       if (selectedEventId === eventId) {
         const remaining = events.filter(e => e.id !== eventId);
         setSelectedEventId(remaining.length > 0 ? remaining[0].id : '');
@@ -1256,10 +1256,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           `Event Director deleted registration for email '${reg.primaryMemberEmail}' (Count: ${count}, Payment: OMR ${payment}). Attendance Cleanup: ${attStatus}, Food Cleanup: ${foodStatus}, Cert Cleanup: ${certStatus}.`
         );
       } catch (auditErr) {
-        console.warn("⚠️ Non-blocking ED Audit log failed:", auditErr);
+        console.warn("âš ï¸ Non-blocking ED Audit log failed:", auditErr);
       }
 
-      setSuccessMsg(`✓ Registration for ${reg.primaryMemberEmail} was deleted successfully.`);
+      setSuccessMsg(`âœ“ Registration for ${reg.primaryMemberEmail} was deleted successfully.`);
     } catch (err: any) {
       console.error("Error deleting registration:", err);
       setErrorMsg("Failed to delete registration: " + (err.message || String(err)));
@@ -1391,7 +1391,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Event Director performed Bulk Reset: deleted all ${regSnap.size} registrations for event '${activeEvent.eventName || activeEvent.title}'.`
       );
 
-      setSuccessMsg(`✓ Successfully reset registrations! All ${regSnap.size} registration records were deleted cleanly.`);
+      setSuccessMsg(`âœ“ Successfully reset registrations! All ${regSnap.size} registration records were deleted cleanly.`);
     } catch (err: any) {
       console.error("[BULK DELETE FAIL] Error resetting registrations:", err);
       setErrorMsg("Failed to execute bulk registration reset: " + (err.message || String(err)));
@@ -1823,7 +1823,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           }
         }
 
-        setSuccessMsg(`✓ ${type} uploaded and updated successfully.`);
+        setSuccessMsg(`âœ“ ${type} uploaded and updated successfully.`);
       } catch (renderErr: any) {
         setUploadDiagnostics(prev => ({
           ...prev,
@@ -1879,7 +1879,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       }
 
       await updateDoc(eventRef, updateData);
-      setSuccessMsg(`✓ ${type} deleted successfully.`);
+      setSuccessMsg(`âœ“ ${type} deleted successfully.`);
     } catch (err: any) {
       console.error(`Delete error for ${type}:`, err);
       setErrorMsg(`Failed to delete ${type}: ${err.message}`);
@@ -2094,7 +2094,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 4000);
-      showToast("✓ All changes saved.");
+      showToast("âœ“ All changes saved.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to save event configuration: " + err.message);
@@ -2207,7 +2207,7 @@ const handleDownloadPDF = () => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(15, 76, 42);
-    doc.text(`FROZEN REGISTRATION PRICING SCHEDULE (${policyMeta.version} • Rev: ${policyMeta.revisionDate})`, 15, 98);
+    doc.text(`FROZEN REGISTRATION PRICING SCHEDULE (${policyMeta.version} â€¢ Rev: ${policyMeta.revisionDate})`, 15, 98);
     
     doc.setLineWidth(0.2);
     doc.setDrawColor(200, 200, 200);
@@ -2259,16 +2259,16 @@ const handleDownloadPDF = () => {
       y += 7;
     };
     
-    addRuleRow("• Core 1 Head (e.g. 1 Parent, 0 Children > Free Age):", `OMR ${configIndividualFee.toFixed(3)} (Single Rate)`);
-    addRuleRow("• Core 2 Heads (e.g. 2 Parents OR 1 Parent + 1 Child > Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
-    addRuleRow("• Core 3+ Heads (e.g. 2 Parents + 1+ Children > Free Age):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
-    addRuleRow("• Children < Free Age:", `OMR 0.000 (Free - Excluded from Core Heads)`);
-    addRuleRow("• Extra Adult (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
-    addRuleRow("• Extra Adult (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
+    addRuleRow("â€¢ Core 1 Head (e.g. 1 Parent, 0 Children > Free Age):", `OMR ${configIndividualFee.toFixed(3)} (Single Rate)`);
+    addRuleRow("â€¢ Core 2 Heads (e.g. 2 Parents OR 1 Parent + 1 Child > Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
+    addRuleRow("â€¢ Core 3+ Heads (e.g. 2 Parents + 1+ Children > Free Age):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
+    addRuleRow("â€¢ Children < Free Age:", `OMR 0.000 (Free - Excluded from Core Heads)`);
+    addRuleRow("â€¢ Extra Adult (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
+    addRuleRow("â€¢ Extra Adult (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
     if (configAllowExternal) {
-      addRuleRow("• Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
+      addRuleRow("â€¢ Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
     } else {
-      addRuleRow("• Guest Rule (Registered Non-Resident Guests):", `Disabled / Guests Not Allowed`);
+      addRuleRow("â€¢ Guest Rule (Registered Non-Resident Guests):", `Disabled / Guests Not Allowed`);
     }
     
     y += 10;
@@ -2277,7 +2277,7 @@ const handleDownloadPDF = () => {
     doc.setTextColor(150, 150, 150);
     doc.text("Note: This document represents the official active pricing tariff approved by the GMK Executive Committee.", 15, y);
     y += 4;
-    doc.text(`Official Policy Ref: ${policyMeta.ref} • Rev Date: ${policyMeta.revisionDate} • Effective: ${policyMeta.fullFormatted} • Verified on commit.`, 15, y);
+    doc.text(`Official Policy Ref: ${policyMeta.ref} â€¢ Rev Date: ${policyMeta.revisionDate} â€¢ Effective: ${policyMeta.fullFormatted} â€¢ Verified on commit.`, 15, y);
     
     doc.save(`${activeEvent.eventName || activeEvent.title}_pricing_policy.pdf`);
   };
@@ -2545,7 +2545,7 @@ const handleDownloadPDF = () => {
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(120, 120, 120);
-    doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
+    doc.text("GMK Event Management System â€¢ Official Verified Certificate", 148.5, 186, { align: "center" });
 
     doc.save(`${recipient.name.replace(/\s+/g, '_')}_Certificate.pdf`);
   };
@@ -2646,7 +2646,7 @@ const handleDownloadPDF = () => {
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
       doc.setTextColor(120, 120, 120);
-      doc.text("GMK Event Management System • Official Verified Certificate", 148.5, 186, { align: "center" });
+      doc.text("GMK Event Management System â€¢ Official Verified Certificate", 148.5, 186, { align: "center" });
     });
 
     doc.save(`${activeEvent.eventName || activeEvent.title}_All_Certificates.pdf`);
@@ -2797,7 +2797,7 @@ const handleDownloadPDF = () => {
   const handlePublishEvent = async () => {
     const validationErrors = validateEventForPublish();
     if (validationErrors.length > 0) {
-      setErrorMsg(`PUBLISHING BLOCKED:\n${validationErrors.map(e => `• ${e}`).join("\n")}`);
+      setErrorMsg(`PUBLISHING BLOCKED:\n${validationErrors.map(e => `â€¢ ${e}`).join("\n")}`);
       return;
     }
 
@@ -2807,7 +2807,7 @@ const handleDownloadPDF = () => {
     // Pass validation, save with 'published' status (does NOT invoke completion logic)
     await handleSaveConfiguration(undefined, 'published');
     setConfigStatus('published');
-    setSuccessMsg("🎉 Validation succeeded! The event is now officially PUBLISHED and available inside the Resident Hub!");
+    setSuccessMsg("ðŸŽ‰ Validation succeeded! The event is now officially PUBLISHED and available inside the Resident Hub!");
   };
 
   // Unpublish Event action
@@ -2822,7 +2822,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       setConfigStatus('draft');
-      setSuccessMsg("✓ Event has been unpublished and is now back in DRAFT status.");
+      setSuccessMsg("âœ“ Event has been unpublished and is now back in DRAFT status.");
     } catch (err: any) {
       setErrorMsg("Failed to unpublish event: " + err.message);
     } finally {
@@ -2848,7 +2848,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       setConfigStatus('completed');
-      setSuccessMsg("🏁 Congratulations! Event status has been updated to COMPLETED. The configuration is now locked and read-only.");
+      setSuccessMsg("ðŸ Congratulations! Event status has been updated to COMPLETED. The configuration is now locked and read-only.");
     } catch (err: any) {
       setErrorMsg("Failed to complete event: " + err.message);
     } finally {
@@ -2892,7 +2892,7 @@ const handleDownloadPDF = () => {
         `Created custom operational committee '${nameTrimmed}'`
       );
 
-      setSuccessMsg(`✓ Created "${nameTrimmed}" Operational Committee!`);
+      setSuccessMsg(`âœ“ Created "${nameTrimmed}" Operational Committee!`);
       setNewCommitteeName('');
       setShowAddCommitteeInput(false);
     } catch (err: any) {
@@ -2937,7 +2937,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Permanently deleted custom operational committee '${comm.name}'`
       );
-      setSuccessMsg(`✓ Committee "${comm.name}" has been permanently deleted.`);
+      setSuccessMsg(`âœ“ Committee "${comm.name}" has been permanently deleted.`);
       if (activeCommitteeToConfigure === comm.name) {
         setActiveCommitteeToConfigure(null);
       }
@@ -2973,7 +2973,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Archived committee '${comm.name}'`
       );
-      setSuccessMsg(`✓ Committee "${comm.name}" has been moved to Archived.`);
+      setSuccessMsg(`âœ“ Committee "${comm.name}" has been moved to Archived.`);
       if (activeCommitteeToConfigure === comm.name) {
         setActiveCommitteeToConfigure(null);
       }
@@ -3000,7 +3000,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Restored committee '${comm.name}' to Active status`
       );
-      setSuccessMsg(`✓ Committee "${comm.name}" has been restored to Active.`);
+      setSuccessMsg(`âœ“ Committee "${comm.name}" has been restored to Active.`);
     } catch (err: any) {
       setErrorMsg("Failed to restore committee: " + err.message);
     } finally {
@@ -3230,7 +3230,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`✓ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
+      setSuccessMsg(`âœ“ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
       setResidentSearchQuery('');
       setCommitteeSearchQueries(prev => ({ ...prev, [committee.id]: '' }));
     } catch (err: any) {
@@ -3400,7 +3400,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`✓ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
+      setSuccessMsg(`âœ“ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
       setSelectedLeadGmkId('');
     } catch (err: any) {
       console.error(err);
@@ -3531,7 +3531,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`✓ Removed Committee Lead assignment successfully.`);
+      setSuccessMsg(`âœ“ Removed Committee Lead assignment successfully.`);
     } catch (err: any) {
       console.error(err);
       const code = err.code || 'TRANSACTION_FAIL';
@@ -3612,7 +3612,7 @@ const handleDownloadPDF = () => {
         setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
       }
 
-      setSuccessMsg(`✓ Successfully added volunteer ${volunteer.fullName} to ${committee.name}.`);
+      setSuccessMsg(`âœ“ Successfully added volunteer ${volunteer.fullName} to ${committee.name}.`);
       setWorkspaceVolSearchQuery('');
     } catch (err: any) {
       console.error("Error adding committee volunteer:", err);
@@ -3659,7 +3659,7 @@ const handleDownloadPDF = () => {
         setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
       }
 
-      setSuccessMsg(`✓ Volunteer removed from ${committee.name}.`);
+      setSuccessMsg(`âœ“ Volunteer removed from ${committee.name}.`);
     } catch (err: any) {
       console.error("Error removing committee volunteer:", err);
       setErrorMsg(err.message || "Failed to remove volunteer");
@@ -3826,7 +3826,7 @@ const handleDownloadPDF = () => {
         `Event Director created program '${progTitle.trim()}'${owningCommittee ? ` under ${owningCommittee.name}` : ''}${progCoordinator ? ` and assigned coordinator ${progCoordinator.fullName}` : ''}`
       );
 
-      setSuccessMsg(`✓ Successfully created program "${progTitle.trim()}"${progCoordinator ? ` and assigned ${progCoordinator.fullName} as Coordinator` : ''}.`);
+      setSuccessMsg(`âœ“ Successfully created program "${progTitle.trim()}"${progCoordinator ? ` and assigned ${progCoordinator.fullName} as Coordinator` : ''}.`);
       setProgTitle('');
       setProgDescription('');
       setProgCoordinator(null);
@@ -4149,7 +4149,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`✓ Added ${fullName} as participant for ${prog.title}.`);
+      setSuccessMsg(`âœ“ Added ${fullName} as participant for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign participant: " + err.message);
@@ -4175,7 +4175,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`✓ Removed participant.`);
+      setSuccessMsg(`âœ“ Removed participant.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove participant: " + err.message);
@@ -4242,7 +4242,7 @@ const handleDownloadPDF = () => {
         }
       }
 
-      setSuccessMsg(`✓ Assigned ${fullName} as a coordinator for ${prog.title}.`);
+      setSuccessMsg(`âœ“ Assigned ${fullName} as a coordinator for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign coordinator: " + err.message);
@@ -4280,7 +4280,7 @@ const handleDownloadPDF = () => {
         }
       }
 
-      setSuccessMsg(`✓ Removed coordinator assignment.`);
+      setSuccessMsg(`âœ“ Removed coordinator assignment.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove coordinator: " + err.message);
@@ -4327,7 +4327,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`✓ Assigned ${fullName} as a volunteer (${role || 'Volunteer'}) for ${prog.title}.`);
+      setSuccessMsg(`âœ“ Assigned ${fullName} as a volunteer (${role || 'Volunteer'}) for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign volunteer: " + err.message);
@@ -4353,7 +4353,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
 
-      setSuccessMsg(`✓ Removed volunteer assignment.`);
+      setSuccessMsg(`âœ“ Removed volunteer assignment.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove volunteer: " + err.message);
@@ -4426,7 +4426,7 @@ const handleDownloadPDF = () => {
           `Resubmitted expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} for ${committee.name} committee review.`
         );
 
-        setSuccessMsg(`✓ Resubmitted expense of OMR ${roundedAmount.toFixed(3)} to Finance for review.`);
+        setSuccessMsg(`âœ“ Resubmitted expense of OMR ${roundedAmount.toFixed(3)} to Finance for review.`);
         setEditingCommExpense(null);
       } else {
         const newExpense: EventCommitteeExpense = {
@@ -4460,7 +4460,7 @@ const handleDownloadPDF = () => {
           `Added expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} to ${committee.name} committee.`
         );
 
-        setSuccessMsg(`✓ Added expense of OMR ${roundedAmount.toFixed(3)} to ${committee.name} Expense Sheet (Pending Review).`);
+        setSuccessMsg(`âœ“ Added expense of OMR ${roundedAmount.toFixed(3)} to ${committee.name} Expense Sheet (Pending Review).`);
       }
 
       setCommExpenseDesc('');
@@ -4502,7 +4502,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
 
-      setSuccessMsg(`✓ Expense removed successfully from ${committee.name} Expense Sheet.`);
+      setSuccessMsg(`âœ“ Expense removed successfully from ${committee.name} Expense Sheet.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove committee expense: " + err.message);
@@ -4595,7 +4595,7 @@ const handleDownloadPDF = () => {
           `Updated sponsorship for '${sponCompanyName.trim()}' (OMR ${amountNum.toFixed(3)}).`
         );
 
-        setSuccessMsg(`✓ Successfully updated sponsorship from ${sponCompanyName.trim()}.`);
+        setSuccessMsg(`âœ“ Successfully updated sponsorship from ${sponCompanyName.trim()}.`);
       } else {
         const newSponsorship = {
           id: `spon_${Date.now()}`,
@@ -4620,7 +4620,7 @@ const handleDownloadPDF = () => {
           `Added sponsorship from '${sponCompanyName.trim()}' for OMR ${amountNum.toFixed(3)}.`
         );
         
-        setSuccessMsg(`✓ Successfully recorded sponsorship from ${sponCompanyName.trim()}.`);
+        setSuccessMsg(`âœ“ Successfully recorded sponsorship from ${sponCompanyName.trim()}.`);
       }
       
       // Reset form
@@ -4656,7 +4656,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       
-      setSuccessMsg(`✓ Sponsorship removed successfully.`);
+      setSuccessMsg(`âœ“ Sponsorship removed successfully.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove sponsorship: " + err.message);
@@ -4726,7 +4726,7 @@ const handleDownloadPDF = () => {
         });
       }
 
-      setSuccessMsg(`✓ Expense of OMR ${amountNum.toFixed(3)} recorded for "${prog.title}"${owningComm ? ` and aggregated to ${owningComm.name}` : ''}.`);
+      setSuccessMsg(`âœ“ Expense of OMR ${amountNum.toFixed(3)} recorded for "${prog.title}"${owningComm ? ` and aggregated to ${owningComm.name}` : ''}.`);
       setExpenseTitle('');
       setExpenseAmount('');
     } catch (err: any) {
@@ -4769,7 +4769,7 @@ const handleDownloadPDF = () => {
         });
       }
 
-      setSuccessMsg(`✓ Expense removed successfully.`);
+      setSuccessMsg(`âœ“ Expense removed successfully.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove program expense: " + err.message);
@@ -4966,7 +4966,7 @@ const handleDownloadPDF = () => {
       );
       console.log(`[PROGRAM APPROVE 5] Audit log & UI refresh complete`);
 
-      setSuccessMsg("✓ Program has been APPROVED and will appear immediately inside the Resident Event Hub.");
+      setSuccessMsg("âœ“ Program has been APPROVED and will appear immediately inside the Resident Event Hub.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to approve program: " + err.message);
@@ -5005,7 +5005,7 @@ const handleDownloadPDF = () => {
       );
       console.log(`[PROGRAM REJECT 5] Audit log & UI refresh complete`);
 
-      setSuccessMsg("✓ Program has been rejected. Authorized users can now delete this rejected submission.");
+      setSuccessMsg("âœ“ Program has been rejected. Authorized users can now delete this rejected submission.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to reject program: " + err.message);
@@ -5121,9 +5121,9 @@ const handleDownloadPDF = () => {
       if (activeProgForManagement === programId) {
         setActiveProgForManagement(null);
       }
-      setSuccessMsg(`✓ Program/Event "${prog.title}" has been permanently deleted.`);
+      setSuccessMsg(`âœ“ Program/Event "${prog.title}" has been permanently deleted.`);
     } catch (err: any) {
-      console.error("❌ [PROGRAM DELETE FAIL]", err);
+      console.error("âŒ [PROGRAM DELETE FAIL]", err);
       setErrorMsg("Failed to delete Program/Event: " + err.message);
     } finally {
       setIsSubmitting(false);
@@ -5158,7 +5158,7 @@ const handleDownloadPDF = () => {
       } : p));
 
       setEditingProgramId(null);
-      setSuccessMsg(`✓ Program "${editProgTitle.trim()}" updated successfully.`);
+      setSuccessMsg(`âœ“ Program "${editProgTitle.trim()}" updated successfully.`);
     } catch (err: any) {
       console.error("Failed to update program details:", err);
       setErrorMsg("Failed to update program details: " + err.message);
@@ -6080,7 +6080,7 @@ const handleDownloadPDF = () => {
                       <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                         <div>
                           <span className="text-[10px] uppercase font-black text-[#d4af37] tracking-wider font-mono">
-                            {evt.eventType || 'Gathering'} • {evt.eventYear || evt.year || '2026'}
+                            {evt.eventType || 'Gathering'} â€¢ {evt.eventYear || evt.year || '2026'}
                           </span>
                           <h4 className="text-stone-850 font-black text-sm font-heading line-clamp-1 mt-0.5">
                             {evt.eventName || evt.title}
@@ -6142,7 +6142,7 @@ const handleDownloadPDF = () => {
                               className="flex-1 py-2.5 rounded-xl bg-[#0f4c2a] hover:bg-[#0b381f] text-white text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.99]"
                             >
                               <span>Open Committee Workspace</span>
-                              <span>➜</span>
+                              <span>âžœ</span>
                             </button>
                           )}
                         </div>
@@ -6227,14 +6227,14 @@ const handleDownloadPDF = () => {
                         <div className="flex flex-wrap gap-2 pt-1">
                           {configHighlights.map((hl, index) => (
                             <div key={index} className="flex items-center space-x-1.5 bg-emerald-50 border border-emerald-100/50 px-2.5 py-1 rounded-full text-stone-800 text-[10px] font-bold">
-                              <span>⭐ {hl}</span>
+                              <span>â­ {hl}</span>
                               {configStatus !== 'completed' && (
                                 <button
                                   type="button"
                                   onClick={() => setConfigHighlights(configHighlights.filter((_, i) => i !== index))}
                                   className="text-stone-400 hover:text-red-600 transition-colors cursor-pointer font-black text-[10px] ml-1"
                                 >
-                                  ×
+                                  Ã—
                                 </button>
                               )}
                             </div>
@@ -6417,11 +6417,11 @@ const handleDownloadPDF = () => {
                       <p className="text-stone-500 text-xs">Configure the high-resolution poster and square thumbnail imagery for this gathering.</p>
                       <div className="flex items-center space-x-4 pt-1.5 text-xs text-stone-600 font-bold">
                         <span className="flex items-center space-x-1.5">
-                          <span className={activeEvent.Poster || activeEvent.posterUrl ? "text-emerald-600" : "text-stone-300"}>●</span>
+                          <span className={activeEvent.Poster || activeEvent.posterUrl ? "text-emerald-600" : "text-stone-300"}>â—</span>
                           <span>Poster</span>
                         </span>
                         <span className="flex items-center space-x-1.5">
-                          <span className={activeEvent.Thumbnail ? "text-emerald-600" : "text-stone-300"}>●</span>
+                          <span className={activeEvent.Thumbnail ? "text-emerald-600" : "text-stone-300"}>â—</span>
                           <span>Thumbnail</span>
                         </span>
                       </div>
@@ -6447,7 +6447,7 @@ const handleDownloadPDF = () => {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-stone-500 font-medium mt-0.5">
                           <span>Revision Date: <strong className="text-stone-800 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}</strong></span>
-                          <span className="text-stone-300">•</span>
+                          <span className="text-stone-300">â€¢</span>
                           <span>Effective: <strong className="text-stone-700 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
                         </div>
                       </div>
@@ -6463,7 +6463,7 @@ const handleDownloadPDF = () => {
                     {isPricingEditing && (
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 text-[11px] font-bold space-y-1 animate-fadeIn">
                         <div className="flex items-center space-x-2">
-                          <span className="text-sm shrink-0">⚠️</span>
+                          <span className="text-sm shrink-0">âš ï¸</span>
                           <span className="uppercase tracking-wider font-extrabold text-amber-900 font-heading text-xs">EDIT MODE</span>
                         </div>
                         <p className="leading-relaxed font-bold text-amber-950">
@@ -6653,7 +6653,7 @@ const handleDownloadPDF = () => {
                               : 'bg-stone-100 hover:bg-stone-200 text-stone-600 border border-stone-200'
                           }`}
                         >
-                          {configRegEnabled ? "✓ Pricing Engine Active" : "Activate Registration Pricing"}
+                          {configRegEnabled ? "âœ“ Pricing Engine Active" : "Activate Registration Pricing"}
                         </button>
                       </div>
                     </div>
@@ -6850,7 +6850,7 @@ const handleDownloadPDF = () => {
                     <GMKCard className="p-6 bg-white border border-stone-200 space-y-4">
                       <div className="border-b border-stone-150 pb-2">
                         <h4 className="font-extrabold text-stone-900 text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                          <span>🏁</span>
+                          <span>ðŸ</span>
                           <span>Event Completion Checklist</span>
                         </h4>
                         <p className="text-[9px] text-stone-500 font-bold mt-0.5">The Event Director must verify and satisfy all checklist criteria before marking the event as officially complete.</p>
@@ -6870,7 +6870,7 @@ const handleDownloadPDF = () => {
                           <div>
                             <span className="text-xs font-black text-stone-850 block">Registration Closed</span>
                             <span className="text-[9px] text-stone-500 font-bold block">
-                              {isRegDateClosed ? "✓ Auto-verified: Registration closes timeline passed" : "Manual override or verified via closes date limit"}
+                              {isRegDateClosed ? "âœ“ Auto-verified: Registration closes timeline passed" : "Manual override or verified via closes date limit"}
                             </span>
                           </div>
                         </div>
@@ -6888,7 +6888,7 @@ const handleDownloadPDF = () => {
                           <div>
                             <span className="text-xs font-black text-stone-850 block">Program Approvals Finalized</span>
                             <span className="text-[9px] text-stone-500 font-bold block">
-                              {isProgramsAllApproved ? "✓ Auto-verified: All submitted programs approved or rejected" : "Manual override or verified: all programs processed"}
+                              {isProgramsAllApproved ? "âœ“ Auto-verified: All submitted programs approved or rejected" : "Manual override or verified: all programs processed"}
                             </span>
                           </div>
                         </div>
@@ -6993,9 +6993,9 @@ const handleDownloadPDF = () => {
                           : 'bg-amber-50/50 border-amber-150 text-amber-800'
                       }`}>
                         {isCompletionReady ? (
-                          <p className="text-xs font-black">✓ ALL PRE-REQUISITES SATISFIED! You may now permanently complete this event.</p>
+                          <p className="text-xs font-black">âœ“ ALL PRE-REQUISITES SATISFIED! You may now permanently complete this event.</p>
                         ) : (
-                          <p className="text-[10px] font-extrabold">⚠️ GATED: All checklist items must be satisfied to unlock the "Complete Event" action button.</p>
+                          <p className="text-[10px] font-extrabold">âš ï¸ GATED: All checklist items must be satisfied to unlock the "Complete Event" action button.</p>
                         )}
                       </div>
                     </GMKCard>
@@ -7072,7 +7072,7 @@ const handleDownloadPDF = () => {
                               <p className="text-xs font-black text-stone-850">Publication Readiness</p>
                               <div className="flex items-center space-x-1.5 mt-0.5 text-[11px] font-bold text-stone-600">
                                 <span className={completedCount === totalCount ? "text-emerald-700" : "text-amber-700"}>
-                                  {completedCount === totalCount ? "✓" : "●"} {completedCount} of {totalCount} requirements completed
+                                  {completedCount === totalCount ? "âœ“" : "â—"} {completedCount} of {totalCount} requirements completed
                                 </span>
                               </div>
                             </div>
@@ -7082,7 +7082,7 @@ const handleDownloadPDF = () => {
                               className="text-[10px] font-black uppercase text-[#0f4c2a] hover:text-[#0c3e22] transition-colors flex items-center space-x-1 self-start sm:self-auto cursor-pointer"
                             >
                               <span>{showReadinessDetails ? "Hide Details" : "View Details"}</span>
-                              <span>{showReadinessDetails ? "▲" : "▼"}</span>
+                              <span>{showReadinessDetails ? "â–²" : "â–¼"}</span>
                             </button>
                           </div>
 
@@ -7093,7 +7093,7 @@ const handleDownloadPDF = () => {
                                 {checklist.map((item, idx) => (
                                   <div key={idx} className="flex items-start space-x-2">
                                     <span className={`text-xs select-none shrink-0 ${item.valid ? "text-emerald-600" : "text-stone-300"}`}>
-                                      {item.valid ? "✓" : "○"}
+                                      {item.valid ? "âœ“" : "â—‹"}
                                     </span>
                                     <span className={item.valid ? "text-stone-700" : "text-stone-400 italic"}>
                                       {item.label}
@@ -7120,7 +7120,7 @@ const handleDownloadPDF = () => {
                     {configStatus === 'published' && (
                       <div className="p-4 bg-emerald-50/55 border border-emerald-150 rounded-2xl text-emerald-900 space-y-1 font-sans">
                         <p className="text-xs font-black flex items-center space-x-1">
-                          <span>●</span>
+                          <span>â—</span>
                           <span>EVENT IS LIVE</span>
                         </p>
                         <p className="text-[10px] text-emerald-800 font-semibold leading-relaxed">
@@ -7143,7 +7143,7 @@ const handleDownloadPDF = () => {
                     {configStatus === 'completed' && (
                       <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl text-stone-800 space-y-1 font-sans">
                         <p className="text-xs font-black flex items-center space-x-1">
-                          <span>🏁</span>
+                          <span>ðŸ</span>
                           <span>EVENT COMPLETED</span>
                         </p>
                         <p className="text-[10px] text-stone-500 font-semibold leading-relaxed">
@@ -7172,7 +7172,7 @@ const handleDownloadPDF = () => {
                               <span className="px-1.5 py-0.5 bg-stone-100 border border-stone-200 rounded text-stone-700 font-bold">
                                 Rev Date: {getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}
                               </span>
-                              <span>📅 Effective: <strong className="text-stone-800 font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
+                              <span>ðŸ“… Effective: <strong className="text-stone-800 font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2 shrink-0">
@@ -7182,7 +7182,7 @@ const handleDownloadPDF = () => {
                               className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-100 rounded-xl transition-all cursor-pointer flex items-center space-x-1 text-[10px] font-extrabold uppercase tracking-wider"
                               title="Download PDF"
                             >
-                              <span>📥</span>
+                              <span>ðŸ“¥</span>
                               <span>PDF</span>
                             </button>
                             <button
@@ -7243,9 +7243,9 @@ const handleDownloadPDF = () => {
 
                         <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl text-[9px] text-stone-500 leading-relaxed font-semibold space-y-1">
                           <span className="font-bold text-stone-700 block uppercase tracking-wider text-[8px]">Calculation Engine Implementation Notes</span>
-                          <p>• Ages are calculated automatically as of the registration timestamp.</p>
-                          <p>• The pricing engine executes inside an atomic database write, verifying exact fees prior to commit.</p>
-                          <p>• Guest fees are added as a separate flat rate addition per guest registered under a household unit.</p>
+                          <p>â€¢ Ages are calculated automatically as of the registration timestamp.</p>
+                          <p>â€¢ The pricing engine executes inside an atomic database write, verifying exact fees prior to commit.</p>
+                          <p>â€¢ Guest fees are added as a separate flat rate addition per guest registered under a household unit.</p>
                         </div>
 
                         {/* Bottom Close Button for easy dismissal */}
@@ -7267,12 +7267,12 @@ const handleDownloadPDF = () => {
                     <div className="flex items-center space-x-2">
                       {hasUnsavedChanges() && (
                         <span className="px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider animate-pulse">
-                          ⚠️ Unsaved Changes
+                          âš ï¸ Unsaved Changes
                         </span>
                       )}
                       {!hasUnsavedChanges() && justSaved && (
                         <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-black uppercase tracking-wider">
-                          ✓ Changes Saved
+                          âœ“ Changes Saved
                         </span>
                       )}
                     </div>
@@ -7571,7 +7571,7 @@ const handleDownloadPDF = () => {
               {/* FLOATING TOAST NOTIFICATION */}
               {toastMessage && (
                 <div className="fixed bottom-6 right-6 z-50 bg-stone-900 text-white py-3 px-5 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold font-heading border border-stone-800 animate-slideIn">
-                  <span className="text-emerald-400 text-sm">✓</span>
+                  <span className="text-emerald-400 text-sm">âœ“</span>
                   <span>{toastMessage}</span>
                 </div>
               )}
@@ -7905,7 +7905,7 @@ const handleDownloadPDF = () => {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-2">
                               <span className="text-base">
-                                {isFinanceComm ? '💰' : isFoodComm ? '🍱' : isAttendanceComm ? '🎟️' : isProgramComm ? '🎭' : '👥'}
+                                {isFinanceComm ? 'ðŸ’°' : isFoodComm ? 'ðŸ±' : isAttendanceComm ? 'ðŸŽŸï¸' : isProgramComm ? 'ðŸŽ­' : 'ðŸ‘¥'}
                               </span>
                               <div>
                                 <h4 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading">
@@ -8023,7 +8023,7 @@ const handleDownloadPDF = () => {
                                           <div className="flex items-center justify-between">
                                             <div className="min-w-0">
                                               <span className="font-bold text-stone-900 text-xs block truncate">{res.fullName}</span>
-                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} â€¢ {res.email}</span>
                                             </div>
                                             <div className="flex items-center space-x-1.5 shrink-0">
                                               <button
@@ -8098,7 +8098,7 @@ const handleDownloadPDF = () => {
                                             )}
                                           </div>
                                           <span className="text-[9px] text-stone-500 font-bold block truncate">
-                                            {vol.unitDisplay ? `Flat: ${vol.unitDisplay}` : ''} {vol.phone ? `• Tel: ${vol.phone}` : ''} {vol.email && vol.email !== 'manual@external.com' ? `• ${vol.email}` : ''}
+                                            {vol.unitDisplay ? `Flat: ${vol.unitDisplay}` : ''} {vol.phone ? `â€¢ Tel: ${vol.phone}` : ''} {vol.email && vol.email !== 'manual@external.com' ? `â€¢ ${vol.email}` : ''}
                                           </span>
                                         </div>
                                         <button
@@ -8178,7 +8178,7 @@ const handleDownloadPDF = () => {
                                               <span className="font-bold text-stone-900 text-xs block truncate">
                                                 {res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded">Primary</span>
                                               </span>
-                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • Tel: {res.phone}</span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} â€¢ Tel: {res.phone}</span>
                                             </div>
                                             <button
                                               type="button"
@@ -8210,7 +8210,7 @@ const handleDownloadPDF = () => {
                                                   {fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded capitalize">{fm.relationship || 'Family'}</span>
                                                 </span>
                                                 <span className="text-[9px] text-stone-500 font-medium">
-                                                  Flat: {primaryRes?.displayUnitNumber || 'N/A'} • Tel: {fm.phone || primaryRes?.phone || 'N/A'}
+                                                  Flat: {primaryRes?.displayUnitNumber || 'N/A'} â€¢ Tel: {fm.phone || primaryRes?.phone || 'N/A'}
                                                 </span>
                                               </div>
                                               <button
@@ -8423,12 +8423,12 @@ const handleDownloadPDF = () => {
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.adults}</td>
                                           </tr>
                                           <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 0–3</td>
+                                            <td className="p-3">Kids 0â€“3</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k0_3}</td>
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k0_3}</td>
                                           </tr>
                                           <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 4–9</td>
+                                            <td className="p-3">Kids 4â€“9</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k4_9}</td>
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k4_9}</td>
                                           </tr>
@@ -8759,7 +8759,7 @@ const handleDownloadPDF = () => {
                                             <Trash2 className="w-3.5 h-3.5" />
                                           </button>
                                         ) : (
-                                          <span className="text-[9px] text-stone-400 font-mono" title="Accepted by Finance">✓</span>
+                                          <span className="text-[9px] text-stone-400 font-mono" title="Accepted by Finance">âœ“</span>
                                         )}
                                       </div>
                                     </div>
@@ -8952,7 +8952,7 @@ const handleDownloadPDF = () => {
                                                       <div className="text-xs font-bold text-stone-900 group-hover:text-sky-800">
                                                         {r.firstName} {r.lastName}
                                                       </div>
-                                                      <div className="text-[10px] text-stone-500 font-mono">Resident • {r.unit}</div>
+                                                      <div className="text-[10px] text-stone-500 font-mono">Resident â€¢ {r.unit}</div>
                                                     </div>
                                                     <div className="opacity-0 group-hover:opacity-100 bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">
                                                       Select
@@ -8972,7 +8972,7 @@ const handleDownloadPDF = () => {
                                                         <div className="text-xs font-bold text-stone-900 group-hover:text-sky-800">
                                                           {r.spouseName}
                                                         </div>
-                                                        <div className="text-[10px] text-stone-500 font-mono">Spouse • {r.unit}</div>
+                                                        <div className="text-[10px] text-stone-500 font-mono">Spouse â€¢ {r.unit}</div>
                                                       </div>
                                                       <div className="opacity-0 group-hover:opacity-100 bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">
                                                         Select
@@ -9136,7 +9136,7 @@ const handleDownloadPDF = () => {
                         <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
                           <div>
                             <strong className="text-stone-900">{progCoordinator.fullName}</strong>
-                            <span className="text-stone-500 block text-[10px]">Unit {progCoordinator.displayUnitNumber} • {progCoordinator.email}</span>
+                            <span className="text-stone-500 block text-[10px]">Unit {progCoordinator.displayUnitNumber} â€¢ {progCoordinator.email}</span>
                           </div>
                           <button
                             type="button"
@@ -9174,7 +9174,7 @@ const handleDownloadPDF = () => {
                                       <div key={res.id} className="p-2 flex items-center justify-between text-[11px] hover:bg-stone-50">
                                         <div>
                                           <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
-                                          <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} • {res.email}</span>
+                                          <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} â€¢ {res.email}</span>
                                         </div>
                                         <button
                                           type="button"
@@ -9245,7 +9245,7 @@ const handleDownloadPDF = () => {
                                     </span>
                                     {prog.committeeName && (
                                       <span className="text-[8px] font-bold text-stone-600 bg-stone-100 border border-stone-200 px-1.5 py-0.5 rounded">
-                                        🏛️ {prog.committeeName}
+                                        ðŸ›ï¸ {prog.committeeName}
                                       </span>
                                     )}
                                     <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border ${
@@ -9258,7 +9258,7 @@ const handleDownloadPDF = () => {
                                   </div>
                                   <h5 className="text-stone-850 font-black text-xs font-heading capitalize truncate">{prog.title}</h5>
                                   <p className="text-stone-500 text-[10px] font-semibold truncate">
-                                    Coord: {prog.coordinators?.[0]?.fullName || 'Unassigned'} • Volunteers: {prog.volunteers?.length || 0} • Participants: {prog.participants?.length || 0}
+                                    Coord: {prog.coordinators?.[0]?.fullName || 'Unassigned'} â€¢ Volunteers: {prog.volunteers?.length || 0} â€¢ Participants: {prog.participants?.length || 0}
                                   </p>
                                   {totalExp > 0 && (
                                     <p className="text-[9.5px] font-mono text-[#0f4c2a] font-bold">
@@ -9388,7 +9388,7 @@ const handleDownloadPDF = () => {
                                       </span>
                                       {prog.committeeName && (
                                         <span className="text-[9px] font-bold text-stone-600 bg-stone-100 border border-stone-200 px-2 py-0.5 rounded-lg">
-                                          🏛️ {prog.committeeName}
+                                          ðŸ›ï¸ {prog.committeeName}
                                         </span>
                                       )}
                                       <span className="text-[9px] font-mono text-stone-400">ID: {prog.id}</span>
@@ -9525,7 +9525,7 @@ const handleDownloadPDF = () => {
                                           <div key={res.id} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                             <div>
                                               <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
-                                              <span className="text-[9px] text-stone-500 block">Unit {res.displayUnitNumber} • {res.email}</span>
+                                              <span className="text-[9px] text-stone-500 block">Unit {res.displayUnitNumber} â€¢ {res.email}</span>
                                             </div>
                                             <button
                                               type="button"
@@ -9633,7 +9633,7 @@ const handleDownloadPDF = () => {
                                               <div key={res.gmkId} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                                 <div>
                                                   <span className="font-extrabold text-stone-900 block">{res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded ml-1">Primary</span></span>
-                                                  <span className="text-[9px] text-stone-500 block">Flat: {res.displayUnitNumber} • {res.email}</span>
+                                                  <span className="text-[9px] text-stone-500 block">Flat: {res.displayUnitNumber} â€¢ {res.email}</span>
                                                 </div>
                                                 <button
                                                   type="button"
@@ -9656,7 +9656,7 @@ const handleDownloadPDF = () => {
                                                 <div key={fm.id} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                                   <div>
                                                     <span className="font-extrabold text-stone-900 block">{fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded ml-1 capitalize">{fm.relationship || 'Family'}</span></span>
-                                                    <span className="text-[9px] text-stone-500 block">Flat: {primaryRes?.displayUnitNumber || 'N/A'} • {fm.email || primaryRes?.email || 'N/A'}</span>
+                                                    <span className="text-[9px] text-stone-500 block">Flat: {primaryRes?.displayUnitNumber || 'N/A'} â€¢ {fm.email || primaryRes?.email || 'N/A'}</span>
                                                   </div>
                                                   <button
                                                     type="button"
@@ -9739,7 +9739,7 @@ const handleDownloadPDF = () => {
                                           <div key={partId} className="p-2.5 bg-emerald-50/30 border border-emerald-100 rounded-xl flex items-center justify-between">
                                             <div>
                                               <span className="text-xs font-black text-stone-900 block">{partName}</span>
-                                              {partUnit && <span className="text-[9px] text-stone-500 font-bold block">Unit {partUnit} {partPhone ? `• 📞 ${partPhone}` : ''}</span>}
+                                              {partUnit && <span className="text-[9px] text-stone-500 font-bold block">Unit {partUnit} {partPhone ? `â€¢ ðŸ“ž ${partPhone}` : ''}</span>}
                                             </div>
                                             <button
                                               type="button"
@@ -9850,15 +9850,15 @@ const handleDownloadPDF = () => {
                                                     )}
                                                   </div>
                                                   <div className="text-[8.5px] text-stone-500 font-bold truncate">
-                                                    Unit {candidate.unitDisplay} • {candidate.relationship}
+                                                    Unit {candidate.unitDisplay} â€¢ {candidate.relationship}
                                                   </div>
                                                   {isChild ? (
                                                     <div className="text-[8.5px] font-mono text-amber-800 font-bold truncate">
-                                                      👨‍👩‍👧 Parent Contact: {candidate.phone || 'N/A'}
+                                                      ðŸ‘¨â€ðŸ‘©â€ðŸ‘§ Parent Contact: {candidate.phone || 'N/A'}
                                                     </div>
                                                   ) : (
                                                     <div className="text-[8.5px] font-mono text-emerald-800 font-bold truncate">
-                                                      📱 Phone: {candidate.phone || 'N/A'}
+                                                      ðŸ“± Phone: {candidate.phone || 'N/A'}
                                                     </div>
                                                   )}
                                                 </div>
@@ -10014,56 +10014,696 @@ const handleDownloadPDF = () => {
                                         <button
                                           type="button"
                                           disabled={!isProgramDirty || isSubmitting}
-                                          onClick={handleSaveProgramWorkspax��=�n�F����e`�fݭn][�d(���-A-;RͮVsE6$ے�0�4o���],��������=���"YU,Jj��L��[�����鰛�����h��>�Y�^����u{��I��_7�h��Od|f�?�l����'�������_t�$f�!��<q�*"�锅��C�\�����;d!��=��qfa��i�Nb���0�l�C|d��L����Ѝ��cí`J7�nov��cWč��&���}�^[�^�nHm��g&�벽A��%��h��d��u�!�����*?o=���`�m�ض��
-�l�����Y�fq�ʷ��7+-Ü��k��>��_y�
-�"��p�L>�Q����L�	L%%��ȍ�c����ր�A��$�I�mv�T3�3�91�B���c���d>���������8&AH�ZDb:����.�TPjԱ@P�{��W��|�Od�CN_�韝9~�'g{ߑ?������`^;;;d9d�n��D�L�<)�p!�A�щ�Ә�Gt��L*+?��xP���h:h�I��k;�G���;.���Y�����ŗ�M�9����"l[C����
-E� �;��Z��_wG��T#�ǌᔒj� r*�����f�:^W�zZ�� r�b�����SN�K�g8է$dH~OaC®�A��"��ᲈ�8K�v�����:U�UE�����y�Y�
-9���īL^ZpxFpJ�"�����<�\�Nސ#z�b�:���
-�Ҙ�\�8��q���;&Θ�ɟC�
-�␓ |��h��A������������η��
-N�6�R�Tp��g WjE^*�K� \E��'�k����9A�AJB��#K����r�L�B64o��@���2Ｌ4I��c��(�q�%��G�����������	�NY���p
-�w6@�-:��B�
-a���Z�k�/1锞+P�7�yqt7d�����e��� `���֗�1!�Ǯ7��nX���a�I�s'�eBP�7/��M��1�%ݪ"��1GV�#*�VD��tZ@	�K;�`�����|*��@��ٞ��*T�7WRCwg�F���w�p���h�o�ֻd�	7D2,u�@��m��(W8����� ����j�%��d����7��Jc7�`�� Z�J#��n�]����+�Q�V�6��xMa���x��M}a��&X�Fk��A
-w��=e�4�~�r�^���hg.�U\��v���~"�dv��_����2�2����	IߙK껁(N���C�̸3��S?+3b=[*��w�"(���	���������C��߀�p��^��'�L$���`�pA�C@�0q�`DF�N�zU��
-v� :�
-w^p]E�hÖ�ԁ�E�J�x�C�̑���W�$N�������p���~����*�,�l')#�T(;���@I��0㍂&g�m��DB�fUE;�t������_�|���F��xC{��@_ �h�
-�ۻ����/ޭ����
-��%s��8LGv�C=g�g��DK��Y<'�OI#�׍���^��d�F�x�m��!�����i_��Ot���VFc�<�)l�|)�H�BI���!u6dF	K�B!fі]�2f��$�
-�C�C���{.^vc�2���
-l��Y ���Y"�'n|_@+z�4�?��fs �s ́�X���r���ob�oF�22�uF����V��zx�\ı�}�0�6��EL�}�
-��d�] ;���g�w*}}���T�T������5?񋯧�O�[�O2�Н"���e��4�澈V�Xm"F�����)l&���J��;2a��H��FJ�Ag��	h���_-���g��@�
-��!�Y��?<2�%�GJ��:�l-M�*��
-k	�����������K&�^M�d��A�;��ڗ�
-O��Go!h!$����h����������Ā2΂E�b��E�{>�ÃY�0�Sə�ܬ�%ά��Q�w{�]Yb��1PɮN�'�E��&L�.R���^���yNM�Uc�Jx�w$��ZŪN\Zj�^�"r�� C��S0��3��Z�q���r�
-��?�w|�BM�㧕��� 8-o�;a�1���-�${J�F﷎τRi�HhL_��d�8�vX�G����)~�?�F��*:K�vЄ��iG�_��<��yVg�Qbk��-�L�aف����5ktH��k9 ���Kn�6��E�G��� ")X�2���z�X��H"��_l� 1�� H�J�QY-��y�IB)��h�[��Ot�y�w�yR@��C�yR֑LBI�R^��ޏY*���<�Vz`ԕ�!������{inIk9�R��r#�	N�n����>g�~>i:&�V`�p�w]M��q��⌛�!��΋����
-h��dv5�p�	�6@�qZ���:9�9ʉ:��'���E�o�ru�k�U����|)|Z���w+����$Z���'
-�~kG�q��ل�0C�`��8��82��kK��ӂ���|�@���;&U�O(�㸰�X�'/^������$��D7���g���X��ivI������>�E�L��aίLf��V���J�m�?�&����m��׵����Y��H��6�ӽ(Bp_�N.�ݻ��3ia����/�C�;]؈Z����a}��@ަRb3��;�\I6h�����>��3����Z��K�����+F�5�+�Z࡝L�i�Y�Sn��̒oa�e�mI��h+<�5%|0전'��w��x��@1lv�ј�3y_1�	�7�����crp~k
-|ВP���8�ġ�#����
-;r�88
-.Y�⧵�q'�7��%�-߱B~��fXt���v�x|#��J��'O�`1	��[�.���Q��-T?Irq��V�IfQ��6���3�P�
-hX;ͪq���d�=}eSn*T����`ߝ�/�>�B�ze1����[�&����{J<:`��#^��U����q��~l!��K���M�T7H֕�L� b�N7�V.�o5'ID�3� �l4�\��j6���x�ь�}!�S�>u|:ma��gV���N��v�3��;�ЮQ@��~�}����{	����jc#+��A�_�˞�a���G�G�ZU���$��Y>H`__."����֣��\{°)�˗�� �W�u��r�
-���4��=�	�s�U�a��2a�at;ki�f^b�}|�[��Ul%X�`_]��<T�e@�� ������q�aG��аo2�R�pM�AY�,�f�]pe�����,�]��F��zY��z3 �\7��=��1���S-&/�|�k�e��C[��X����#sd��w:�+)�o� �D2_�D��7ew�(pf�V0���ޞ���B�=� �Z���@��lo<�[KM�3�BҒl�#7��<��RټjZ|I������e�n|�)��H�VAlxˀO�{ȮQٟ8�a�y��f'�����+�h����6��^oU�ec#(h �-tJ�X+\��I�S�I��x�75����]Y1���!
-��c,�Vo�^?��ˣ혷ȱCȣ m�9��$�J�;�,?
-�h�9a�9��w�	�$�qSn�Rht�S��2�Y��������@z)?��;%?�xc�V�ڷ��]��q��,�z���Ci��n=t%��
-`�ѷe���f�,�B�.a<��cTL1-�{����O���>0��$�}���TMz�D�ن �
-+���=����ٺUť�M���h�ElwJ��(j]~.�GaDX�[#c�A�^K�K�&����6Ƥ�I�'֯���͡�]Ǯs�-s�>u3�+JI4t^{��zYa�%� @<z-�;�T�X�k��uʁL���hJEt��rq'`.������*�9 d�a0E�!�>7������mJ�`L�֘)ɬ�����;����!5M����q��"AY��`��O�����f��+Q/Ry�U�A�2-�?�i���Tz��v�j���nY�+������6ɸ��迖K���T1�W�F��
-4�?���^i���.T]�YoGm�W!�ˡS7���˲��fh"}�����w��ɤ֥���)��-�:�,�+�ng�K����x�]N$VL�kɣ@��#�⻐<��;�<LW�G��]ǐ�w	iЍo�zR��ɟ�Q�|��6���
-�W�V��N"���Zj�`�T�� ֆVw2��t"Sޅ�W�'rO#V�͊j1�ʸ�-��0
-��0����0�C���o~ʵ�k��Uc��z��k��K�w��{��x
-�JH�\>�l��HzxN����MT�چ�u��B<����7�D]WC��^:�H*
-D-�=[����+Q+3�d|ig�T�$	\B�鈮�<C:���3�����bm�\6�=���^ϖv��[*/Y#bӝ�:�j�v��nU���RɅ�H���~k�V
-����W���?)ޔ'6x�j_�x�1I8���)�B�6�kt��Q_�Y��:8�Fh�IKkS �Q[A�Vjڸ�PJ±�*1ͦ��>���v?M�V�c�y�I:mE��3������s
-̮�I�����jR	�҉}uU���w%�]:߹�6B�бh;Q �eN�ɮ)Ώ�Le�$-5������S,�B�W`f���$�O�k�S"���[�&�R^5� /����)�V��ϵ{�9cׯ�*�V�
-��J��`�\h�pNE���G�yH�gR�#U��w�I�/꿃SU�nV��Fݟ��(��'Ab\%�_�ܒ[�e�UE��Sv�^m���*�\�;��L��r��ܹ^)xh_⽸�E�������Y%'�����>9�����3r����h�'���`�Hv!N�_p2d"P?>���HJ�t��nw���e�br���1ܐ8Y_vb���w��N�9�f>�I�W^@�<���g������Q���$#�qF���L���ge�����.S�G���CEGiŏ��1��GU�:��(��x������6�z���Z#�{:K�j���g�v��+� $� %�S&R�G΂�3�o�)	��&ն;J�2p8,��_�N>����.��M׬Kͬ
-����Z�#��R����r����~�oT~�ꄕ���n�6�w�@�~������98<�{s�W�(�ֺ$Hx��X��ph����1c�D1��e�}K����@����4
-tJ�[�r�n���c����$o�����u���#�ܑɛ`�P��޲�����ʏ���V"K}��K��X��h#d���Ы����"��g���\/��ݑF{7��qS�\���a�D_��N���{G�������o&zsD}z��4$�� ���V�
-�]�{��� �̐ˮ~e�
-�Q���S2�) �*����:���{�#u�m^���}]�Y��٩R�ĉ�:�p�H�N�FOZ ��B,��Q9��Z�� ]�2���]�xE�~���9U����J��8�L"c)���&3���R=ӝ�n�ۭ���/���E:�������m�u��'�-KQ�yXn0
-S�^�+��P.E%��BZ�o�s��\��e=�Z��^����\�Q9�K�������w{��6������7�?*��K�0�Y��y�FU*�$[���}ߘf$|����T	��[��E]����pa���M8�����m _���7p��{�՛��L6\���&bʥ�����zWՅ��wI[Ѧ�g�Ӫ�aj[&)�F�ThJ���}nAG'�S��->�j���=�.��+ ��IT����sS8 �9e#,��*�{�_�?�g��|(;{V[���`#ˇ��;eX��q������-�I�FeV3��Ԓv�҅����}@@d��IK�
- ��Lt��K4�L�h
-��"�a�� ���g*��M�IVͯ�*��b��>��J�LO��؀��~��X.7K�)� �LM�w�%�Tr/�>�`��U�BM}�D	*�����^Q�km�F�rwY[�Z���������re}pM*�R݀7͉!�V3R�'zō�.���H�/:xJ`ӈL�������v�����Я�� ���
-�;��T�wJa%SRSf�9�2��=T��X�[�䂜!ݍ �����M��i4&N��/��!�.�m��S��`�X�mv;o�u�R[=J5U�˽�kjo
-/{�&�$����'�d\+l�U˷�O��o�܁u|[-���=���]��w�w��l�r���e)DD�NҨ3>��RAraj	�$�?�RD��+���!� Pm���Q��\+J�
-2��o��}U��L9l��,��1�*^o�F>D�a���
-}�$��,�j0�իP��ư��]՘%8��	�ZNzȋ�K�_�����܍} frp�����@<�3/$�
-XJ\K�*9����eB�Fq2�1g�l�蛯�  �� �
+                                          onClick={handleSaveProgramWorkspace}
+                                          className="px-3 py-1.5 bg-[#d4af37] hover:bg-[#c4a132] text-stone-900 rounded-lg text-[10px] uppercase tracking-wider font-black cursor-pointer shadow-xs transition-all disabled:opacity-50 flex items-center space-x-1"
+                                        >
+                                          <Save className="w-3.5 h-3.5" />
+                                          <span>Save</span>
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
+                  Select an active event from the top right or Events tab to view programs.
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* 5. REGISTRATIONS TAB */}
+          {activeTab === 'registrations' && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
+                    Event Registration Console
+                  </h3>
+                  <p className="text-stone-550 text-[10px] font-bold">Track, review, and export active registrant tallies in real-time.</p>
+                </div>
+              </div>
+
+              {selectedEventId && activeEvent ? (
+                <div className="space-y-6">
+                  {/* Strict Tally KPI Layout (Only 4 specific counts, NO charts, NO dashboards, NO extra KPI widgets) */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-heading">
+                    <div className="bg-white border border-stone-200 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
+                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-wider">Families Registered</span>
+                      <strong className="text-lg text-stone-900 font-black mt-2">{stats.familiesCount}</strong>
+                    </div>
+                    
+                    <div className="bg-white border border-stone-200 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
+                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-wider">Residents Registered</span>
+                      <strong className="text-lg text-stone-900 font-black mt-2">{stats.residentsCount}</strong>
+                    </div>
+
+                    <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
+                      <span className="text-[10px] uppercase font-black text-emerald-800 tracking-wider">Adults</span>
+                      <strong className="text-lg text-[#0f4c2a] font-black mt-2">{stats.adultsCount}</strong>
+                    </div>
+
+                    <div className="bg-amber-50/40 border border-amber-150 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
+                      <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider">Children</span>
+                      <strong className="text-lg text-amber-800 font-black mt-2">{stats.childrenCount}</strong>
+                    </div>
+                  </div>
+
+                                    {registrations.length > 0 && (
+                    <div className="flex justify-end pt-2 mb-4">
+                      <button
+                        onClick={handleDeleteAllRegistrations}
+                        disabled={isSubmitting}
+                        className="px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1.5 shadow-xs"
+                        title="Delete All Registrations (Bulk Reset)"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                        <span>Delete All Registrations</span>
+                      </button>
+                    </div>
+                  )}
+                  <RegistrationReportingWorkspace 
+                    events={events}
+                    registrations={registrations}
+                    families={families}
+                    familyMembers={familyMembers}
+                    activeEvent={activeEvent}
+                    setPaymentModalReg={setPaymentModalReg}
+                    isSubmitting={isSubmitting}
+                  />
+                </div>
+              ) : (
+                <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
+                  Select an active event from the top right or Events tab to view registrations.
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* 6. REPORTS TAB */}
+          {activeTab === 'reports' && (
+            <div className="space-y-6 animate-fadeIn font-sans">
+              <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
+                    Reports : Reports
+                  </h3>
+                  <p className="text-stone-550 text-[10px] font-bold">Consolidated review of financial statements, coordination stats, and attendance tallies.</p>
+                </div>
+              </div>
+
+              {selectedEventId && activeEvent ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Financial & Tally Sheet Card */}
+                  <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
+                    <div className="border-b border-stone-150 pb-2">
+                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                        <span>ðŸ“Š</span>
+                        <span>Registrations</span>
+                      </h4>
+                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Registrations</p>
+                    </div>
+
+                    {(() => {
+                      const stats = calculateStats();
+                      return (
+                        <div className="space-y-3.5">
+                          <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
+                            <div className="p-3 bg-stone-50 flex justify-between">
+                              <span className="text-stone-500">Event Status:</span>
+                              <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
+                            </div>
+                            <div className="p-3 flex justify-between">
+                              <span className="text-stone-500">Total Registered Units:</span>
+                              <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
+                            </div>
+                            <div className="p-3 flex justify-between">
+                              <span className="text-stone-500">Registered:</span>
+                              <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
+                            </div>
+                            <div className="p-3 flex justify-between">
+                              <span className="text-stone-500">Adult Count:</span>
+                              <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
+                            </div>
+                            <div className="p-3 flex justify-between">
+                              <span className="text-stone-500">Children Count:</span>
+                              <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
+                            </div>
+                            <div className="p-3 flex justify-between">
+                              <span className="text-stone-500">Event Venue:</span>
+                              <span className="font-extrabold text-stone-900">{configVenue || 'Not Set'}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setShowSummaryModal(true)}
+                              className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs"
+                            >
+                              Reports
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleExportCSV}
+                              className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg transition-all cursor-pointer shadow-xs"
+                            >
+                              Export Report CSV
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </GMKCard>
+
+                  {/* Program Coordination & Committees Summary Card */}
+                  <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
+                    <div className="border-b border-stone-150 pb-2">
+                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                        <span>ðŸ¤</span>
+                        <span>Committees & Programs Readiness</span>
+                      </h4>
+                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Assigned leadership, coordinator status, and team assignments.</p>
+                    </div>
+
+                    <div className="space-y-3.5 text-xs">
+                      <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150">
+                        <div className="p-3 bg-stone-50 flex justify-between items-center font-semibold">
+                          <span className="text-stone-500">Active Committees:</span>
+                          <span className="font-extrabold text-stone-900">{activeCommittees.length}</span>
+                        </div>
+                        <div className="p-3 flex justify-between items-center font-semibold">
+                          <span className="text-stone-500">Committee Leads Assigned:</span>
+                          <span className="font-extrabold text-stone-900">
+                            {activeCommittees.reduce((acc, curr) => acc + (curr.members || []).filter(m => m.role === 'Lead').length, 0)}
+                          </span>
+                        </div>
+                        <div className="p-3 flex justify-between items-center font-semibold">
+                          <span className="text-stone-500">Active Programs:</span>
+                          <span className="font-extrabold text-stone-900">
+                            {activePrograms.filter(p => p.eventId === selectedEventId).length}
+                          </span>
+                        </div>
+                        <div className="p-3 flex justify-between items-center font-semibold">
+                          <span className="text-stone-500">Total Program Coordinators:</span>
+                          <span className="font-extrabold text-stone-900">
+                            {activePrograms.filter(p => p.eventId === selectedEventId && p.coordinatorGmkId).length}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowCommitteeDataModal(true)}
+                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
+                        >
+                          <span>ðŸ‘¥</span>
+                          <span>Committee data</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportCommitteeDataPDF}
+                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
+                        >
+                          <span>ðŸ“„</span>
+                          <span>Export to PDF</span>
+                        </button>
+                      </div>
+
+                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                        <p className="text-[10px] text-stone-600 font-bold leading-relaxed">
+                          Want to adjust committee assignments or programs? Go to the <span className="text-[#0f4c2a] underline font-extrabold cursor-pointer" onClick={() => setActiveTab('committees')}>Committees</span> section to assign leads or add events directly.
+                        </p>
+                      </div>
+                    </div>
+                  </GMKCard>
+
+                  {/* Certificates Section */}
+                  <div className="md:col-span-2 pt-4">
+                    <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
+                      <div className="border-b border-stone-150 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
+                            <span>ðŸ“œ</span>
+                            <span>Certificates</span>
+                          </h4>
+                          <p className="text-[9px] text-stone-500 font-bold mt-0.5">
+                            Generate official PDF certificates for Committee Leads, Coordinators, Volunteers, and Program Participants.
+                          </p>
+                        </div>
+
+                        {(() => {
+                          const recipients = getCertificateRecipients();
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => generateBulkCertificatesPDF(recipients)}
+                              disabled={recipients.length === 0}
+                              className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 shrink-0"
+                            >
+                              <span>ðŸ“¥</span>
+                              <span>Download All Certificates (PDF)</span>
+                            </button>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Filter Sub-Tabs & Search */}
+                      {(() => {
+                        const allRecipients = getCertificateRecipients();
+                        const filteredRecipients = allRecipients.filter(r => {
+                          const matchesTab = certTab === 'all' ? true :
+                            certTab === 'leads' ? r.type === 'Committee Lead' :
+                            certTab === 'coordinators' ? r.type === 'Coordinator' :
+                            certTab === 'volunteers' ? r.type === 'Volunteer' :
+                            certTab === 'participants' ? r.type === 'Participant' : true;
+
+                          const matchesSearch = certSearch.trim() === '' ? true :
+                            r.name.toLowerCase().includes(certSearch.toLowerCase()) ||
+                            r.roleOrProgram.toLowerCase().includes(certSearch.toLowerCase());
+
+                          return matchesTab && matchesSearch;
+                        });
+
+                        return (
+                          <div className="space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              {/* Filter Tabs */}
+                              <div className="overflow-x-auto hide-scrollbar">
+                                <div className="flex gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200 text-[10px] font-extrabold font-mono min-w-max pb-px">
+                                {[
+                                  { id: 'all', label: 'All', count: allRecipients.length },
+                                  { id: 'leads', label: 'Committee Leads', count: allRecipients.filter(r => r.type === 'Committee Lead').length },
+                                  { id: 'coordinators', label: 'Coordinators', count: allRecipients.filter(r => r.type === 'Coordinator').length },
+                                  { id: 'volunteers', label: 'Volunteers', count: allRecipients.filter(r => r.type === 'Volunteer').length },
+                                  { id: 'participants', label: 'Participants', count: allRecipients.filter(r => r.type === 'Participant').length }
+                                ].map(tab => (
+                                  <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setCertTab(tab.id as any)}
+                                    className={`px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1 ${
+                                      certTab === tab.id
+                                        ? 'bg-[#0f4c2a] text-white shadow-xs'
+                                        : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
+                                    }`}
+                                  >
+                                    <span>{tab.label}</span>
+                                    <span className={`px-1.5 py-0.2 rounded-full text-[8px] ${certTab === tab.id ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'}`}>
+                                      {tab.count}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                              </div>
+
+                              {/* Search Box */}
+                              <input
+                                type="text"
+                                value={certSearch}
+                                onChange={(e) => setCertSearch(e.target.value)}
+                                placeholder="Search recipient name..."
+                                className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] w-full sm:w-48"
+                              />
+                            </div>
+
+                            {/* Recipients List Table */}
+                            {filteredRecipients.length === 0 ? (
+                              <div className="text-center py-8 text-stone-400 font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-xl">
+                                No certificate recipients found matching criteria.
+                              </div>
+                            ) : (
+                              <div className="border border-stone-200 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs">
+                                {filteredRecipients.map((rec) => (
+                                  <div key={rec.id} className="p-3.5 bg-white hover:bg-stone-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center space-x-2">
+                                        <span className="font-extrabold text-stone-900">{rec.name}</span>
+                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                                          rec.type === 'Committee Lead' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                                          rec.type === 'Coordinator' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                                          rec.type === 'Volunteer' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                          'bg-purple-50 text-purple-800 border-purple-200'
+                                        }`}>
+                                          {rec.type}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-stone-500 font-bold">{rec.context}</p>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => generateSingleCertificatePDF(rec)}
+                                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-xl transition-all cursor-pointer font-extrabold text-[10px] uppercase tracking-wider flex items-center space-x-1 shrink-0"
+                                    >
+                                      <span>ðŸ“œ</span>
+                                      <span>Download PDF Certificate</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </GMKCard>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
+                  Select an active event from the top right or Events tab to view analytics.
+                </div>
+              )}
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {/* Global Summary Modal Overlay */}
+      {showSummaryModal && activeEvent && (() => {
+        const stats = calculateStats();
+        return (
+          <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans">
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="absolute right-4 top-4 text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div>
+                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Registrations</span>
+                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEvent.eventName || activeEvent.title}</h3>
+              </div>
+
+              <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
+                <div className="p-3 bg-stone-50 flex justify-between">
+                  <span className="text-stone-500">Event Status:</span>
+                  <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Total Registered Units:</span>
+                  <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Registered:</span>
+                  <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Adult Count:</span>
+                  <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Children Count:</span>
+                  <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
+                </div>
+                <div className="p-3 flex justify-between">
+                  <span className="text-stone-500">Event Venue:</span>
+                  <span className="font-extrabold text-stone-900">{configVenue || 'Not Set'}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close Summary View
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Global Committee Data Modal Overlay */}
+      {showCommitteeDataModal && activeEvent && (
+        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans max-h-[85vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white z-10 flex items-start justify-between border-b border-stone-150 pb-3">
+              <div>
+                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Committee Roster</span>
+                <h3 className="text-sm font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
+                  Committee Data â€” {activeEvent.eventName || activeEvent.title}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowCommitteeDataModal(false)}
+                className="text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-semibold">
+              {activeCommittees.filter(c => c.status !== 'archived').length === 0 ? (
+                <p className="text-stone-400 italic text-center py-6">No active committees configured.</p>
+              ) : (
+                activeCommittees.filter(c => c.status !== 'archived').map(comm => {
+                  const leads = (comm.members || []).filter(m => m.role === 'Lead').map(m => m.fullName);
+                  const volunteers = (comm.members || []).filter(m => m.role !== 'Lead').map(m => m.fullName);
+
+                  return (
+                    <div key={comm.id} className="border border-stone-200 rounded-2xl p-4 bg-stone-50/50 space-y-3">
+                      <div className="flex items-center justify-between border-b border-stone-200 pb-2">
+                        <h4 className="font-extrabold text-[#0f4c2a] font-heading text-xs uppercase">{comm.name}</h4>
+                        <span className="text-[9px] font-bold text-stone-500 bg-white px-2 py-0.5 rounded-md border border-stone-200">
+                          {leads.length} Leads â€¢ {volunteers.length} Volunteers
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Leads:</span>
+                          {leads.length === 0 ? (
+                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {leads.map((name, i) => (
+                                <span key={i} className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-[11px] font-bold">
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Volunteers:</span>
+                          {volunteers.length === 0 ? (
+                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {volunteers.map((name, i) => (
+                                <span key={i} className="px-2.5 py-1 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-lg text-[11px] font-bold">
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 border-t border-stone-150">
+              <button
+                type="button"
+                onClick={handleExportCommitteeDataPDF}
+                className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer shadow-xs flex items-center space-x-1"
+              >
+                <span>ðŸ“„</span>
+                <span>Export to PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCommitteeDataModal(false)}
+                className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECORD / PROCESS PAYMENT OVERLAY MODAL */}
+      {paymentModalReg && (() => {
+        const amtDue = paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0;
+        const amtRecNum = parseFloat(paymentModalAmtRec) || 0;
+        const diff = amtRecNum - amtDue;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white border border-stone-200 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-scaleUp text-left">
+              <div className="flex justify-between items-start border-b border-stone-150 pb-3">
+                <div>
+                  <span className="text-[9px] font-mono font-bold text-[#d4af37] uppercase tracking-wider block">Finance Committee Operational Tool</span>
+                  <h3 className="text-base font-black text-[#0f4c2a] font-heading">Record / Process Registration Payment</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalReg(null)}
+                  className="p-1 hover:bg-stone-100 rounded-lg text-stone-400 hover:text-stone-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* HOUSEHOLD DETAILS */}
+              <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">GMK Household ID</span>
+                  <span className="font-mono font-black text-stone-900 bg-stone-200/80 px-2 py-0.5 rounded text-[10px]">
+                    {paymentModalReg.primaryMemberGmkId || 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">Primary Member Email</span>
+                  <span className="font-semibold text-stone-800">{paymentModalReg.primaryMemberEmail}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-stone-500 font-bold uppercase text-[9px]">Total Registered Attendees</span>
+                  <span className="font-mono font-black text-[#0f4c2a]">{paymentModalReg.totalParticipants || 1} Persons</span>
+                </div>
+              </div>
+
+              {/* PAYMENT ENTRY & CALCULATION */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 p-3 rounded-2xl">
+                  <span className="text-xs font-bold text-emerald-900 uppercase">Total Registration Fee Due</span>
+                  <span className="text-base font-mono font-black text-[#0f4c2a]">OMR {amtDue.toFixed(3)}</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
+                    Amount Received from Resident (OMR)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 font-mono text-stone-400 text-xs font-bold">OMR</span>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={paymentModalAmtRec}
+                      onChange={(e) => setPaymentModalAmtRec(e.target.value)}
+                      placeholder="0.000"
+                      className="w-full pl-12 pr-4 py-2 font-mono font-black bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-300 focus:border-[#0f4c2a] rounded-xl text-sm text-stone-900 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* STATUS BADGE / CALCULATION PREVIEW */}
+                <div className={`p-3 rounded-xl border text-xs font-bold ${
+                  (amtRecNum === 0 && amtDue > 0) ? 'bg-stone-50 border-stone-300 text-stone-700' :
+                  Math.abs(diff) < 0.0001 ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
+                  diff < 0 ? 'bg-amber-50 border-amber-300 text-amber-950' :
+                  'bg-blue-50 border-blue-300 text-blue-950'
+                }`}>
+                  <div className="flex justify-between items-center">
+                    <span className="uppercase text-[9px]">Calculated Payment Status</span>
+                    <span className="font-black uppercase">
+                      {(amtRecNum === 0 && amtDue > 0) ? 'Pending' : Math.abs(diff) < 0.0001 ? 'Fully Paid' : diff < 0 ? 'Partially Paid' : 'Overpaid / Refund Due'}
+                    </span>
+                  </div>
+                  {diff < 0 && (
+                    <p className="text-[10px] mt-1 text-amber-800">
+                      Remaining Balance Due: <strong className="font-mono font-black">OMR {Math.abs(diff).toFixed(3)}</strong>
+                    </p>
+                  )}
+                  {diff > 0 && (
+                    <p className="text-[10px] mt-1 text-blue-800">
+                      Refund Amount Owed to Resident: <strong className="font-mono font-black">OMR {diff.toFixed(3)}</strong>
+                    </p>
+                  )}
+                </div>
+
+                {/* PRESETS */}
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModalAmtRec(amtDue.toString())}
+                    className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[10px] font-bold uppercase rounded-lg border border-stone-250 transition-all cursor-pointer"
+                  >
+                    Set Full Amount
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentModalAmtRec('0');
+                      setPaymentModalRemarks('Fee Waived by Finance Committee');
+                    }}
+                    className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 text-[10px] font-bold uppercase rounded-lg border border-blue-200 transition-all cursor-pointer"
+                  >
+                    Mark Waived
+                  </button>
+                </div>
+
+                {/* REMARKS */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
+                    Finance Committee Remarks / Payment Ref #
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentModalRemarks}
+                    onChange={(e) => setPaymentModalRemarks(e.target.value)}
+                    placeholder="e.g. Bank Transfer Ref #12345 / Cash collected at desk..."
+                    className="w-full px-3 py-2 font-bold bg-stone-50 border border-stone-250 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                  />
+                </div>
+              </div>
+
+              {/* ACTIONS */}
+              <div className="flex items-center space-x-2 pt-2 border-t border-stone-150">
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalReg(null)}
+                  className="flex-1 py-2.5 bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleRecordPaymentSubmit}
+                  className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[#d4af37]" />
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-[#d4af37]" />
+                      <span>Confirm & Record Payment</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {isConfirmOpen && confirmOptions && (
+        <GEASConfirmationDialogUI
+          options={confirmOptions}
+          onConfirm={handleConfirmSubmit}
+          onCancel={handleConfirmCancel}
+        />
+      )}
+    </div>
+  );
+}
