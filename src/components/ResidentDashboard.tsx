@@ -630,16 +630,27 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                 <Users className="w-4 h-4 text-[#d4af37]" />
                 <span>My Family Summary</span>
               </h4>
-              <GMKButton
-                variant="primary"
-                size="md"
-                onClick={() => { setForceEditingOnboarding(true); }}
-                className="flex items-center space-x-2 font-bold shadow-sm px-4 py-2 text-xs rounded-xl"
-                title="Edit Family & Household Profile"
-              >
-                <Edit className="w-3.5 h-3.5 text-[#d4af37]" />
-                <span>Edit</span>
-              </GMKButton>
+              <div className="flex flex-col items-end gap-1">
+                <GMKButton
+                  variant="primary"
+                  size="sm"
+                  onClick={() => { setForceEditingOnboarding(true); }}
+                  className="flex items-center space-x-1.5 font-bold shadow-2xs px-3 py-1.5 text-xs rounded-xl"
+                  title="Edit Family & Household Profile"
+                >
+                  <Edit className="w-3 h-3 text-[#d4af37]" />
+                  <span>Edit</span>
+                </GMKButton>
+                <button
+                  type="button"
+                  onClick={() => setIsChangePasswordOpen(true)}
+                  className="inline-flex items-center space-x-1 text-[10.5px] text-stone-500 hover:text-[#0f4c2a] font-semibold hover:underline cursor-pointer transition-colors py-0.5"
+                  title="Change Password"
+                >
+                  <Lock className="w-2.5 h-2.5 text-stone-400" />
+                  <span>Change password</span>
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-4">
@@ -730,32 +741,7 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
             </GMKCard>
           )}
 
-          {/* Account Security GMKCard */}
-          <GMKCard className="space-y-4">
-            <h4 className="text-xs font-extrabold text-[#0f4c2a] uppercase tracking-wider flex items-center space-x-1.5 font-heading border-b border-stone-100 pb-3">
-              <Lock className="w-4 h-4 text-[#d4af37]" />
-              <span>Account Security</span>
-            </h4>
-            <div className="flex items-center justify-between p-4 bg-stone-50 border border-stone-150 rounded-2xl">
-              <div>
-                <span className="text-stone-900 font-extrabold text-xs block">Firebase Authentication</span>
-                <span className="text-stone-600 text-[10px] font-semibold mt-1 block max-w-sm">
-                  Manage your secure login credentials. Your password is encrypted and authenticated directly via Firebase identity services.
-                </span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <GMKButton
-                  variant="outline"
-                  size="md"
-                  onClick={() => setIsChangePasswordOpen(true)}
-                  className="flex items-center space-x-2 font-bold shadow-sm px-4 py-2 text-xs rounded-xl"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Change Password</span>
-                </GMKButton>
-              </div>
-            </div>
-          </GMKCard>
+
 
         </div>
       )}

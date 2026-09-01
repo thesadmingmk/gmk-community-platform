@@ -203,7 +203,7 @@ export default function ChangePasswordModal({ isOpen, onClose, userEmail }: Chan
                       <span>Processing...</span>
                     </>
                   ) : (
-                    <span>CHANGE PASSWORD</span>
+                    <span>Change Password</span>
                   )}
                 </button>
               </div>

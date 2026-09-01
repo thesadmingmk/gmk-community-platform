@@ -2057,7 +2057,7 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                 <span className="px-1.5 py-0.5 bg-amber-50 border border-amber-200/60 rounded text-amber-900 font-bold">
                   Rev Date: {getTariffMetadata(showingPricingModalEvent).revisionDate}
                 </span>
-                <span>📅 Effective: <strong className="text-stone-700 font-bold">{getTariffMetadata(showingPricingModalEvent).fullFormatted}</strong></span>
+                <span>Effective: <strong className="text-stone-700 font-bold">{getTariffMetadata(showingPricingModalEvent).fullFormatted}</strong></span>
               </div>
               <p className="text-stone-500 text-xs mt-1">
                 Review the applicable registration rates and fee breakdown for this gathering.

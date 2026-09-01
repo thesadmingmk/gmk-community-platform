@@ -2031,18 +2031,22 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
       )}
 
       {/* Info notification lines */}
-      {errorMsg && (
-        <div className="bg-red-50 border-b border-red-200 px-6 py-3 text-red-800 text-xs font-bold text-center flex items-center justify-center space-x-2">
-          <X className="w-4 h-4 text-red-600 cursor-pointer shrink-0" onClick={() => setErrorMsg(null)} />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-      {successMsg && (
-        <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-3 text-emerald-800 text-xs font-bold text-center flex items-center justify-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-600 cursor-pointer shrink-0" onClick={() => setSuccessMsg(null)} />
-          <span>{successMsg}</span>
-        </div>
-      )}
+      {/* Centralized Fixed Alerts Layer */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center space-y-2 pointer-events-none w-full max-w-md px-4">
+        {successMsg && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center space-x-2.5 shadow-xl animate-fadeIn w-full pointer-events-auto">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0 cursor-pointer" onClick={() => setSuccessMsg(null)} />
+            <span className="font-sans font-bold text-xs">{successMsg}</span>
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl flex items-center space-x-2.5 shadow-xl animate-fadeIn w-full pointer-events-auto">
+            <X className="w-4 h-4 text-rose-600 shrink-0 cursor-pointer" onClick={() => setErrorMsg(null)} />
+            <span className="font-sans font-bold text-xs whitespace-pre-line">{errorMsg}</span>
+          </div>
+        )}
+      </div>
 
       {deletionReport && (
         <div className="max-w-7xl mx-auto mx-4 mt-4 bg-stone-50 border border-stone-200 rounded-lg p-4 font-mono text-xs text-stone-700 shadow-xs">

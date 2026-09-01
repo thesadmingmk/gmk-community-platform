@@ -78,10 +78,105 @@ export const isFinanceOwnedExpense = (exp: {
   if (exp.createdScope === 'committee') return false;
   if (exp.createdByScope === 'finance' || exp.createdByScope === 'event') return true;
   if (exp.committeeId === 'EVENT_EXPENSE' || exp.committeeId === 'event') return true;
-  if (formatCategoryLabel(exp.committeeName) === 'Event' || formatCategoryLabel(exp.categoryName) === 'Event') return true;
+  if (exp.committeeName && formatCategoryLabel(exp.committeeName) === 'Event') return true;
+  if (exp.categoryName && formatCategoryLabel(exp.categoryName) === 'Event') return true;
   if (exp.categoryId === 'EVENT_EXPENSE' || exp.categoryId === 'event') return true;
   if (exp.id && (exp.id.startsWith('exp_event_') || exp.id.startsWith('exp_finance_'))) return true;
   return false;
+};
+
+export const getExpensePayeeDisplayName = (exp: EventCommitteeExpense): string => {
+  if (exp.paidByName && exp.paidByName.trim()) {
+    return exp.paidByName.trim();
+  }
+  if (exp.payee && exp.payee.trim()) {
+    return exp.payee.trim();
+  }
+  if (exp.paidByType === 'resident' || exp.isPersonalPayment) {
+    return 'Resident';
+  }
+  if (exp.paidByType === 'sponsor') {
+    return 'Sponsor';
+  }
+  return 'Event Treasury';
+};
+
+export const getExpensePayeeTooltip = (exp: EventCommitteeExpense): string => {
+  const parts: string[] = [];
+  if (exp.paidByType === 'resident' || exp.isPersonalPayment) {
+    parts.push('Payment Source: Resident Out-of-Pocket');
+    if (exp.paidByName) parts.push(`Name: ${exp.paidByName}`);
+    if (exp.paidByResidentId) parts.push(`GMK ID: ${exp.paidByResidentId}`);
+    if (exp.paidByUnit) parts.push(`Unit: ${exp.paidByUnit}`);
+    if (exp.paidByPhone) parts.push(`Phone: ${exp.paidByPhone}`);
+    if (exp.paidByEmail) parts.push(`Email: ${exp.paidByEmail}`);
+    if (exp.payee && exp.payee !== exp.paidByName) parts.push(`Vendor / Payee: ${exp.payee}`);
+  } else if (exp.paidByType === 'sponsor') {
+    parts.push('Payment Source: Registered Sponsor');
+    if (exp.paidByName) parts.push(`Sponsor: ${exp.paidByName}`);
+    if (exp.payee && exp.payee !== exp.paidByName) parts.push(`Vendor / Payee: ${exp.payee}`);
+  } else {
+    parts.push('Payment Source: Event Treasury');
+    if (exp.payee) parts.push(`Vendor / Payee: ${exp.payee}`);
+  }
+  return parts.join(' | ');
+};
+
+export const getExpenseLifecycleStatus = (exp: EventCommitteeExpense & { isFinanceOwned?: boolean }): {
+  code: 'pending' | 'approved' | 'refund_pending' | 'refunded' | 'settled' | 'rejected';
+  label: string;
+  badgeClass: string;
+} => {
+  const isFin = exp.isFinanceOwned ?? isFinanceOwnedExpense(exp);
+  const isNonTreasury = exp.paidByType === 'resident' || exp.paidByType === 'sponsor' || exp.isPersonalPayment;
+  const isSettled = exp.settlementStatus === 'settled' || exp.payableStatus === 'refunded';
+
+  if (exp.financeStatus === 'rejected') {
+    return {
+      code: 'rejected',
+      label: 'Rejected',
+      badgeClass: 'bg-rose-100 text-rose-800 border border-rose-200'
+    };
+  }
+
+  if (!isFin && (exp.financeStatus === 'pending' || !exp.financeStatus)) {
+    return {
+      code: 'pending',
+      label: 'Pending Review',
+      badgeClass: 'bg-amber-100 text-amber-800 border border-amber-300'
+    };
+  }
+
+  // Accepted by Finance (or Finance Owned)
+  if (isNonTreasury) {
+    if (isSettled) {
+      return {
+        code: 'refunded',
+        label: 'Refunded',
+        badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+      };
+    }
+    return {
+      code: 'refund_pending',
+      label: 'Refund Pending',
+      badgeClass: 'bg-sky-100 text-sky-800 border border-sky-300'
+    };
+  }
+
+  // Treasury Expense
+  if (isSettled) {
+    return {
+      code: 'settled',
+      label: 'Settled',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+    };
+  }
+
+  return {
+    code: 'approved',
+    label: 'Approved',
+    badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+  };
 };
 
 interface FinanceWorkspaceProps {
@@ -176,10 +271,10 @@ export default function FinanceWorkspace({
   
   // Expenses Workspace Staged Filter State
   const [draftExpenseCommittee, setDraftExpenseCommittee] = useState<string>('all');
-  const [draftExpenseStatus, setDraftExpenseStatus] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
+  const [draftExpenseStatus, setDraftExpenseStatus] = useState<'all' | 'pending' | 'approved' | 'refund_pending' | 'refunded' | 'settled' | 'rejected' | 'accepted'>('all');
   const [draftExpenseSearch, setDraftExpenseSearch] = useState<string>('');
   const [appliedExpenseCommittee, setAppliedExpenseCommittee] = useState<string>('all');
-  const [appliedExpenseStatus, setAppliedExpenseStatus] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('all');
+  const [appliedExpenseStatus, setAppliedExpenseStatus] = useState<'all' | 'pending' | 'approved' | 'refund_pending' | 'refunded' | 'settled' | 'rejected' | 'accepted'>('all');
   const [appliedExpenseSearch, setAppliedExpenseSearch] = useState<string>('');
 
   // Refunds & Payables Workspace Staged Filter State
@@ -451,63 +546,98 @@ export default function FinanceWorkspace({
     }).filter(s => Boolean(s.name.trim()));
   }, [sponsorshipIncomeList]);
 
+  // Helper to remove any undefined properties recursively to guarantee 100% Firestore safety
+  const sanitizeFirestorePayload = <T,>(obj: T): T => {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj
+        .filter(item => item !== undefined)
+        .map(item => sanitizeFirestorePayload(item)) as unknown as T;
+    }
+    if (typeof obj === 'object') {
+      const result: Record<string, any> = {};
+      for (const [key, value] of Object.entries(obj as Record<string, any>)) {
+        if (value !== undefined) {
+          result[key] = sanitizeFirestorePayload(value);
+        }
+      }
+      return result as T;
+    }
+    return obj;
+  };
+
   // Clean expense payload to avoid any undefined field errors in Firestore
   const cleanExpensePayload = (exp: Partial<EventCommitteeExpense>): EventCommitteeExpense => {
-    const isResident = exp.paidByType === 'resident';
+    const isResident = exp.paidByType === 'resident' || exp.isPersonalPayment;
     const isSponsor = exp.paidByType === 'sponsor';
 
     const cleaned: Record<string, any> = {
       id: exp.id || `exp_${Date.now()}`,
-      categoryId: exp.categoryId,
-      categoryName: exp.categoryName,
       date: exp.date || new Date().toISOString().split('T')[0],
       description: (exp.description || '').trim(),
       amount: Number(exp.amount) || 0,
       createdAt: exp.createdAt || new Date().toISOString(),
       createdBy: exp.createdBy || profile?.email || 'finance_lead',
       paidByType: exp.paidByType || 'event_treasury',
-      isPersonalPayment: isResident
+      isPersonalPayment: Boolean(isResident)
     };
 
-    if (exp.payee && exp.payee.trim()) {
+    if (exp.categoryId && typeof exp.categoryId === 'string' && exp.categoryId.trim()) {
+      cleaned.categoryId = exp.categoryId.trim();
+    }
+    if (exp.categoryName && typeof exp.categoryName === 'string' && exp.categoryName.trim()) {
+      cleaned.categoryName = exp.categoryName.trim();
+    }
+    if (exp.payee && typeof exp.payee === 'string' && exp.payee.trim()) {
       cleaned.payee = exp.payee.trim();
+    }
+    if (exp.createdScope) {
+      cleaned.createdScope = exp.createdScope;
     }
 
     if (isResident) {
-      cleaned.paidByResidentId = exp.paidByResidentId || '';
-      cleaned.paidByName = exp.paidByName || '';
-      cleaned.paidByUnit = exp.paidByUnit || '';
-      cleaned.paidByPhone = exp.paidByPhone || '';
-      cleaned.paidByEmail = exp.paidByEmail || '';
-      cleaned.payableStatus = exp.payableStatus || 'pending';
-      cleaned.refundedAmount = Number(exp.refundedAmount) || 0;
+      if (exp.paidByResidentId && exp.paidByResidentId.trim()) cleaned.paidByResidentId = exp.paidByResidentId.trim();
+      if (exp.paidByName && exp.paidByName.trim()) cleaned.paidByName = exp.paidByName.trim();
+      if (exp.paidByUnit && exp.paidByUnit.trim()) cleaned.paidByUnit = exp.paidByUnit.trim();
+      if (exp.paidByPhone && exp.paidByPhone.trim()) cleaned.paidByPhone = exp.paidByPhone.trim();
+      if (exp.paidByEmail && exp.paidByEmail.trim()) cleaned.paidByEmail = exp.paidByEmail.trim();
+      if (exp.payableStatus) {
+        cleaned.payableStatus = exp.payableStatus;
+      }
+      if (exp.refundedAmount !== undefined && exp.refundedAmount !== null) {
+        cleaned.refundedAmount = Number(exp.refundedAmount) || 0;
+      }
     } else if (isSponsor) {
-      cleaned.paidBySponsorId = exp.paidBySponsorId || '';
-      cleaned.paidByName = exp.paidByName || '';
+      if (exp.paidBySponsorId && exp.paidBySponsorId.trim()) cleaned.paidBySponsorId = exp.paidBySponsorId.trim();
+      if (exp.paidByName && exp.paidByName.trim()) cleaned.paidByName = exp.paidByName.trim();
       cleaned.isPersonalPayment = false;
     }
 
-    if (exp.lastEditedBy) cleaned.lastEditedBy = exp.lastEditedBy;
-    if (exp.lastEditedAt) cleaned.lastEditedAt = exp.lastEditedAt;
+    if (exp.payableStatus) cleaned.payableStatus = exp.payableStatus;
+    if (exp.refundedAmount !== undefined && exp.refundedAmount !== null) cleaned.refundedAmount = Number(exp.refundedAmount) || 0;
+    if (exp.lastEditedBy && exp.lastEditedBy.trim()) cleaned.lastEditedBy = exp.lastEditedBy.trim();
+    if (exp.lastEditedAt && exp.lastEditedAt.trim()) cleaned.lastEditedAt = exp.lastEditedAt.trim();
     if (exp.financeStatus) cleaned.financeStatus = exp.financeStatus;
-    if (exp.acceptedBy) cleaned.acceptedBy = exp.acceptedBy;
-    if (exp.acceptedAt) cleaned.acceptedAt = exp.acceptedAt;
-    if (exp.rejectedBy) cleaned.rejectedBy = exp.rejectedBy;
-    if (exp.rejectedAt) cleaned.rejectedAt = exp.rejectedAt;
-    if (exp.rejectionReason) cleaned.rejectionReason = exp.rejectionReason;
-    if (exp.resubmittedBy) cleaned.resubmittedBy = exp.resubmittedBy;
-    if (exp.resubmittedAt) cleaned.resubmittedAt = exp.resubmittedAt;
+    if (exp.acceptedBy && exp.acceptedBy.trim()) cleaned.acceptedBy = exp.acceptedBy.trim();
+    if (exp.acceptedAt && exp.acceptedAt.trim()) cleaned.acceptedAt = exp.acceptedAt.trim();
+    if (exp.rejectedBy && exp.rejectedBy.trim()) cleaned.rejectedBy = exp.rejectedBy.trim();
+    if (exp.rejectedAt && exp.rejectedAt.trim()) cleaned.rejectedAt = exp.rejectedAt.trim();
+    if (exp.rejectionReason && exp.rejectionReason.trim()) cleaned.rejectionReason = exp.rejectionReason.trim();
+    if (exp.resubmittedBy && exp.resubmittedBy.trim()) cleaned.resubmittedBy = exp.resubmittedBy.trim();
+    if (exp.resubmittedAt && exp.resubmittedAt.trim()) cleaned.resubmittedAt = exp.resubmittedAt.trim();
     if (exp.settlementStatus) cleaned.settlementStatus = exp.settlementStatus;
-    if (exp.settledBy) cleaned.settledBy = exp.settledBy;
-    if (exp.settledAt) cleaned.settledAt = exp.settledAt;
-    if (exp.settlementMethod) cleaned.settlementMethod = exp.settlementMethod;
-    if (exp.settlementReference) cleaned.settlementReference = exp.settlementReference;
-    if (exp.settlementRemarks) cleaned.settlementRemarks = exp.settlementRemarks;
+    if (exp.settledBy && exp.settledBy.trim()) cleaned.settledBy = exp.settledBy.trim();
+    if (exp.settledAt && exp.settledAt.trim()) cleaned.settledAt = exp.settledAt.trim();
+    if (exp.settlementMethod && exp.settlementMethod.trim()) cleaned.settlementMethod = exp.settlementMethod.trim();
+    if (exp.settlementReference && exp.settlementReference.trim()) cleaned.settlementReference = exp.settlementReference.trim();
+    if (exp.settlementRemarks && exp.settlementRemarks.trim()) cleaned.settlementRemarks = exp.settlementRemarks.trim();
     if (exp.refundHistory && exp.refundHistory.length > 0) {
-      cleaned.refundHistory = exp.refundHistory;
+      cleaned.refundHistory = exp.refundHistory.filter(Boolean);
     }
 
-    return cleaned as EventCommitteeExpense;
+    return sanitizeFirestorePayload(cleaned) as EventCommitteeExpense;
   };
 
   // Filtered expenses with applied status and committee filters
@@ -517,12 +647,16 @@ export default function FinanceWorkspace({
         ? (exp.committeeId === 'EVENT_EXPENSE' || exp.committeeId === 'event' || formatCategoryLabel(exp.committeeName) === 'Event' || exp.createdScope === 'finance')
         : exp.committeeName.toLowerCase() === appliedExpenseCommittee.toLowerCase());
     
-    const expStatus = exp.financeStatus || 'pending';
-    const matchesStatus = appliedExpenseStatus === 'all' || expStatus === appliedExpenseStatus;
+    const statusObj = getExpenseLifecycleStatus(exp);
+    const matchesStatus = appliedExpenseStatus === 'all' || 
+      statusObj.code === appliedExpenseStatus ||
+      (appliedExpenseStatus === 'accepted' && (statusObj.code === 'approved' || statusObj.code === 'refund_pending' || statusObj.code === 'refunded' || statusObj.code === 'settled'));
 
+    const payeeName = getExpensePayeeDisplayName(exp);
     const matchesSearch = !appliedExpenseSearch.trim() || 
       exp.description.toLowerCase().includes(appliedExpenseSearch.toLowerCase()) ||
       exp.committeeName.toLowerCase().includes(appliedExpenseSearch.toLowerCase()) ||
+      payeeName.toLowerCase().includes(appliedExpenseSearch.toLowerCase()) ||
       ((exp as any).payee && (exp as any).payee.toLowerCase().includes(appliedExpenseSearch.toLowerCase())) ||
       (exp.createdBy && exp.createdBy.toLowerCase().includes(appliedExpenseSearch.toLowerCase())) ||
       (exp.paidByName && exp.paidByName.toLowerCase().includes(appliedExpenseSearch.toLowerCase())) ||
@@ -773,18 +907,18 @@ export default function FinanceWorkspace({
           const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
           const existsInEvent = currentEventExpenses.some(e => e.id === editingExpense.id);
           const updatedEventExpenses = existsInEvent
-            ? currentEventExpenses.map(e => e.id === editingExpense.id ? updatedExpensePayload : e)
-            : [...currentEventExpenses, updatedExpensePayload];
+            ? currentEventExpenses.map(e => e.id === editingExpense.id ? updatedExpensePayload : cleanExpensePayload(e))
+            : [...currentEventExpenses.map(e => cleanExpensePayload(e)), updatedExpensePayload];
           await handleUpdateFinance({ eventExpenses: updatedEventExpenses });
 
           // Also remove from any committee where it might have resided
           for (const comm of activeCommittees) {
             if ((comm.expenses || []).some(e => e.id === editingExpense.id)) {
-              const updatedCommExpenses = (comm.expenses || []).filter(e => e.id !== editingExpense.id);
-              await updateDoc(doc(db, "eventCommittees", comm.id), {
+              const updatedCommExpenses = (comm.expenses || []).filter(e => e.id !== editingExpense.id).map(e => cleanExpensePayload(e));
+              await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
                 expenses: updatedCommExpenses,
                 updatedAt: new Date().toISOString()
-              });
+              }));
             }
           }
         } else if (targetComm) {
@@ -792,18 +926,18 @@ export default function FinanceWorkspace({
           // Remove from eventFinance if it was there
           const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
           if (currentEventExpenses.some(e => e.id === editingExpense.id)) {
-            const filteredEventExpenses = currentEventExpenses.filter(e => e.id !== editingExpense.id);
+            const filteredEventExpenses = currentEventExpenses.filter(e => e.id !== editingExpense.id).map(e => cleanExpensePayload(e));
             await handleUpdateFinance({ eventExpenses: filteredEventExpenses });
           }
 
           // Remove from other committees if it was there
           for (const comm of activeCommittees) {
             if (comm.id !== targetComm.id && (comm.expenses || []).some(e => e.id === editingExpense.id)) {
-              const updatedCommExpenses = (comm.expenses || []).filter(e => e.id !== editingExpense.id);
-              await updateDoc(doc(db, "eventCommittees", comm.id), {
+              const updatedCommExpenses = (comm.expenses || []).filter(e => e.id !== editingExpense.id).map(e => cleanExpensePayload(e));
+              await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
                 expenses: updatedCommExpenses,
                 updatedAt: new Date().toISOString()
-              });
+              }));
             }
           }
 
@@ -811,13 +945,13 @@ export default function FinanceWorkspace({
           const targetExistingExpenses = targetComm.expenses || [];
           const existsInTarget = targetExistingExpenses.some(e => e.id === editingExpense.id);
           const updatedTargetExpenses = existsInTarget
-            ? targetExistingExpenses.map(e => e.id === editingExpense.id ? updatedExpensePayload : e)
-            : [...targetExistingExpenses, updatedExpensePayload];
+            ? targetExistingExpenses.map(e => e.id === editingExpense.id ? updatedExpensePayload : cleanExpensePayload(e))
+            : [...targetExistingExpenses.map(e => cleanExpensePayload(e)), updatedExpensePayload];
           
-          await updateDoc(doc(db, "eventCommittees", targetComm.id), {
+          await updateDoc(doc(db, "eventCommittees", targetComm.id), sanitizeFirestorePayload({
             expenses: updatedTargetExpenses,
             updatedAt: new Date().toISOString()
-          });
+          }));
         }
 
         await createAuditLog(
@@ -856,13 +990,13 @@ export default function FinanceWorkspace({
 
         if (isEventExpense) {
           const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
-          await handleUpdateFinance({ eventExpenses: [...currentEventExpenses, newExpensePayload] });
+          await handleUpdateFinance({ eventExpenses: [...currentEventExpenses.map(e => cleanExpensePayload(e)), newExpensePayload] });
         } else if (targetComm) {
           const targetExistingExpenses = targetComm.expenses || [];
-          await updateDoc(doc(db, "eventCommittees", targetComm.id), {
-            expenses: [...targetExistingExpenses, newExpensePayload],
+          await updateDoc(doc(db, "eventCommittees", targetComm.id), sanitizeFirestorePayload({
+            expenses: [...targetExistingExpenses.map(e => cleanExpensePayload(e)), newExpensePayload],
             updatedAt: new Date().toISOString()
-          });
+          }));
         }
 
         await createAuditLog(
@@ -933,11 +1067,11 @@ export default function FinanceWorkspace({
       // Check all active committees and remove if present
       for (const comm of activeCommittees) {
         if ((comm.expenses || []).some(e => e.id === expenseId)) {
-          const updated = (comm.expenses || []).filter(e => e.id !== expenseId);
-          await updateDoc(doc(db, "eventCommittees", comm.id), {
+          const updated = (comm.expenses || []).filter(e => e.id !== expenseId).map(e => cleanExpensePayload(e));
+          await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
             expenses: updated,
             updatedAt: new Date().toISOString()
-          });
+          }));
         }
       }
 
@@ -962,17 +1096,23 @@ export default function FinanceWorkspace({
     try {
       setIsFinanceSubmitting(true);
       const isEventExpense = exp.committeeId === 'EVENT_EXPENSE' || exp.committeeName === 'EVENT EXPENSE';
+      const isReimbursable = (exp.paidByType === 'resident' || exp.paidByType === 'sponsor' || exp.isPersonalPayment);
+
+      const targetPayableStatus = isReimbursable && exp.settlementStatus !== 'settled'
+        ? 'pending'
+        : (exp.payableStatus || (exp.settlementStatus === 'settled' ? 'refunded' : undefined));
 
       const updatedPayload: EventCommitteeExpense = cleanExpensePayload({
         ...exp,
         financeStatus: 'accepted',
         acceptedAt: new Date().toISOString(),
-        acceptedBy: profile?.email || 'finance_lead'
+        acceptedBy: profile?.email || 'finance_lead',
+        ...(targetPayableStatus ? { payableStatus: targetPayableStatus } : {})
       });
 
       if (isEventExpense) {
         const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
-        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : e);
+        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
         await handleUpdateFinance({ eventExpenses: updated });
       } else {
         const comm = activeCommittees.find(c => c.id === exp.committeeId);
@@ -980,11 +1120,11 @@ export default function FinanceWorkspace({
           setErrorMsg("Committee not found.");
           return;
         }
-        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : e);
-        await updateDoc(doc(db, "eventCommittees", comm.id), {
+        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
+        await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
           expenses: updated,
           updatedAt: new Date().toISOString()
-        });
+        }));
       }
 
       await createAuditLog(
@@ -1026,7 +1166,7 @@ export default function FinanceWorkspace({
 
       if (isEventExpense) {
         const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
-        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : e);
+        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
         await handleUpdateFinance({ eventExpenses: updated });
       } else {
         const comm = activeCommittees.find(c => c.id === exp.committeeId);
@@ -1034,11 +1174,11 @@ export default function FinanceWorkspace({
           setErrorMsg("Committee not found.");
           return;
         }
-        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : e);
-        await updateDoc(doc(db, "eventCommittees", comm.id), {
+        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
+        await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
           expenses: updated,
           updatedAt: new Date().toISOString()
-        });
+        }));
       }
 
       await createAuditLog(
@@ -1082,7 +1222,7 @@ export default function FinanceWorkspace({
 
       if (isEventExpense) {
         const currentEventExpenses = (eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[];
-        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : e);
+        const updated = currentEventExpenses.map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
         await handleUpdateFinance({ eventExpenses: updated });
       } else {
         const comm = activeCommittees.find(c => c.id === exp.committeeId);
@@ -1090,11 +1230,11 @@ export default function FinanceWorkspace({
           setErrorMsg("Committee not found.");
           return;
         }
-        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : e);
-        await updateDoc(doc(db, "eventCommittees", comm.id), {
+        const updated = (comm.expenses || []).map(e => e.id === exp.id ? updatedPayload : cleanExpensePayload(e));
+        await updateDoc(doc(db, "eventCommittees", comm.id), sanitizeFirestorePayload({
           expenses: updated,
           updatedAt: new Date().toISOString()
-        });
+        }));
       }
 
       await createAuditLog(
@@ -1145,7 +1285,7 @@ export default function FinanceWorkspace({
 
       // Direct Firestore update to guarantee immediate real-time reflection
       const newStatus = reg.paymentStatus === 'cancelled' ? 'refunded' : (amtDue > 0 ? 'paid' : 'refunded');
-      await updateDoc(doc(db, "event_registrations", reg.id), {
+      await updateDoc(doc(db, "event_registrations", reg.id), sanitizeFirestorePayload({
         paymentStatus: newStatus,
         refundDue: 0,
         amountReceived: amtDue,
@@ -1155,7 +1295,7 @@ export default function FinanceWorkspace({
         refundedBy: profile?.email || 'finance_lead',
         financeRemarks: `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance (${profile?.email || 'Finance Lead'}).`,
         updatedAt: new Date().toISOString()
-      });
+      }));
 
       setSuccessMsg(`✓ Refund of OMR ${refundAmt.toFixed(3)} processed successfully for ${reg.primaryMemberGmkId || reg.primaryMemberEmail}.`);
     } catch (err: any) {
@@ -1432,34 +1572,27 @@ export default function FinanceWorkspace({
 
       const rows = filteredExpenses.map(exp => {
         const isFin = exp.isFinanceOwned ?? isFinanceOwnedExpense(exp);
-        const payerDisplay = exp.paidByType === 'resident'
-          ? `Resident: ${exp.paidByName || 'Resident'} (${exp.paidByUnit || exp.paidByResidentId || ''})`
-          : exp.paidByType === 'sponsor'
-          ? `Sponsor: ${exp.paidByName || 'Sponsor'}`
-          : 'Event Treasury';
-
-        const statusDisplay = isFin 
-          ? 'Finance Owned' 
-          : (exp.financeStatus === 'accepted' ? 'Accepted' : exp.financeStatus === 'rejected' ? 'Rejected' : 'Pending Review');
+        const statusObj = getExpenseLifecycleStatus(exp);
+        const payeeName = getExpensePayeeDisplayName(exp);
 
         const settlementDisplay = (exp.paidByType === 'resident' || exp.paidByType === 'sponsor' || exp.isPersonalPayment)
-          ? (exp.settlementStatus === 'settled' ? `Settled (${exp.settlementMethod || 'Bank'})` : 'Pending Reimbursement')
-          : 'N/A (Treasury)';
+          ? (exp.settlementStatus === 'settled' || exp.payableStatus === 'refunded' ? `Refunded (${exp.settlementMethod || 'Bank Transfer'})` : 'Refund Pending')
+          : 'Settled (Treasury)';
 
         return [
           exp.date || 'N/A',
           formatCategoryLabel(exp.committeeName),
           exp.description || 'N/A',
-          payerDisplay,
+          payeeName,
           `OMR ${(Number(exp.amount) || 0).toFixed(3)}`,
-          statusDisplay,
+          statusObj.label,
           settlementDisplay
         ];
       });
 
       autoTable(doc, {
         startY: 55,
-        head: [['Date', 'Committee / Category', 'Description', 'Paid By / Source', 'Amount (OMR)', 'Review Status', 'Settlement Status']],
+        head: [['Date', 'Committee / Category', 'Description', 'Payee', 'Amount (OMR)', 'Status', 'Action / Settlement']],
         body: rows.length > 0 ? rows : [['No expenses matching current filter criteria.', '', '', '', '', '', '']],
         theme: 'grid',
         headStyles: { fillColor: [15, 76, 42], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
@@ -1518,34 +1651,29 @@ export default function FinanceWorkspace({
       // Ledger Rows Sheet
       const ledgerData = filteredExpenses.map(exp => {
         const isFin = exp.isFinanceOwned ?? isFinanceOwnedExpense(exp);
-        const payerDisplay = exp.paidByType === 'resident'
-          ? `Resident: ${exp.paidByName || 'Resident'} (${exp.paidByUnit || exp.paidByResidentId || ''})`
-          : exp.paidByType === 'sponsor'
-          ? `Sponsor: ${exp.paidByName || 'Sponsor'}`
-          : 'Event Treasury';
-
-        const statusDisplay = isFin 
-          ? 'Finance Owned' 
-          : (exp.financeStatus === 'accepted' ? 'Accepted' : exp.financeStatus === 'rejected' ? 'Rejected' : 'Pending Review');
+        const statusObj = getExpenseLifecycleStatus(exp);
+        const payeeName = getExpensePayeeDisplayName(exp);
+        const payeeTooltip = getExpensePayeeTooltip(exp);
 
         const settlementDisplay = (exp.paidByType === 'resident' || exp.paidByType === 'sponsor' || exp.isPersonalPayment)
-          ? (exp.settlementStatus === 'settled' ? `Settled (${exp.settlementMethod || 'Bank'})` : 'Pending Reimbursement')
-          : 'N/A (Treasury)';
+          ? (exp.settlementStatus === 'settled' || exp.payableStatus === 'refunded' ? `Refunded (${exp.settlementMethod || 'Bank Transfer'})` : 'Refund Pending')
+          : 'Settled (Treasury)';
 
         return {
           'Expense ID': exp.id,
           'Date': exp.date || 'N/A',
           'Committee / Category': formatCategoryLabel(exp.committeeName),
           'Description': exp.description || 'N/A',
-          'Payee': (exp as any).payee || '',
-          'Payment Source': payerDisplay,
+          'Payee': payeeName,
+          'Payee Details': payeeTooltip,
+          'Payment Source': exp.paidByType === 'resident' ? 'Resident Out-of-Pocket' : exp.paidByType === 'sponsor' ? 'Registered Sponsor' : 'Event Treasury',
           'Payer Name': exp.paidByName || '',
           'Payer Unit': exp.paidByUnit || '',
           'Payer GMK ID': exp.paidByResidentId || '',
           'Payer Phone': exp.paidByPhone || '',
           'Amount (OMR)': Number(exp.amount) || 0,
-          'Governance Status': statusDisplay,
-          'Settlement Status': settlementDisplay,
+          'Status': statusObj.label,
+          'Action / Settlement': settlementDisplay,
           'Settlement Ref': exp.settlementReference || '',
           'Settlement Date': exp.settledAt || '',
           'Created By': exp.createdBy || '',
@@ -2313,27 +2441,7 @@ export default function FinanceWorkspace({
                 <p className="text-xs text-stone-500 font-bold mt-0.5">Uniform expense governance, review, and approval across all operational committees.</p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleExportExpensesExcel}
-                  disabled={filteredExpenses.length === 0}
-                  className="cursor-pointer px-3 py-2 bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-2xs disabled:opacity-50"
-                  title="Export Filtered Expenses to Excel"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Export Excel</span>
-                </button>
-
-                <button
-                  onClick={handleExportExpensesPDF}
-                  disabled={filteredExpenses.length === 0}
-                  className="cursor-pointer px-3 py-2 bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-2xs disabled:opacity-50"
-                  title="Export Filtered Expenses to PDF"
-                >
-                  <FileText className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Export PDF</span>
-                </button>
-
+              <div className="flex items-center gap-2">
                 <button
                   onClick={handleOpenAddExpense}
                   className="cursor-pointer px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-sm"
@@ -2344,16 +2452,16 @@ export default function FinanceWorkspace({
               </div>
             </div>
 
-            {/* Filter & Search Bar with Staged RUN Action */}
-            <div className="bg-stone-100/80 p-3.5 rounded-2xl border border-stone-200 space-y-3">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            {/* Filter & Search Bar with Compact RUN Action */}
+            <div className="bg-stone-100/80 p-3 rounded-2xl border border-stone-200">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-2.5">
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                   <div className="flex items-center space-x-1.5">
                     <span className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Committee:</span>
                     <select
                       value={draftExpenseCommittee}
                       onChange={(e) => setDraftExpenseCommittee(e.target.value)}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
+                      className="bg-white border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                     >
                       <option value="all">All Committees & Categories</option>
                       <option value="Event">Event (Event Level)</option>
@@ -2368,51 +2476,52 @@ export default function FinanceWorkspace({
                     <select
                       value={draftExpenseStatus}
                       onChange={(e) => setDraftExpenseStatus(e.target.value as any)}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
+                      className="bg-white border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                     >
                       <option value="all">All Statuses</option>
                       <option value="pending">Pending Review</option>
-                      <option value="accepted">Accepted</option>
+                      <option value="approved">Approved</option>
+                      <option value="refund_pending">Refund Pending</option>
+                      <option value="refunded">Refunded</option>
+                      <option value="settled">Settled</option>
                       <option value="rejected">Rejected</option>
                     </select>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRunExpensesFilter}
+                    className="cursor-pointer px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-2xs flex items-center space-x-1.5 shrink-0"
+                    title="Apply Filters"
+                  >
+                    <Play className="w-3 h-3 text-[#d4af37] fill-[#d4af37]" />
+                    <span>RUN</span>
+                  </button>
 
                   {(draftExpenseCommittee !== 'all' || draftExpenseStatus !== 'all' || draftExpenseSearch.trim() !== '' || appliedExpenseCommittee !== 'all' || appliedExpenseStatus !== 'all' || appliedExpenseSearch.trim() !== '') && (
                     <button
                       type="button"
                       onClick={handleClearExpensesFilter}
-                      className="cursor-pointer px-3.5 py-1.5 bg-stone-800 hover:bg-stone-900 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
+                      className="cursor-pointer px-2.5 py-1.5 bg-stone-800 hover:bg-stone-900 text-white font-bold text-[10px] rounded-xl flex items-center gap-1 transition-colors shadow-xs"
                       title="Clear All Filters"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-3 h-3" />
                       <span>Clear All</span>
                     </button>
                   )}
                 </div>
 
-                <div className="relative w-full md:w-64">
+                <div className="relative w-full md:w-60">
                   <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={draftExpenseSearch}
                     onChange={(e) => setDraftExpenseSearch(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleRunExpensesFilter(); }}
-                    placeholder="Filter description, payer, unit..."
+                    placeholder="Filter description, payer..."
                     className="w-full pl-8 pr-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                   />
                 </div>
-              </div>
-
-              {/* Explicit Centered RUN Action */}
-              <div className="flex items-center justify-center pt-2.5 border-t border-stone-200/70">
-                <button
-                  type="button"
-                  onClick={handleRunExpensesFilter}
-                  className="cursor-pointer px-8 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center space-x-2"
-                >
-                  <Play className="w-3.5 h-3.5 text-[#d4af37] fill-[#d4af37]" />
-                  <span>RUN</span>
-                </button>
               </div>
             </div>
             
@@ -2431,17 +2540,19 @@ export default function FinanceWorkspace({
                         <th className="p-3">Date</th>
                         <th className="p-3">Committee</th>
                         <th className="p-3">Description</th>
-                        <th className="p-3">Payment Source / Payer</th>
+                        <th className="p-3">Payee</th>
                         <th className="p-3 text-right">Amount (OMR)</th>
-                        <th className="p-3 text-center">Review Status</th>
-                        <th className="p-3 text-center">Governance Action</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-center">Action</th>
                         <th className="p-3 text-center">Manage</th>
                       </tr>
                     </thead>
                     <tbody className="text-xs font-bold text-stone-700">
                       {filteredExpenses.map((exp) => {
-                        const status = exp.financeStatus || 'pending';
                         const isFinOwned = exp.isFinanceOwned ?? isFinanceOwnedExpense(exp);
+                        const statusInfo = getExpenseLifecycleStatus(exp);
+                        const payeeName = getExpensePayeeDisplayName(exp);
+                        const payeeTooltip = getExpensePayeeTooltip(exp);
 
                         return (
                           <tr key={exp.id} className="border-b border-stone-100 hover:bg-stone-50/50">
@@ -2459,96 +2570,97 @@ export default function FinanceWorkspace({
                             </td>
                             <td className="p-3">
                               <div className="font-semibold text-stone-900">{exp.description}</div>
-                              {exp.payee && (
-                                <div className="text-[10px] text-stone-400 font-bold">Payee: {exp.payee}</div>
-                              )}
-                              {exp.rejectionReason && status === 'rejected' && (
+                              {exp.rejectionReason && statusInfo.code === 'rejected' && (
                                 <div className="mt-1 text-[10px] text-rose-700 font-bold bg-rose-50 border border-rose-200 rounded-md p-1.5">
                                   <span className="font-black uppercase text-[9px] block">Rejection Reason:</span>
                                   {exp.rejectionReason}
                                 </div>
                               )}
                             </td>
-                            <td className="p-3">
-                              {exp.paidByType === 'resident' || exp.isPersonalPayment ? (
-                                <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-sky-50 border border-sky-200 text-sky-900 rounded-lg text-[10px] font-bold">
-                                  <User className="w-3 h-3 text-sky-700 shrink-0" />
-                                  <div>
-                                    <span className="font-extrabold">{exp.paidByName || 'Resident'}</span>
-                                    {exp.paidByUnit && <span className="text-sky-700 ml-1 text-[9px]">({exp.paidByUnit})</span>}
-                                    {exp.paidByResidentId && (
-                                      <span className="text-sky-600 block font-mono text-[8.5px] font-black">{exp.paidByResidentId}</span>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : exp.paidByType === 'sponsor' ? (
-                                <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-[10px] font-bold">
-                                  <Building className="w-3 h-3 text-amber-700 shrink-0" />
-                                  <div>
-                                    <span className="font-extrabold">{exp.paidByName || 'Sponsor'}</span>
-                                    <span className="text-amber-700 block text-[8.5px] font-black uppercase">Registered Sponsor</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg text-[10px] font-bold">
-                                  <CreditCard className="w-3 h-3 text-emerald-700 shrink-0" />
-                                  <span>Event Treasury</span>
-                                </div>
-                              )}
+                            <td className="p-3 whitespace-nowrap">
+                              <div 
+                                className="inline-flex items-center space-x-1.5 text-stone-800 font-semibold cursor-help"
+                                title={payeeTooltip}
+                              >
+                                {exp.paidByType === 'resident' || exp.isPersonalPayment ? (
+                                  <User className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                                ) : exp.paidByType === 'sponsor' ? (
+                                  <Building className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                ) : (
+                                  <CreditCard className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                )}
+                                <span className="text-xs font-bold text-stone-800 hover:text-stone-950">
+                                  {payeeName}
+                                </span>
+                              </div>
                             </td>
                             <td className="p-3 text-right font-mono font-black text-rose-700 whitespace-nowrap">
                               OMR {(Number(exp.amount) || 0).toFixed(3)}
                             </td>
                             <td className="p-3 text-center whitespace-nowrap">
-                              {isFinOwned ? (
-                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-stone-100 text-stone-600 border border-stone-200 rounded-lg text-[10px] font-black uppercase tracking-wider" title="Finance-owned expenses do not require committee review">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                  <span>Finance</span>
+                              {statusInfo.code === 'pending' ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                  <Clock className="w-3 h-3 text-amber-700" />
+                                  <span>Pending Review</span>
                                 </span>
-                              ) : status === 'accepted' ? (
+                              ) : statusInfo.code === 'approved' ? (
                                 <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
-                                  <Check className="w-3 h-3" />
-                                  <span>Accepted</span>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                  <span>Approved</span>
                                 </span>
-                              ) : status === 'rejected' ? (
-                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
-                                  <Ban className="w-3 h-3" />
-                                  <span>Rejected</span>
+                              ) : statusInfo.code === 'refund_pending' ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-sky-100 text-sky-800 border border-sky-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                  <Clock className="w-3 h-3 text-sky-700" />
+                                  <span>Refund Pending</span>
+                                </span>
+                              ) : statusInfo.code === 'refunded' ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                  <span>Refunded</span>
+                                </span>
+                              ) : statusInfo.code === 'settled' ? (
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                  <Check className="w-3 h-3 text-emerald-700" />
+                                  <span>Settled</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
-                                  <Clock className="w-3 h-3" />
-                                  <span>Pending Review</span>
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                  <Ban className="w-3 h-3 text-rose-700" />
+                                  <span>Rejected</span>
                                 </span>
                               )}
                             </td>
                             <td className="p-3 text-center whitespace-nowrap">
                               <div className="flex items-center justify-center space-x-1.5">
-                                {!isFinOwned && status !== 'accepted' && (
-                                  <button
-                                    onClick={() => handleAcceptExpense(exp)}
-                                    disabled={isFinanceSubmitting}
-                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
-                                    title="Accept & Approve Expense into Financials"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                    <span>Accept</span>
-                                  </button>
+                                {statusInfo.code === 'pending' && !isFinOwned && (
+                                  <>
+                                    <button
+                                      onClick={() => handleAcceptExpense(exp)}
+                                      disabled={isFinanceSubmitting}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                                      title="Accept & Approve Expense into Financials"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                      <span>Accept</span>
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setRejectingExpense(exp);
+                                        setRejectionReasonInput('');
+                                        setShowRejectModal(true);
+                                      }}
+                                      disabled={isFinanceSubmitting}
+                                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer disabled:opacity-50"
+                                      title="Reject Expense and Request Revision"
+                                    >
+                                      <Ban className="w-3 h-3" />
+                                      <span>Reject</span>
+                                    </button>
+                                  </>
                                 )}
-                                {!isFinOwned && status !== 'rejected' && (
-                                  <button
-                                    onClick={() => {
-                                      setRejectingExpense(exp);
-                                      setRejectionReasonInput('');
-                                      setShowRejectModal(true);
-                                    }}
-                                    disabled={isFinanceSubmitting}
-                                    className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 transition-all cursor-pointer disabled:opacity-50"
-                                    title="Reject Expense and Request Revision"
-                                  >
-                                    <Ban className="w-3 h-3" />
-                                    <span>Reject</span>
-                                  </button>
+
+                                {statusInfo.code !== 'pending' && (
+                                  <span className="text-stone-300 text-xs font-bold">—</span>
                                 )}
                               </div>
                             </td>
@@ -2602,43 +2714,21 @@ export default function FinanceWorkspace({
         {/* ========================================================================= */}
         {financeTab === 'refunds' && (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-2xl border border-stone-200 shadow-xs">
-              <div>
-                <h3 className="font-black text-stone-900 uppercase tracking-wider text-sm mb-1">Refunds & Payables Management</h3>
-                <p className="text-xs text-stone-500 font-bold">Manage reimbursement settlements for accepted non-treasury committee expenses and registration refund obligations.</p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleExportRefundsExcel}
-                  className="cursor-pointer px-3 py-2 bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-2xs"
-                  title="Export Refunds & Payables to Excel"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Export Excel</span>
-                </button>
-
-                <button
-                  onClick={handleExportRefundsPDF}
-                  className="cursor-pointer px-3 py-2 bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center space-x-1.5 shadow-2xs"
-                  title="Export Refunds & Payables to PDF"
-                >
-                  <FileText className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Export PDF</span>
-                </button>
-              </div>
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs">
+              <h3 className="font-black text-stone-900 uppercase tracking-wider text-sm mb-1">Refunds & Payables Management</h3>
+              <p className="text-xs text-stone-500 font-bold">Manage reimbursement settlements for accepted non-treasury committee expenses and registration refund obligations.</p>
             </div>
 
-            {/* Filter & Search Bar with Staged RUN Action */}
-            <div className="bg-stone-100/80 p-3.5 rounded-2xl border border-stone-200 space-y-3">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            {/* Filter & Search Bar with Compact RUN Action */}
+            <div className="bg-stone-100/80 p-3 rounded-2xl border border-stone-200">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-2.5">
                 <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                   <div className="flex items-center space-x-1.5">
                     <span className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Obligation View:</span>
                     <select
                       value={draftRefundFilterType}
                       onChange={(e: any) => setDraftRefundFilterType(e.target.value)}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
+                      className="bg-white border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                     >
                       <option value="all">All Obligations & Refunds</option>
                       <option value="pending_payables">Pending Reimbursements</option>
@@ -2648,20 +2738,30 @@ export default function FinanceWorkspace({
                     </select>
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={handleRunRefundsFilter}
+                    className="cursor-pointer px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-2xs flex items-center space-x-1.5 shrink-0"
+                    title="Apply Filters"
+                  >
+                    <Play className="w-3 h-3 text-[#d4af37] fill-[#d4af37]" />
+                    <span>RUN</span>
+                  </button>
+
                   {(draftRefundFilterType !== 'all' || draftRefundSearch.trim() !== '' || appliedRefundFilterType !== 'all' || appliedRefundSearch.trim() !== '') && (
                     <button
                       type="button"
                       onClick={handleClearRefundsFilter}
-                      className="cursor-pointer px-3.5 py-1.5 bg-stone-800 hover:bg-stone-900 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-xs"
+                      className="cursor-pointer px-2.5 py-1.5 bg-stone-800 hover:bg-stone-900 text-white font-bold text-[10px] rounded-xl flex items-center gap-1 transition-colors shadow-xs"
                       title="Clear All Filters"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-3 h-3" />
                       <span>Clear All</span>
                     </button>
                   )}
                 </div>
 
-                <div className="relative w-full md:w-64">
+                <div className="relative w-full md:w-60">
                   <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
@@ -2672,18 +2772,6 @@ export default function FinanceWorkspace({
                     className="w-full pl-8 pr-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
                   />
                 </div>
-              </div>
-
-              {/* Explicit Centered RUN Action */}
-              <div className="flex items-center justify-center pt-2.5 border-t border-stone-200/70">
-                <button
-                  type="button"
-                  onClick={handleRunRefundsFilter}
-                  className="cursor-pointer px-8 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center space-x-2"
-                >
-                  <Play className="w-3.5 h-3.5 text-[#d4af37] fill-[#d4af37]" />
-                  <span>RUN</span>
-                </button>
               </div>
             </div>
             
@@ -2725,7 +2813,12 @@ export default function FinanceWorkspace({
                               <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-stone-600">
                                 <div className="inline-flex items-center space-x-1 text-sky-900 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
                                   <User className="w-3 h-3 text-sky-700" />
-                                  <span>Payee: <strong>{exp.paidByName || 'Resident'}</strong> {exp.paidByUnit ? `(${exp.paidByUnit})` : ''} {exp.paidByResidentId ? `• ${exp.paidByResidentId}` : ''}</span>
+                                  <span>Payee: <strong>{exp.paidByName || 'Resident'}</strong></span>
+                                  {(exp.paidByUnit || exp.paidByResidentId) && (
+                                    <span className="ml-1 cursor-help" title={`Unit: ${exp.paidByUnit || 'N/A'}\nGMK ID: ${exp.paidByResidentId || 'N/A'}`}>
+                                      <Info className="w-3 h-3 text-sky-500 inline-block" />
+                                    </span>
+                                  )}
                                 </div>
                                 {exp.paidByPhone && (
                                   <span className="text-[10px] text-stone-500 font-mono">Phone: {exp.paidByPhone}</span>
@@ -2890,46 +2983,140 @@ export default function FinanceWorkspace({
         {/* ========================================================================= */}
         {financeTab === 'reports' && (
           <div className="space-y-6">
-            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs">
-              <h3 className="font-black text-stone-900 uppercase tracking-wider text-sm mb-1">Financial Statements & Exports</h3>
-              <p className="text-xs text-stone-500 font-bold">Generate official balance sheets and committee utilization reports. Detailed expenses and refunds ledgers are available directly in their respective workspaces.</p>
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black text-stone-900 uppercase tracking-wider text-sm mb-1">Financial Statements & Workspace Reports</h3>
+                <p className="text-xs text-stone-500 font-bold">Generate official statements, committee budget utilization, centralized expense ledgers, and refunds & payables reports in PDF and Excel formats.</p>
+              </div>
+              <span className="shrink-0 px-3 py-1 bg-emerald-50 text-[#0f4c2a] border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center space-x-1">
+                <FileCheck className="w-3.5 h-3.5 text-[#d4af37]" />
+                <span>Audit Ready</span>
+              </span>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Report 1: Financial Statement */}
-              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between text-center space-y-4">
+              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between space-y-4">
                 <div>
-                  <div className="w-12 h-12 bg-emerald-50 text-[#0f4c2a] rounded-2xl flex items-center justify-center mx-auto mb-3 border border-emerald-100">
-                    <FileText className="w-6 h-6" />
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-10 h-10 bg-emerald-50 text-[#0f4c2a] rounded-xl flex items-center justify-center border border-emerald-100 shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-stone-900 uppercase text-sm">Event Financial Statement</h4>
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/60 px-2 py-0.5 rounded-md uppercase">Statement of Accounts</span>
+                    </div>
                   </div>
-                  <h4 className="font-black text-stone-900 uppercase text-sm mb-1">Event Financial Statement</h4>
-                  <p className="text-xs text-stone-500 font-bold">Comprehensive accounting of opening balance, registration income, sponsorships, and centralized expenditures.</p>
+                  <p className="text-xs text-stone-500 font-bold">Comprehensive accounting of opening balance, registration income, sponsorships, and total centralized expenditures.</p>
                 </div>
-                <button 
-                  onClick={generateFinancialSummaryPDF}
-                  className="px-4 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-[#d4af37]" />
-                  <span>Download Statement PDF</span>
-                </button>
+                <div className="pt-3 border-t border-stone-100">
+                  <button 
+                    onClick={generateFinancialSummaryPDF}
+                    className="px-4 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer shadow-xs"
+                  >
+                    <Download className="w-4 h-4 text-[#d4af37]" />
+                    <span>Download Statement PDF</span>
+                  </button>
+                </div>
               </div>
 
               {/* Report 2: Committee Budgets */}
-              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between text-center space-y-4">
+              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between space-y-4">
                 <div>
-                  <div className="w-12 h-12 bg-blue-50 text-blue-700 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-blue-100">
-                    <PieChart className="w-6 h-6" />
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-10 h-10 bg-blue-50 text-blue-700 rounded-xl flex items-center justify-center border border-blue-100 shrink-0">
+                      <PieChart className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-stone-900 uppercase text-sm">Committee Budgets & Utilization</h4>
+                      <span className="text-[10px] font-bold text-blue-800 bg-blue-100/60 px-2 py-0.5 rounded-md uppercase">Allocation Analysis</span>
+                    </div>
                   </div>
-                  <h4 className="font-black text-stone-900 uppercase text-sm mb-1">Committee Budgets Report</h4>
-                  <p className="text-xs text-stone-500 font-bold">Detailed breakdown of allocations, actual expense utilization, and remaining margins across all committees.</p>
+                  <p className="text-xs text-stone-500 font-bold">Detailed breakdown of allocations, actual expense utilization, and remaining margins across all operational committees.</p>
                 </div>
-                <button 
-                  onClick={generateCommitteeBudgetPDF}
-                  className="px-4 py-2.5 bg-blue-700 text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-blue-800 transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-[#d4af37]" />
-                  <span>Download Budgets PDF</span>
-                </button>
+                <div className="pt-3 border-t border-stone-100">
+                  <button 
+                    onClick={generateCommitteeBudgetPDF}
+                    className="px-4 py-2.5 bg-blue-700 text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-blue-800 transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer shadow-xs"
+                  >
+                    <Download className="w-4 h-4 text-[#d4af37]" />
+                    <span>Download Budgets PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Report 3: Centralized Expenses Ledger */}
+              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-10 h-10 bg-amber-50 text-amber-800 rounded-xl flex items-center justify-center border border-amber-200 shrink-0">
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-stone-900 uppercase text-sm">Centralized Expenses Ledger</h4>
+                      <span className="text-[10px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md uppercase">
+                        {centralizedExpenses.length} Records • OMR {totalExpenses.toFixed(3)} Accepted
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-stone-500 font-bold">Complete governance ledger of all committee and event expenses, payer sources (Treasury, Resident, Sponsor), review statuses, and settlement tracking.</p>
+                </div>
+                <div className="pt-3 border-t border-stone-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button 
+                    onClick={handleExportExpensesExcel}
+                    disabled={centralizedExpenses.length === 0}
+                    className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-black uppercase text-xs tracking-wider rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+                    title="Export Centralized Expenses to Excel"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                    <span>Export Excel</span>
+                  </button>
+                  <button 
+                    onClick={handleExportExpensesPDF}
+                    disabled={centralizedExpenses.length === 0}
+                    className="px-3.5 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                    title="Export Centralized Expenses to PDF"
+                  >
+                    <FileText className="w-4 h-4 text-[#d4af37]" />
+                    <span>Export PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Report 4: Refunds & Payables Report */}
+              <div className="p-6 bg-white border border-stone-200 rounded-2xl shadow-xs flex flex-col justify-between space-y-4">
+                <div>
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-10 h-10 bg-sky-50 text-sky-800 rounded-xl flex items-center justify-center border border-sky-200 shrink-0">
+                      <HandCoins className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-stone-900 uppercase text-sm">Refunds & Payables Report</h4>
+                      <span className="text-[10px] font-bold text-sky-900 bg-sky-100 px-2 py-0.5 rounded-md uppercase">
+                        {pendingPayables.length + pendingRefunds.length} Pending Actions
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-stone-500 font-bold">Detailed audit report of committee out-of-pocket reimbursement payables and registration overpayment/cancellation refund disbursements.</p>
+                </div>
+                <div className="pt-3 border-t border-stone-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button 
+                    onClick={handleExportRefundsExcel}
+                    className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-black uppercase text-xs tracking-wider rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-2xs"
+                    title="Export Refunds & Payables to Excel"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                    <span>Export Excel</span>
+                  </button>
+                  <button 
+                    onClick={handleExportRefundsPDF}
+                    className="px-3.5 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
+                    title="Export Refunds & Payables to PDF"
+                  >
+                    <FileText className="w-4 h-4 text-[#d4af37]" />
+                    <span>Export PDF</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

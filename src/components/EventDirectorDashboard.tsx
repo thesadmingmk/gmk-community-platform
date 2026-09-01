@@ -1,7 +1,7 @@
 import FinanceWorkspace from "./FinanceWorkspace";
 import RegistrationReportingWorkspace from "./RegistrationReportingWorkspace";
 import AttendanceWorkspace from "./AttendanceWorkspace";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { jsPDF } from 'jspdf';
 import { db, useAuth, storage, auth, functions } from '../context/AuthContext';
@@ -78,7 +78,13 @@ import {
   PieChart, 
   HeartHandshake,
   Save,
-  Edit2
+  Edit2,
+  Lock,
+  Utensils,
+  Award,
+  Coins,
+  Circle,
+  ClipboardCheck
 } from 'lucide-react';
 import { GMKCard, GMKBadge } from './gmk/DesignSystem';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
@@ -534,6 +540,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [commExpensePaidByResidentId, setCommExpensePaidByResidentId] = useState('');
   const [commExpensePaidByUnit, setCommExpensePaidByUnit] = useState('');
   const [commExpensePaidBySponsorId, setCommExpensePaidBySponsorId] = useState('');
+  const [commExpensePayee, setCommExpensePayee] = useState('');
+  const [commExpensePaidByPhone, setCommExpensePaidByPhone] = useState('');
+  const [commExpensePaidByEmail, setCommExpensePaidByEmail] = useState('');
+  const [commResidentSearchTerm, setCommResidentSearchTerm] = useState('');
+  const [showCommExpenseForm, setShowCommExpenseForm] = useState(false);
   const [editingCommExpense, setEditingCommExpense] = useState<EventCommitteeExpense | null>(null);
   
   // Sponsorship States
@@ -639,7 +650,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as ResidentProfile));
       setResidents(list.filter(r => r.status === 'active'));
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] Residents snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] Residents snapshot permission-denied or blocked:", err);
     });
 
     const unsubFamilies = onSnapshot(collection(db, "families"), (snap) => {
@@ -647,7 +658,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as Family));
       setFamilies(list);
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] Families snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] Families snapshot permission-denied or blocked:", err);
     });
 
     const unsubFamilyMembers = onSnapshot(collection(db, "familyMembers"), (snap) => {
@@ -655,7 +666,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as FamilyMember));
       setFamilyMembers(list);
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] FamilyMembers snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] FamilyMembers snapshot permission-denied or blocked:", err);
     });
 
     return () => {
@@ -727,7 +738,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setLastFirestoreReadStatus('OK');
       setLastRefreshTimestamp(new Date().toLocaleTimeString());
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] EventCommittees snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] EventCommittees snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -738,7 +749,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setActivePrograms(list);
       setLastFirestoreReadStatus('OK');
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] EventPrograms snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] EventPrograms snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -749,7 +760,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       setRegistrations(list);
       setLastFirestoreReadStatus('OK');
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] EventRegistrations snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] EventRegistrations snapshot permission-denied or blocked:", err);
       setLastFirestoreReadStatus('ERROR: ' + err.code);
     });
 
@@ -759,7 +770,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       snap.forEach(d => list.push(d.data() as EventAttendance));
       setActiveAttendances(list);
     }, (err) => {
-      console.warn("âš ï¸ [EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
+      console.warn("[EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
     });
 
     return () => {
@@ -922,7 +933,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Created event master '${newEventName.trim()}'`
       );
 
-      setSuccessMsg(`âœ“ Successfully created event "${newEventName.trim()}"!`);
+      setSuccessMsg(`Successfully created event "${newEventName.trim()}"!`);
       
       // Cleanup inputs and redirect
       setNewEventName('');
@@ -959,7 +970,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         eventId,
         `Archived event master '${eventName}'`
       );
-      setSuccessMsg(`âœ“ Event "${eventName}" has been archived successfully.`);
+      setSuccessMsg(`Event "${eventName}" has been archived successfully.`);
     } catch (err: any) {
       console.error("Error archiving event:", err);
       setErrorMsg("Failed to archive event: " + (err.message || String(err)));
@@ -1048,7 +1059,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Permanently deleted draft event master '${eventName}'`
       );
 
-      setSuccessMsg(`âœ“ Draft Event "${eventName}" and associated committees deleted.`);
+      setSuccessMsg(`Draft Event "${eventName}" and associated committees deleted.`);
       if (selectedEventId === eventId) {
         const remaining = events.filter(e => e.id !== eventId);
         setSelectedEventId(remaining.length > 0 ? remaining[0].id : '');
@@ -1256,10 +1267,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           `Event Director deleted registration for email '${reg.primaryMemberEmail}' (Count: ${count}, Payment: OMR ${payment}). Attendance Cleanup: ${attStatus}, Food Cleanup: ${foodStatus}, Cert Cleanup: ${certStatus}.`
         );
       } catch (auditErr) {
-        console.warn("âš ï¸ Non-blocking ED Audit log failed:", auditErr);
+        console.warn("Non-blocking ED Audit log failed:", auditErr);
       }
 
-      setSuccessMsg(`âœ“ Registration for ${reg.primaryMemberEmail} was deleted successfully.`);
+      setSuccessMsg(`Registration for ${reg.primaryMemberEmail} was deleted successfully.`);
     } catch (err: any) {
       console.error("Error deleting registration:", err);
       setErrorMsg("Failed to delete registration: " + (err.message || String(err)));
@@ -1391,7 +1402,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         `Event Director performed Bulk Reset: deleted all ${regSnap.size} registrations for event '${activeEvent.eventName || activeEvent.title}'.`
       );
 
-      setSuccessMsg(`âœ“ Successfully reset registrations! All ${regSnap.size} registration records were deleted cleanly.`);
+      setSuccessMsg(`Successfully reset registrations! All ${regSnap.size} registration records were deleted cleanly.`);
     } catch (err: any) {
       console.error("[BULK DELETE FAIL] Error resetting registrations:", err);
       setErrorMsg("Failed to execute bulk registration reset: " + (err.message || String(err)));
@@ -1823,7 +1834,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
           }
         }
 
-        setSuccessMsg(`âœ“ ${type} uploaded and updated successfully.`);
+        setSuccessMsg(`${type} uploaded and updated successfully.`);
       } catch (renderErr: any) {
         setUploadDiagnostics(prev => ({
           ...prev,
@@ -1879,7 +1890,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       }
 
       await updateDoc(eventRef, updateData);
-      setSuccessMsg(`âœ“ ${type} deleted successfully.`);
+      setSuccessMsg(`${type} deleted successfully.`);
     } catch (err: any) {
       console.error(`Delete error for ${type}:`, err);
       setErrorMsg(`Failed to delete ${type}: ${err.message}`);
@@ -2094,7 +2105,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
 
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 4000);
-      showToast("âœ“ All changes saved.");
+      showToast("All changes saved.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to save event configuration: " + err.message);
@@ -2207,7 +2218,7 @@ const handleDownloadPDF = () => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(15, 76, 42);
-    doc.text(`FROZEN REGISTRATION PRICING SCHEDULE (${policyMeta.version} â€¢ Rev: ${policyMeta.revisionDate})`, 15, 98);
+    doc.text(`FROZEN REGISTRATION PRICING SCHEDULE (${policyMeta.version} * Rev: ${policyMeta.revisionDate})`, 15, 98);
     
     doc.setLineWidth(0.2);
     doc.setDrawColor(200, 200, 200);
@@ -2259,16 +2270,16 @@ const handleDownloadPDF = () => {
       y += 7;
     };
     
-    addRuleRow("â€¢ Core 1 Head (e.g. 1 Parent, 0 Children > Free Age):", `OMR ${configIndividualFee.toFixed(3)} (Single Rate)`);
-    addRuleRow("â€¢ Core 2 Heads (e.g. 2 Parents OR 1 Parent + 1 Child > Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
-    addRuleRow("â€¢ Core 3+ Heads (e.g. 2 Parents + 1+ Children > Free Age):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
-    addRuleRow("â€¢ Children < Free Age:", `OMR 0.000 (Free - Excluded from Core Heads)`);
-    addRuleRow("â€¢ Extra Adult (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
-    addRuleRow("â€¢ Extra Adult (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
+    addRuleRow("* Core 1 Head (e.g. 1 Parent, 0 Children > Free Age):", `OMR ${configIndividualFee.toFixed(3)} (Single Rate)`);
+    addRuleRow("* Core 2 Heads (e.g. 2 Parents OR 1 Parent + 1 Child > Free Age):", `OMR ${configCoupleFee.toFixed(3)} (Couple Rate)`);
+    addRuleRow("* Core 3+ Heads (e.g. 2 Parents + 1+ Children > Free Age):", `OMR ${configFamilyFee.toFixed(3)} (Family Rate Cap)`);
+    addRuleRow("* Children < Free Age:", `OMR 0.000 (Free - Excluded from Core Heads)`);
+    addRuleRow("* Extra Adult (Spouse Parents / Own Parents):", `OMR ${configParentFee.toFixed(3)} per parent`);
+    addRuleRow("* Extra Adult (Maid / Other Residents):", `OMR ${configOtherFee.toFixed(3)} per person`);
     if (configAllowExternal) {
-      addRuleRow("â€¢ Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
+      addRuleRow("* Guest Rule (Registered Non-Resident Guests):", `OMR ${configExternalRate.toFixed(3)} per guest flat rate`);
     } else {
-      addRuleRow("â€¢ Guest Rule (Registered Non-Resident Guests):", `Disabled / Guests Not Allowed`);
+      addRuleRow("* Guest Rule (Registered Non-Resident Guests):", `Disabled / Guests Not Allowed`);
     }
     
     y += 10;
@@ -2277,7 +2288,7 @@ const handleDownloadPDF = () => {
     doc.setTextColor(150, 150, 150);
     doc.text("Note: This document represents the official active pricing tariff approved by the GMK Executive Committee.", 15, y);
     y += 4;
-    doc.text(`Official Policy Ref: ${policyMeta.ref} â€¢ Rev Date: ${policyMeta.revisionDate} â€¢ Effective: ${policyMeta.fullFormatted} â€¢ Verified on commit.`, 15, y);
+    doc.text(`Official Policy Ref: ${policyMeta.ref} * Rev Date: ${policyMeta.revisionDate} * Effective: ${policyMeta.fullFormatted} * Verified on commit.`, 15, y);
     
     doc.save(`${activeEvent.eventName || activeEvent.title}_pricing_policy.pdf`);
   };
@@ -2545,7 +2556,7 @@ const handleDownloadPDF = () => {
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(120, 120, 120);
-    doc.text("GMK Event Management System â€¢ Official Verified Certificate", 148.5, 186, { align: "center" });
+    doc.text("GMK Event Management System * Official Verified Certificate", 148.5, 186, { align: "center" });
 
     doc.save(`${recipient.name.replace(/\s+/g, '_')}_Certificate.pdf`);
   };
@@ -2646,7 +2657,7 @@ const handleDownloadPDF = () => {
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
       doc.setTextColor(120, 120, 120);
-      doc.text("GMK Event Management System â€¢ Official Verified Certificate", 148.5, 186, { align: "center" });
+      doc.text("GMK Event Management System * Official Verified Certificate", 148.5, 186, { align: "center" });
     });
 
     doc.save(`${activeEvent.eventName || activeEvent.title}_All_Certificates.pdf`);
@@ -2797,7 +2808,7 @@ const handleDownloadPDF = () => {
   const handlePublishEvent = async () => {
     const validationErrors = validateEventForPublish();
     if (validationErrors.length > 0) {
-      setErrorMsg(`PUBLISHING BLOCKED:\n${validationErrors.map(e => `â€¢ ${e}`).join("\n")}`);
+      setErrorMsg(`PUBLISHING BLOCKED:\n${validationErrors.map(e => `* ${e}`).join("\n")}`);
       return;
     }
 
@@ -2807,7 +2818,7 @@ const handleDownloadPDF = () => {
     // Pass validation, save with 'published' status (does NOT invoke completion logic)
     await handleSaveConfiguration(undefined, 'published');
     setConfigStatus('published');
-    setSuccessMsg("ðŸŽ‰ Validation succeeded! The event is now officially PUBLISHED and available inside the Resident Hub!");
+    setSuccessMsg(" Validation succeeded! The event is now officially PUBLISHED and available inside the Resident Hub!");
   };
 
   // Unpublish Event action
@@ -2822,7 +2833,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       setConfigStatus('draft');
-      setSuccessMsg("âœ“ Event has been unpublished and is now back in DRAFT status.");
+      setSuccessMsg("Event has been unpublished and is now back in DRAFT status.");
     } catch (err: any) {
       setErrorMsg("Failed to unpublish event: " + err.message);
     } finally {
@@ -2848,7 +2859,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       setConfigStatus('completed');
-      setSuccessMsg("ðŸ Congratulations! Event status has been updated to COMPLETED. The configuration is now locked and read-only.");
+      setSuccessMsg(" Congratulations! Event status has been updated to COMPLETED. The configuration is now locked and read-only.");
     } catch (err: any) {
       setErrorMsg("Failed to complete event: " + err.message);
     } finally {
@@ -2892,7 +2903,7 @@ const handleDownloadPDF = () => {
         `Created custom operational committee '${nameTrimmed}'`
       );
 
-      setSuccessMsg(`âœ“ Created "${nameTrimmed}" Operational Committee!`);
+      setSuccessMsg(`Created "${nameTrimmed}" Operational Committee!`);
       setNewCommitteeName('');
       setShowAddCommitteeInput(false);
     } catch (err: any) {
@@ -2937,7 +2948,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Permanently deleted custom operational committee '${comm.name}'`
       );
-      setSuccessMsg(`âœ“ Committee "${comm.name}" has been permanently deleted.`);
+      setSuccessMsg(`Committee "${comm.name}" has been permanently deleted.`);
       if (activeCommitteeToConfigure === comm.name) {
         setActiveCommitteeToConfigure(null);
       }
@@ -2973,7 +2984,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Archived committee '${comm.name}'`
       );
-      setSuccessMsg(`âœ“ Committee "${comm.name}" has been moved to Archived.`);
+      setSuccessMsg(`Committee "${comm.name}" has been moved to Archived.`);
       if (activeCommitteeToConfigure === comm.name) {
         setActiveCommitteeToConfigure(null);
       }
@@ -3000,7 +3011,7 @@ const handleDownloadPDF = () => {
         comm.id,
         `Restored committee '${comm.name}' to Active status`
       );
-      setSuccessMsg(`âœ“ Committee "${comm.name}" has been restored to Active.`);
+      setSuccessMsg(`Committee "${comm.name}" has been restored to Active.`);
     } catch (err: any) {
       setErrorMsg("Failed to restore committee: " + err.message);
     } finally {
@@ -3230,7 +3241,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`âœ“ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
+      setSuccessMsg(`Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
       setResidentSearchQuery('');
       setCommitteeSearchQueries(prev => ({ ...prev, [committee.id]: '' }));
     } catch (err: any) {
@@ -3400,7 +3411,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`âœ“ Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
+      setSuccessMsg(`Successfully added ${resident.fullName} as a Committee Lead for ${committee.name}.`);
       setSelectedLeadGmkId('');
     } catch (err: any) {
       console.error(err);
@@ -3531,7 +3542,7 @@ const handleDownloadPDF = () => {
 
       setLastTransactionStatus('SUCCESS');
       setLastFirestoreWriteStatus('OK');
-      setSuccessMsg(`âœ“ Removed Committee Lead assignment successfully.`);
+      setSuccessMsg(`Removed Committee Lead assignment successfully.`);
     } catch (err: any) {
       console.error(err);
       const code = err.code || 'TRANSACTION_FAIL';
@@ -3612,7 +3623,7 @@ const handleDownloadPDF = () => {
         setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
       }
 
-      setSuccessMsg(`âœ“ Successfully added volunteer ${volunteer.fullName} to ${committee.name}.`);
+      setSuccessMsg(`Successfully added volunteer ${volunteer.fullName} to ${committee.name}.`);
       setWorkspaceVolSearchQuery('');
     } catch (err: any) {
       console.error("Error adding committee volunteer:", err);
@@ -3659,7 +3670,7 @@ const handleDownloadPDF = () => {
         setActiveCommittees(prev => prev.map(c => c.id === reloadedData.id ? reloadedData : c));
       }
 
-      setSuccessMsg(`âœ“ Volunteer removed from ${committee.name}.`);
+      setSuccessMsg(`Volunteer removed from ${committee.name}.`);
     } catch (err: any) {
       console.error("Error removing committee volunteer:", err);
       setErrorMsg(err.message || "Failed to remove volunteer");
@@ -3826,7 +3837,7 @@ const handleDownloadPDF = () => {
         `Event Director created program '${progTitle.trim()}'${owningCommittee ? ` under ${owningCommittee.name}` : ''}${progCoordinator ? ` and assigned coordinator ${progCoordinator.fullName}` : ''}`
       );
 
-      setSuccessMsg(`âœ“ Successfully created program "${progTitle.trim()}"${progCoordinator ? ` and assigned ${progCoordinator.fullName} as Coordinator` : ''}.`);
+      setSuccessMsg(`Successfully created program "${progTitle.trim()}"${progCoordinator ? ` and assigned ${progCoordinator.fullName} as Coordinator` : ''}.`);
       setProgTitle('');
       setProgDescription('');
       setProgCoordinator(null);
@@ -4149,7 +4160,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`âœ“ Added ${fullName} as participant for ${prog.title}.`);
+      setSuccessMsg(`Added ${fullName} as participant for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign participant: " + err.message);
@@ -4175,7 +4186,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`âœ“ Removed participant.`);
+      setSuccessMsg(`Removed participant.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove participant: " + err.message);
@@ -4242,7 +4253,7 @@ const handleDownloadPDF = () => {
         }
       }
 
-      setSuccessMsg(`âœ“ Assigned ${fullName} as a coordinator for ${prog.title}.`);
+      setSuccessMsg(`Assigned ${fullName} as a coordinator for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign coordinator: " + err.message);
@@ -4280,7 +4291,7 @@ const handleDownloadPDF = () => {
         }
       }
 
-      setSuccessMsg(`âœ“ Removed coordinator assignment.`);
+      setSuccessMsg(`Removed coordinator assignment.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove coordinator: " + err.message);
@@ -4327,7 +4338,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       }));
 
-      setSuccessMsg(`âœ“ Assigned ${fullName} as a volunteer (${role || 'Volunteer'}) for ${prog.title}.`);
+      setSuccessMsg(`Assigned ${fullName} as a volunteer (${role || 'Volunteer'}) for ${prog.title}.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to assign volunteer: " + err.message);
@@ -4353,7 +4364,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
 
-      setSuccessMsg(`âœ“ Removed volunteer assignment.`);
+      setSuccessMsg(`Removed volunteer assignment.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove volunteer: " + err.message);
@@ -4362,7 +4373,155 @@ const handleDownloadPDF = () => {
     }
   };
 
+  
+  const residentCandidates = useMemo(() => {
+    const list = [];
+    (residents || []).forEach(res => {
+      if (res.gmkId || res.fullName) {
+        const rGmkId = res.gmkId || '';
+        list.push({
+          key: `res_${rGmkId}`,
+          residentId: rGmkId,
+          fullName: res.fullName || '',
+          unit: res.displayUnitNumber || '',
+          phone: res.phone || '',
+          email: res.email || '',
+          relationship: 'Primary Member',
+          displayLabel: `[${rGmkId}] ${res.fullName} (${res.displayUnitNumber || 'Unit N/A'}) -- Primary Member`
+        });
+      }
+    });
+    
+    (familyMembers || []).forEach(mem => {
+      if (typeof mem.relationship === 'string' && mem.relationship.toLowerCase() === 'spouse' && typeof mem.name === 'string' && mem.name.trim()) {
+        const pGmkId = typeof mem.familyId === 'string' ? mem.familyId.replace('fam_', '') : '';
+        const alreadyExists = list.some(item => 
+          item.relationship === 'Spouse' && (
+            item.residentId === `${pGmkId}_spouse` || 
+            item.fullName.toLowerCase() === mem.name.toLowerCase()
+          )
+        );
+
+        if (!alreadyExists && pGmkId) {
+          const parentRes = residents.find(r => r.gmkId === pGmkId);
+          list.push({
+            key: `mem_spouse_${mem.id || pGmkId}`,
+            residentId: `${pGmkId}_spouse`,
+            fullName: mem.name.trim(),
+            unit: typeof parentRes?.displayUnitNumber === 'string' ? parentRes.displayUnitNumber : '',
+            phone: typeof mem.phone === 'string' ? mem.phone : (typeof mem.whatsAppNumber === 'string' ? mem.whatsAppNumber : (typeof parentRes?.phone === 'string' ? parentRes.phone : '')),
+            email: typeof parentRes?.email === 'string' ? parentRes.email : '',
+            relationship: 'Spouse',
+            displayLabel: `[${pGmkId}] ${mem.name.trim()} (${typeof parentRes?.displayUnitNumber === 'string' ? parentRes.displayUnitNumber : 'Unit N/A'}) -- Spouse`
+          });
+        }
+      }
+    });
+
+    return list.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [familyMembers, residents]);
+
+  const filteredResidentCandidates = useMemo(() => {
+    if (!commResidentSearchTerm.trim()) return residentCandidates.slice(0, 50);
+    const q = commResidentSearchTerm.toLowerCase();
+    return residentCandidates.filter(c => 
+      c.fullName.toLowerCase().includes(q) ||
+      c.residentId.toLowerCase().includes(q) ||
+      c.unit.toLowerCase().includes(q)
+    ).slice(0, 50);
+  }, [residentCandidates, commResidentSearchTerm]);
+
+  const sanitizeCommFirestorePayload = (obj: any): any => {
+    if (obj === null || obj === undefined) return null;
+    if (Array.isArray(obj)) {
+      return obj
+        .filter(item => item !== undefined)
+        .map(item => (typeof item === "object" && item !== null ? sanitizeCommFirestorePayload(item) : item));
+    }
+    if (typeof obj === "object" && !(obj instanceof Date)) {
+      const sanitized: Record<string, any> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined) {
+          sanitized[key] = (typeof value === "object" && value !== null && !(value instanceof Date))
+            ? sanitizeCommFirestorePayload(value)
+            : value;
+        }
+      }
+      return sanitized;
+    }
+    return obj;
+  };
+
+  const cleanCommExpensePayload = (exp: any) => {
+    const isResident = exp.paidByType === "resident";
+    const isSponsor = exp.paidByType === "sponsor";
+
+    const cleaned: Record<string, any> = {
+      id: exp.id || `exp_comm_${Date.now()}`,
+      date: exp.date || new Date().toISOString().split("T")[0],
+      description: (exp.description || "").trim(),
+      amount: Number(exp.amount) || 0,
+      createdAt: exp.createdAt || new Date().toISOString(),
+      createdBy: exp.createdBy || profile?.email || "event_director",
+      paidByType: exp.paidByType || "event_treasury",
+      isPersonalPayment: isResident
+    };
+
+    if (exp.payee && exp.payee.trim()) {
+      cleaned.payee = exp.payee.trim();
+    }
+
+    if (isResident) {
+      if (exp.paidByResidentId) cleaned.paidByResidentId = exp.paidByResidentId;
+      if (exp.paidByName) cleaned.paidByName = exp.paidByName;
+      if (exp.paidByUnit) cleaned.paidByUnit = exp.paidByUnit;
+      if (exp.paidByPhone) cleaned.paidByPhone = exp.paidByPhone;
+      if (exp.paidByEmail) cleaned.paidByEmail = exp.paidByEmail;
+      if (exp.payableStatus) cleaned.payableStatus = exp.payableStatus;
+      if (exp.refundedAmount !== undefined) cleaned.refundedAmount = Number(exp.refundedAmount) || 0;
+    } else if (isSponsor) {
+      if (exp.paidBySponsorId) cleaned.paidBySponsorId = exp.paidBySponsorId;
+      if (exp.paidByName) cleaned.paidByName = exp.paidByName;
+      cleaned.isPersonalPayment = false;
+    }
+
+    if (exp.financeStatus) cleaned.financeStatus = exp.financeStatus;
+    if (exp.acceptedAt) cleaned.acceptedAt = exp.acceptedAt;
+    if (exp.acceptedBy) cleaned.acceptedBy = exp.acceptedBy;
+    if (exp.rejectedAt) cleaned.rejectedAt = exp.rejectedAt;
+    if (exp.rejectedBy) cleaned.rejectedBy = exp.rejectedBy;
+    if (exp.rejectionReason) cleaned.rejectionReason = exp.rejectionReason;
+    if (exp.resubmittedBy) cleaned.resubmittedBy = exp.resubmittedBy;
+    if (exp.resubmittedAt) cleaned.resubmittedAt = exp.resubmittedAt;
+    if (exp.settlementStatus) cleaned.settlementStatus = exp.settlementStatus;
+    if (exp.settledAt) cleaned.settledAt = exp.settledAt;
+    if (exp.settledBy) cleaned.settledBy = exp.settledBy;
+    if (exp.settlementMethod) cleaned.settlementMethod = exp.settlementMethod;
+    if (exp.settlementReference) cleaned.settlementReference = exp.settlementReference;
+    if (exp.settlementRemarks) cleaned.settlementRemarks = exp.settlementRemarks;
+
+    return sanitizeCommFirestorePayload(cleaned);
+  };
+
+  const handleCancelExpense = () => {
+    setEditingCommExpense(null);
+    setCommExpenseDesc('');
+    setCommExpenseAmount('');
+    setCommExpenseDate('');
+    setCommExpensePaidByType('event_treasury');
+    setCommExpensePaidByName('');
+    setCommExpensePaidByResidentId('');
+    setCommExpensePaidByUnit('');
+    setCommExpensePaidBySponsorId('');
+    setCommExpensePayee('');
+    setCommExpensePaidByPhone('');
+    setCommExpensePaidByEmail('');
+    setCommResidentSearchTerm('');
+    setShowCommExpenseForm(false);
+  };
+
   // Add or Resubmit committee expense (3 decimal places OMR precision)
+
   const handleAddCommitteeExpense = async (committeeId: string) => {
     if (!commExpenseDesc.trim() || !commExpenseAmount.trim()) {
       setErrorMsg("Please enter expense description and amount.");
@@ -4387,70 +4546,94 @@ const handleDownloadPDF = () => {
     try {
       const currentExpenses = committee.expenses || [];
       const roundedAmount = Math.round(amountNum * 1000) / 1000;
-      let updatedExpenses: EventCommitteeExpense[];
+      let updatedExpenses;
 
       if (editingCommExpense) {
-        // Resubmit flow for rejected or revised expenses
+        const prevStatus = editingCommExpense.financeStatus || 'pending';
+        // Update flow for committee expense:
+        // Editing any committee expense (pending, accepted, or rejected) returns it to Pending Finance Review
         updatedExpenses = currentExpenses.map(exp => {
           if (exp.id === editingCommExpense.id) {
-            return {
+            return cleanCommExpensePayload({
               ...exp,
               date: commExpenseDate || exp.date || new Date().toISOString().split('T')[0],
               description: commExpenseDesc.trim(),
               amount: roundedAmount,
+              payee: commExpensePayee,
               paidByType: commExpensePaidByType,
               paidByResidentId: commExpensePaidByType === 'resident' ? commExpensePaidByResidentId : undefined,
               paidByName: (commExpensePaidByType === 'resident' || commExpensePaidByType === 'sponsor') ? commExpensePaidByName : undefined,
               paidByUnit: commExpensePaidByType === 'resident' ? commExpensePaidByUnit : undefined,
+              paidByPhone: commExpensePaidByType === 'resident' ? commExpensePaidByPhone : undefined,
+              paidByEmail: commExpensePaidByType === 'resident' ? commExpensePaidByEmail : undefined,
               paidBySponsorId: commExpensePaidByType === 'sponsor' ? commExpensePaidBySponsorId : undefined,
-              financeStatus: 'pending' as const,
-              rejectionReason: '',
+              financeStatus: 'pending',
+              acceptedAt: undefined,
+              acceptedBy: undefined,
+              rejectedAt: undefined,
+              rejectedBy: undefined,
+              rejectionReason: undefined,
               resubmittedAt: new Date().toISOString(),
-              resubmittedBy: profile?.email || 'event_director',
-              updatedAt: new Date().toISOString()
-            };
+              resubmittedBy: profile?.email || 'event_director'
+            });
           }
           return exp;
         });
-
-        await updateDoc(doc(db, "eventCommittees", committee.id), {
-          expenses: updatedExpenses,
+        await updateDoc(doc(db, "eventCommittees", committee.id), sanitizeCommFirestorePayload({
+          expenses: (updatedExpenses || []).map(e => cleanCommExpensePayload(e)),
           updatedAt: new Date().toISOString()
-        });
+        }));
+
+        const auditAction = prevStatus === 'rejected'
+          ? 'COMMITTEE_EXPENSE_RESUBMITTED'
+          : prevStatus === 'accepted'
+          ? 'COMMITTEE_EXPENSE_REVISED'
+          : 'COMMITTEE_EXPENSE_UPDATED';
+
+        const auditMsg = prevStatus === 'rejected'
+          ? `Resubmitted rejected expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} for ${committee.name} committee review.`
+          : prevStatus === 'accepted'
+          ? `Revised accepted expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} for ${committee.name} committee (returned to Pending Finance Review).`
+          : `Updated expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} for ${committee.name} committee review.`;
 
         await createAuditLog(
-          'COMMITTEE_EXPENSE_RESUBMITTED',
+          auditAction,
           profile?.email || 'event_director',
           'committee',
           committee.id,
-          `Resubmitted expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} for ${committee.name} committee review.`
+          auditMsg
         );
-
-        setSuccessMsg(`âœ“ Resubmitted expense of OMR ${roundedAmount.toFixed(3)} to Finance for review.`);
-        setEditingCommExpense(null);
+        const userMsg = prevStatus === 'rejected'
+          ? `Resubmitted expense of OMR ${roundedAmount.toFixed(3)} (Pending Finance Review).`
+          : prevStatus === 'accepted'
+          ? `Updated expense of OMR ${roundedAmount.toFixed(3)} (Returned to Pending Finance Review).`
+          : `Updated expense of OMR ${roundedAmount.toFixed(3)} (Pending Review).`;
+        setSuccessMsg(userMsg);
       } else {
-        const newExpense: EventCommitteeExpense = {
+        const newExpense = cleanCommExpensePayload({
           id: `exp_comm_${Date.now()}`,
           date: commExpenseDate || new Date().toISOString().split('T')[0],
           description: commExpenseDesc.trim(),
           amount: roundedAmount,
+          payee: commExpensePayee,
           paidByType: commExpensePaidByType,
           paidByResidentId: commExpensePaidByType === 'resident' ? commExpensePaidByResidentId : undefined,
           paidByName: (commExpensePaidByType === 'resident' || commExpensePaidByType === 'sponsor') ? commExpensePaidByName : undefined,
           paidByUnit: commExpensePaidByType === 'resident' ? commExpensePaidByUnit : undefined,
+          paidByPhone: commExpensePaidByType === 'resident' ? commExpensePaidByPhone : undefined,
+          paidByEmail: commExpensePaidByType === 'resident' ? commExpensePaidByEmail : undefined,
           paidBySponsorId: commExpensePaidByType === 'sponsor' ? commExpensePaidBySponsorId : undefined,
           financeStatus: 'pending',
           settlementStatus: 'pending',
           createdAt: new Date().toISOString(),
           createdBy: profile?.email || 'event_director'
-        };
+        });
 
         updatedExpenses = [...currentExpenses, newExpense];
-
-        await updateDoc(doc(db, "eventCommittees", committee.id), {
-          expenses: updatedExpenses,
+        await updateDoc(doc(db, "eventCommittees", committee.id), sanitizeCommFirestorePayload({
+          expenses: (updatedExpenses || []).map(e => cleanCommExpensePayload(e)),
           updatedAt: new Date().toISOString()
-        });
+        }));
 
         await createAuditLog(
           'COMMITTEE_EXPENSE_ADDED',
@@ -4459,18 +4642,11 @@ const handleDownloadPDF = () => {
           committee.id,
           `Added expense '${commExpenseDesc.trim()}' of OMR ${roundedAmount.toFixed(3)} to ${committee.name} committee.`
         );
-
-        setSuccessMsg(`âœ“ Added expense of OMR ${roundedAmount.toFixed(3)} to ${committee.name} Expense Sheet (Pending Review).`);
+        setSuccessMsg(`Added expense of OMR ${roundedAmount.toFixed(3)} to ${committee.name} Expense Sheet (Pending Review).`);
       }
 
-      setCommExpenseDesc('');
-      setCommExpenseAmount('');
-      setCommExpenseDate('');
-      setCommExpensePaidByType('event_treasury');
-      setCommExpensePaidByName('');
-      setCommExpensePaidByResidentId('');
-      setCommExpensePaidByUnit('');
-      setCommExpensePaidBySponsorId('');
+      handleCancelExpense();
+
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to save committee expense: " + err.message);
@@ -4485,10 +4661,6 @@ const handleDownloadPDF = () => {
     if (!committee) return;
 
     const targetExp = (committee.expenses || []).find(e => e.id === expenseId);
-    if (targetExp && targetExp.financeStatus === 'accepted') {
-      setErrorMsg("This expense has already been Accepted by Finance and cannot be deleted directly. Contact Finance to adjust.");
-      return;
-    }
 
     setIsSubmitting(true);
     setErrorMsg(null);
@@ -4497,12 +4669,24 @@ const handleDownloadPDF = () => {
     try {
       const updatedExpenses = (committee.expenses || []).filter(e => e.id !== expenseId);
 
-      await updateDoc(doc(db, "eventCommittees", committee.id), {
-        expenses: updatedExpenses,
+      await updateDoc(doc(db, "eventCommittees", committee.id), sanitizeCommFirestorePayload({
+        expenses: (updatedExpenses || []).map(e => cleanCommExpensePayload(e)),
         updatedAt: new Date().toISOString()
-      });
+      }));
 
-      setSuccessMsg(`âœ“ Expense removed successfully from ${committee.name} Expense Sheet.`);
+      const expDesc = targetExp?.description || 'Expense';
+      const expAmt = targetExp?.amount ? Number(targetExp.amount).toFixed(3) : '0.000';
+      const statusLabel = targetExp?.financeStatus ? ` (${targetExp.financeStatus})` : '';
+
+      await createAuditLog(
+        'COMMITTEE_EXPENSE_DELETED',
+        profile?.email || 'event_director',
+        'committee',
+        committee.id,
+        `Deleted expense '${expDesc}' of OMR ${expAmt}${statusLabel} from ${committee.name} committee.`
+      );
+
+      setSuccessMsg(`Expense '${expDesc}' removed successfully from ${committee.name} Expense Sheet.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove committee expense: " + err.message);
@@ -4595,7 +4779,7 @@ const handleDownloadPDF = () => {
           `Updated sponsorship for '${sponCompanyName.trim()}' (OMR ${amountNum.toFixed(3)}).`
         );
 
-        setSuccessMsg(`âœ“ Successfully updated sponsorship from ${sponCompanyName.trim()}.`);
+        setSuccessMsg(`Successfully updated sponsorship from ${sponCompanyName.trim()}.`);
       } else {
         const newSponsorship = {
           id: `spon_${Date.now()}`,
@@ -4620,7 +4804,7 @@ const handleDownloadPDF = () => {
           `Added sponsorship from '${sponCompanyName.trim()}' for OMR ${amountNum.toFixed(3)}.`
         );
         
-        setSuccessMsg(`âœ“ Successfully recorded sponsorship from ${sponCompanyName.trim()}.`);
+        setSuccessMsg(`Successfully recorded sponsorship from ${sponCompanyName.trim()}.`);
       }
       
       // Reset form
@@ -4656,7 +4840,7 @@ const handleDownloadPDF = () => {
         updatedAt: new Date().toISOString()
       });
       
-      setSuccessMsg(`âœ“ Sponsorship removed successfully.`);
+      setSuccessMsg(`Sponsorship removed successfully.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove sponsorship: " + err.message);
@@ -4726,7 +4910,7 @@ const handleDownloadPDF = () => {
         });
       }
 
-      setSuccessMsg(`âœ“ Expense of OMR ${amountNum.toFixed(3)} recorded for "${prog.title}"${owningComm ? ` and aggregated to ${owningComm.name}` : ''}.`);
+      setSuccessMsg(`Expense of OMR ${amountNum.toFixed(3)} recorded for "${prog.title}"${owningComm ? ` and aggregated to ${owningComm.name}` : ''}.`);
       setExpenseTitle('');
       setExpenseAmount('');
     } catch (err: any) {
@@ -4769,7 +4953,7 @@ const handleDownloadPDF = () => {
         });
       }
 
-      setSuccessMsg(`âœ“ Expense removed successfully.`);
+      setSuccessMsg(`Expense removed successfully.`);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to remove program expense: " + err.message);
@@ -4966,7 +5150,7 @@ const handleDownloadPDF = () => {
       );
       console.log(`[PROGRAM APPROVE 5] Audit log & UI refresh complete`);
 
-      setSuccessMsg("âœ“ Program has been APPROVED and will appear immediately inside the Resident Event Hub.");
+      setSuccessMsg("Program has been APPROVED and will appear immediately inside the Resident Event Hub.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to approve program: " + err.message);
@@ -5005,7 +5189,7 @@ const handleDownloadPDF = () => {
       );
       console.log(`[PROGRAM REJECT 5] Audit log & UI refresh complete`);
 
-      setSuccessMsg("âœ“ Program has been rejected. Authorized users can now delete this rejected submission.");
+      setSuccessMsg("Program has been rejected. Authorized users can now delete this rejected submission.");
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to reject program: " + err.message);
@@ -5121,9 +5305,9 @@ const handleDownloadPDF = () => {
       if (activeProgForManagement === programId) {
         setActiveProgForManagement(null);
       }
-      setSuccessMsg(`âœ“ Program/Event "${prog.title}" has been permanently deleted.`);
+      setSuccessMsg(`Program/Event "${prog.title}" has been permanently deleted.`);
     } catch (err: any) {
-      console.error("âŒ [PROGRAM DELETE FAIL]", err);
+      console.error("x [PROGRAM DELETE FAIL]", err);
       setErrorMsg("Failed to delete Program/Event: " + err.message);
     } finally {
       setIsSubmitting(false);
@@ -5158,7 +5342,7 @@ const handleDownloadPDF = () => {
       } : p));
 
       setEditingProgramId(null);
-      setSuccessMsg(`âœ“ Program "${editProgTitle.trim()}" updated successfully.`);
+      setSuccessMsg(`Program "${editProgTitle.trim()}" updated successfully.`);
     } catch (err: any) {
       console.error("Failed to update program details:", err);
       setErrorMsg("Failed to update program details: " + err.message);
@@ -5621,10 +5805,16 @@ const handleDownloadPDF = () => {
       if (!cName.includes('finance') && !cName.includes('program')) {
         // Prevent duplicate tabs
         if (!navItems.find(i => i.id === `comm_${comm.committee}`)) {
+          let commIcon = Users;
+          if (cName.includes('attendance')) commIcon = QrCode;
+          else if (cName.includes('food')) commIcon = Utensils;
+          else if (cName.includes('sponsorship')) commIcon = Award;
+          else if (cName.includes('finance')) commIcon = PieChart;
+          
           navItems.push({
             id: `comm_${comm.committee}`,
             label: `${comm.committee} Workspace`,
-            icon: Users,
+            icon: commIcon,
             targetComm: comm.committee
           });
         }
@@ -5812,20 +6002,22 @@ const handleDownloadPDF = () => {
         {/* Content Workspace Area */}
         <main className="flex-1 p-4 sm:p-6 overflow-y-auto bg-stone-50 space-y-4 pb-24 md:pb-6">
           
-          {/* Alerts */}
-          {successMsg && (
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center space-x-2.5 shadow-sm animate-fadeIn">
-              <Check className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-              <span className="font-sans font-bold text-xs">{successMsg}</span>
-            </div>
-          )}
+          {/* Centralized Fixed Alerts Layer */}
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center space-y-2 pointer-events-none w-full max-w-md px-4">
+            {successMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center space-x-2.5 shadow-xl animate-fadeIn w-full pointer-events-auto">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-sans font-bold text-xs">{successMsg}</span>
+              </div>
+            )}
 
-          {errorMsg && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl flex items-center space-x-2.5 shadow-sm animate-fadeIn">
-              <AlertCircle className="w-4.5 h-4.5 text-rose-600 shrink-0" />
-              <span className="font-sans font-bold text-xs whitespace-pre-line">{errorMsg}</span>
-            </div>
-          )}
+            {errorMsg && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl flex items-center space-x-2.5 shadow-xl animate-fadeIn w-full pointer-events-auto">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span className="font-sans font-bold text-xs whitespace-pre-line">{errorMsg}</span>
+              </div>
+            )}
+          </div>
 
           {/* Tab Renderers */}
 
@@ -6080,7 +6272,7 @@ const handleDownloadPDF = () => {
                       <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                         <div>
                           <span className="text-[10px] uppercase font-black text-[#d4af37] tracking-wider font-mono">
-                            {evt.eventType || 'Gathering'} â€¢ {evt.eventYear || evt.year || '2026'}
+                            {evt.eventType || 'Gathering'} * {evt.eventYear || evt.year || '2026'}
                           </span>
                           <h4 className="text-stone-850 font-black text-sm font-heading line-clamp-1 mt-0.5">
                             {evt.eventName || evt.title}
@@ -6142,7 +6334,7 @@ const handleDownloadPDF = () => {
                               className="flex-1 py-2.5 rounded-xl bg-[#0f4c2a] hover:bg-[#0b381f] text-white text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.99]"
                             >
                               <span>Open Committee Workspace</span>
-                              <span>âžœ</span>
+                              <span>&rarr;</span>
                             </button>
                           )}
                         </div>
@@ -6227,14 +6419,14 @@ const handleDownloadPDF = () => {
                         <div className="flex flex-wrap gap-2 pt-1">
                           {configHighlights.map((hl, index) => (
                             <div key={index} className="flex items-center space-x-1.5 bg-emerald-50 border border-emerald-100/50 px-2.5 py-1 rounded-full text-stone-800 text-[10px] font-bold">
-                              <span>â­ {hl}</span>
+                              <span>* {hl}</span>
                               {configStatus !== 'completed' && (
                                 <button
                                   type="button"
                                   onClick={() => setConfigHighlights(configHighlights.filter((_, i) => i !== index))}
                                   className="text-stone-400 hover:text-red-600 transition-colors cursor-pointer font-black text-[10px] ml-1"
                                 >
-                                  Ã—
+                                  x
                                 </button>
                               )}
                             </div>
@@ -6417,11 +6609,11 @@ const handleDownloadPDF = () => {
                       <p className="text-stone-500 text-xs">Configure the high-resolution poster and square thumbnail imagery for this gathering.</p>
                       <div className="flex items-center space-x-4 pt-1.5 text-xs text-stone-600 font-bold">
                         <span className="flex items-center space-x-1.5">
-                          <span className={activeEvent.Poster || activeEvent.posterUrl ? "text-emerald-600" : "text-stone-300"}>â—</span>
+                          <span className={activeEvent.Poster || activeEvent.posterUrl ? "text-emerald-600 font-bold" : "text-stone-300"}>•</span>
                           <span>Poster</span>
                         </span>
                         <span className="flex items-center space-x-1.5">
-                          <span className={activeEvent.Thumbnail ? "text-emerald-600" : "text-stone-300"}>â—</span>
+                          <span className={activeEvent.Thumbnail ? "text-emerald-600 font-bold" : "text-stone-300"}>•</span>
                           <span>Thumbnail</span>
                         </span>
                       </div>
@@ -6447,7 +6639,7 @@ const handleDownloadPDF = () => {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-stone-500 font-medium mt-0.5">
                           <span>Revision Date: <strong className="text-stone-800 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}</strong></span>
-                          <span className="text-stone-300">â€¢</span>
+                          <span className="text-stone-300">•</span>
                           <span>Effective: <strong className="text-stone-700 font-mono font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
                         </div>
                       </div>
@@ -6463,7 +6655,7 @@ const handleDownloadPDF = () => {
                     {isPricingEditing && (
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 text-[11px] font-bold space-y-1 animate-fadeIn">
                         <div className="flex items-center space-x-2">
-                          <span className="text-sm shrink-0">âš ï¸</span>
+                          <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
                           <span className="uppercase tracking-wider font-extrabold text-amber-900 font-heading text-xs">EDIT MODE</span>
                         </div>
                         <p className="leading-relaxed font-bold text-amber-950">
@@ -6653,7 +6845,7 @@ const handleDownloadPDF = () => {
                               : 'bg-stone-100 hover:bg-stone-200 text-stone-600 border border-stone-200'
                           }`}
                         >
-                          {configRegEnabled ? "âœ“ Pricing Engine Active" : "Activate Registration Pricing"}
+                          {configRegEnabled ? "Pricing Engine Active" : "Activate Registration Pricing"}
                         </button>
                       </div>
                     </div>
@@ -6850,7 +7042,7 @@ const handleDownloadPDF = () => {
                     <GMKCard className="p-6 bg-white border border-stone-200 space-y-4">
                       <div className="border-b border-stone-150 pb-2">
                         <h4 className="font-extrabold text-stone-900 text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                          <span>ðŸ</span>
+                          <span></span>
                           <span>Event Completion Checklist</span>
                         </h4>
                         <p className="text-[9px] text-stone-500 font-bold mt-0.5">The Event Director must verify and satisfy all checklist criteria before marking the event as officially complete.</p>
@@ -6870,7 +7062,7 @@ const handleDownloadPDF = () => {
                           <div>
                             <span className="text-xs font-black text-stone-850 block">Registration Closed</span>
                             <span className="text-[9px] text-stone-500 font-bold block">
-                              {isRegDateClosed ? "âœ“ Auto-verified: Registration closes timeline passed" : "Manual override or verified via closes date limit"}
+                              {isRegDateClosed ? "Auto-verified: Registration closes timeline passed" : "Manual override or verified via closes date limit"}
                             </span>
                           </div>
                         </div>
@@ -6888,7 +7080,7 @@ const handleDownloadPDF = () => {
                           <div>
                             <span className="text-xs font-black text-stone-850 block">Program Approvals Finalized</span>
                             <span className="text-[9px] text-stone-500 font-bold block">
-                              {isProgramsAllApproved ? "âœ“ Auto-verified: All submitted programs approved or rejected" : "Manual override or verified: all programs processed"}
+                              {isProgramsAllApproved ? "Auto-verified: All submitted programs approved or rejected" : "Manual override or verified: all programs processed"}
                             </span>
                           </div>
                         </div>
@@ -6993,9 +7185,15 @@ const handleDownloadPDF = () => {
                           : 'bg-amber-50/50 border-amber-150 text-amber-800'
                       }`}>
                         {isCompletionReady ? (
-                          <p className="text-xs font-black">âœ“ ALL PRE-REQUISITES SATISFIED! You may now permanently complete this event.</p>
+                          <p className="text-xs font-black flex items-center space-x-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>ALL PRE-REQUISITES SATISFIED! You may now permanently complete this event.</span>
+                          </p>
                         ) : (
-                          <p className="text-[10px] font-extrabold">âš ï¸ GATED: All checklist items must be satisfied to unlock the "Complete Event" action button.</p>
+                          <p className="text-[10px] font-extrabold flex items-center space-x-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>GATED: All checklist items must be satisfied to unlock the "Complete Event" action button.</span>
+                          </p>
                         )}
                       </div>
                     </GMKCard>
@@ -7071,8 +7269,8 @@ const handleDownloadPDF = () => {
                             <div>
                               <p className="text-xs font-black text-stone-850">Publication Readiness</p>
                               <div className="flex items-center space-x-1.5 mt-0.5 text-[11px] font-bold text-stone-600">
-                                <span className={completedCount === totalCount ? "text-emerald-700" : "text-amber-700"}>
-                                  {completedCount === totalCount ? "âœ“" : "â—"} {completedCount} of {totalCount} requirements completed
+                                <span className={completedCount === totalCount ? "text-emerald-700 font-bold" : "text-amber-700 font-bold"}>
+                                  {completedCount} of {totalCount} requirements completed
                                 </span>
                               </div>
                             </div>
@@ -7082,7 +7280,7 @@ const handleDownloadPDF = () => {
                               className="text-[10px] font-black uppercase text-[#0f4c2a] hover:text-[#0c3e22] transition-colors flex items-center space-x-1 self-start sm:self-auto cursor-pointer"
                             >
                               <span>{showReadinessDetails ? "Hide Details" : "View Details"}</span>
-                              <span>{showReadinessDetails ? "â–²" : "â–¼"}</span>
+                              {showReadinessDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                             </button>
                           </div>
 
@@ -7092,9 +7290,11 @@ const handleDownloadPDF = () => {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] font-bold">
                                 {checklist.map((item, idx) => (
                                   <div key={idx} className="flex items-start space-x-2">
-                                    <span className={`text-xs select-none shrink-0 ${item.valid ? "text-emerald-600" : "text-stone-300"}`}>
-                                      {item.valid ? "âœ“" : "â—‹"}
-                                    </span>
+                                    {item.valid ? (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                                    ) : (
+                                      <Circle className="w-3.5 h-3.5 text-stone-300 shrink-0 mt-0.5" />
+                                    )}
                                     <span className={item.valid ? "text-stone-700" : "text-stone-400 italic"}>
                                       {item.label}
                                     </span>
@@ -7119,8 +7319,8 @@ const handleDownloadPDF = () => {
 
                     {configStatus === 'published' && (
                       <div className="p-4 bg-emerald-50/55 border border-emerald-150 rounded-2xl text-emerald-900 space-y-1 font-sans">
-                        <p className="text-xs font-black flex items-center space-x-1">
-                          <span>â—</span>
+                        <p className="text-xs font-black flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
                           <span>EVENT IS LIVE</span>
                         </p>
                         <p className="text-[10px] text-emerald-800 font-semibold leading-relaxed">
@@ -7143,7 +7343,7 @@ const handleDownloadPDF = () => {
                     {configStatus === 'completed' && (
                       <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl text-stone-800 space-y-1 font-sans">
                         <p className="text-xs font-black flex items-center space-x-1">
-                          <span>ðŸ</span>
+                          <span></span>
                           <span>EVENT COMPLETED</span>
                         </p>
                         <p className="text-[10px] text-stone-500 font-semibold leading-relaxed">
@@ -7172,7 +7372,7 @@ const handleDownloadPDF = () => {
                               <span className="px-1.5 py-0.5 bg-stone-100 border border-stone-200 rounded text-stone-700 font-bold">
                                 Rev Date: {getPolicyMetadata(activeEvent, activeEvent?.pricing).revisionDate}
                               </span>
-                              <span>ðŸ“… Effective: <strong className="text-stone-800 font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
+                              <span> Effective: <strong className="text-stone-800 font-bold">{getPolicyMetadata(activeEvent, activeEvent?.pricing).fullFormatted}</strong></span>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2 shrink-0">
@@ -7182,7 +7382,7 @@ const handleDownloadPDF = () => {
                               className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-100 rounded-xl transition-all cursor-pointer flex items-center space-x-1 text-[10px] font-extrabold uppercase tracking-wider"
                               title="Download PDF"
                             >
-                              <span>ðŸ“¥</span>
+                              <span></span>
                               <span>PDF</span>
                             </button>
                             <button
@@ -7243,9 +7443,9 @@ const handleDownloadPDF = () => {
 
                         <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl text-[9px] text-stone-500 leading-relaxed font-semibold space-y-1">
                           <span className="font-bold text-stone-700 block uppercase tracking-wider text-[8px]">Calculation Engine Implementation Notes</span>
-                          <p>â€¢ Ages are calculated automatically as of the registration timestamp.</p>
-                          <p>â€¢ The pricing engine executes inside an atomic database write, verifying exact fees prior to commit.</p>
-                          <p>â€¢ Guest fees are added as a separate flat rate addition per guest registered under a household unit.</p>
+                          <p>* Ages are calculated automatically as of the registration timestamp.</p>
+                          <p>* The pricing engine executes inside an atomic database write, verifying exact fees prior to commit.</p>
+                          <p>* Guest fees are added as a separate flat rate addition per guest registered under a household unit.</p>
                         </div>
 
                         {/* Bottom Close Button for easy dismissal */}
@@ -7266,13 +7466,15 @@ const handleDownloadPDF = () => {
                   <div className="sticky bottom-16 md:bottom-0 bg-white/95 backdrop-blur-md p-4 border border-stone-200 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 z-10">
                     <div className="flex items-center space-x-2">
                       {hasUnsavedChanges() && (
-                        <span className="px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider animate-pulse">
-                          âš ï¸ Unsaved Changes
+                        <span className="px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[10px] font-black uppercase tracking-wider animate-pulse flex items-center space-x-1">
+                          <AlertCircle className="w-3 h-3 text-amber-700 shrink-0" />
+                          <span>Unsaved Changes</span>
                         </span>
                       )}
                       {!hasUnsavedChanges() && justSaved && (
-                        <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-black uppercase tracking-wider">
-                          âœ“ Changes Saved
+                        <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center space-x-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-700 shrink-0" />
+                          <span>Changes Saved</span>
                         </span>
                       )}
                     </div>
@@ -7570,8 +7772,8 @@ const handleDownloadPDF = () => {
 
               {/* FLOATING TOAST NOTIFICATION */}
               {toastMessage && (
-                <div className="fixed bottom-6 right-6 z-50 bg-stone-900 text-white py-3 px-5 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold font-heading border border-stone-800 animate-slideIn">
-                  <span className="text-emerald-400 text-sm">âœ“</span>
+                <div className="fixed bottom-6 right-6 z-50 bg-stone-900 text-white py-3 px-5 rounded-2xl shadow-2xl flex items-center space-x-2.5 text-xs font-bold font-heading border border-stone-800 animate-slideIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>{toastMessage}</span>
                 </div>
               )}
@@ -7903,10 +8105,15 @@ const handleDownloadPDF = () => {
                         {!activeProgForManagement && (
                         <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-base">
-                                {isFinanceComm ? 'ðŸ’°' : isFoodComm ? 'ðŸ±' : isAttendanceComm ? 'ðŸŽŸï¸' : isProgramComm ? 'ðŸŽ­' : 'ðŸ‘¥'}
-                              </span>
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#0f4c2a] shrink-0">
+                                {isFinanceComm ? <Coins className="w-4 h-4 text-emerald-700" /> :
+                                 isFoodComm ? <Utensils className="w-4 h-4 text-amber-700" /> :
+                                 isAttendanceComm ? <QrCode className="w-4 h-4 text-[#0f4c2a]" /> :
+                                 isProgramComm ? <Calendar className="w-4 h-4 text-purple-700" /> :
+                                 isSponsorshipComm ? <Award className="w-4 h-4 text-blue-700" /> :
+                                 <Users className="w-4 h-4 text-[#0f4c2a]" />}
+                              </div>
                               <div>
                                 <h4 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading">
                                   {activeCommitteeToConfigure} Committee Workspace
@@ -8023,7 +8230,7 @@ const handleDownloadPDF = () => {
                                           <div className="flex items-center justify-between">
                                             <div className="min-w-0">
                                               <span className="font-bold text-stone-900 text-xs block truncate">{res.fullName}</span>
-                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} â€¢ {res.email}</span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} * {res.email}</span>
                                             </div>
                                             <div className="flex items-center space-x-1.5 shrink-0">
                                               <button
@@ -8098,7 +8305,7 @@ const handleDownloadPDF = () => {
                                             )}
                                           </div>
                                           <span className="text-[9px] text-stone-500 font-bold block truncate">
-                                            {vol.unitDisplay ? `Flat: ${vol.unitDisplay}` : ''} {vol.phone ? `â€¢ Tel: ${vol.phone}` : ''} {vol.email && vol.email !== 'manual@external.com' ? `â€¢ ${vol.email}` : ''}
+                                            {vol.unitDisplay ? `Flat: ${vol.unitDisplay}` : ''} {vol.phone ? `* Tel: ${vol.phone}` : ''} {vol.email && vol.email !== 'manual@external.com' ? `* ${vol.email}` : ''}
                                           </span>
                                         </div>
                                         <button
@@ -8178,7 +8385,7 @@ const handleDownloadPDF = () => {
                                               <span className="font-bold text-stone-900 text-xs block truncate">
                                                 {res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded">Primary</span>
                                               </span>
-                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} â€¢ Tel: {res.phone}</span>
+                                              <span className="text-[9px] text-stone-500 font-medium">Flat: {res.displayUnitNumber} • Tel: {res.phone}</span>
                                             </div>
                                             <button
                                               type="button"
@@ -8210,7 +8417,7 @@ const handleDownloadPDF = () => {
                                                   {fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded capitalize">{fm.relationship || 'Family'}</span>
                                                 </span>
                                                 <span className="text-[9px] text-stone-500 font-medium">
-                                                  Flat: {primaryRes?.displayUnitNumber || 'N/A'} â€¢ Tel: {fm.phone || primaryRes?.phone || 'N/A'}
+                                                  Flat: {primaryRes?.displayUnitNumber || 'N/A'} • Tel: {fm.phone || primaryRes?.phone || 'N/A'}
                                                 </span>
                                               </div>
                                               <button
@@ -8387,6 +8594,7 @@ const handleDownloadPDF = () => {
                                   <div className="space-y-6 animate-fadeIn text-left">
                                     <div className="flex items-center justify-between">
                                       <h5 className="text-sm font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-2">
+                                        <Utensils className="w-4 h-4 text-[#0f4c2a]" />
                                         <span>Food Headcount</span>
                                       </h5>
                                     </div>
@@ -8423,12 +8631,12 @@ const handleDownloadPDF = () => {
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.adults}</td>
                                           </tr>
                                           <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 0â€“3</td>
+                                            <td className="p-3">Kids 0-3</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k0_3}</td>
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k0_3}</td>
                                           </tr>
                                           <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 4â€“9</td>
+                                            <td className="p-3">Kids 4-9</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k4_9}</td>
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k4_9}</td>
                                           </tr>
@@ -8728,39 +8936,46 @@ const handleDownloadPDF = () => {
                                         )}
                                       </div>
                                       <div className="col-span-1 text-center flex items-center justify-center space-x-1">
-                                        {status === 'rejected' && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setEditingCommExpense(exp);
-                                              setCommExpenseDesc(exp.description);
-                                              setCommExpenseAmount(String(exp.amount));
-                                              setCommExpenseDate(exp.date || '');
-                                              setCommExpensePaidByType(exp.paidByType || (exp.isPersonalPayment ? 'resident' : 'event_treasury') as any);
-                                              setCommExpensePaidByName(exp.paidByName || '');
-                                              setCommExpensePaidByResidentId(exp.paidByResidentId || '');
-                                              setCommExpensePaidByUnit(exp.paidByUnit || '');
-                                              setCommExpensePaidBySponsorId(exp.paidBySponsorId || '');
-                                            }}
-                                            className="p-1 hover:bg-amber-50 text-amber-700 hover:text-amber-800 rounded-lg transition-colors cursor-pointer"
-                                            title="Edit and Resubmit Expense"
-                                          >
-                                            <Edit3 className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                        {status !== 'accepted' ? (
-                                          <button
-                                            type="button"
-                                            disabled={isSubmitting}
-                                            onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
-                                            className="p-1 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
-                                            title="Delete Expense"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        ) : (
-                                          <span className="text-[9px] text-stone-400 font-mono" title="Accepted by Finance">âœ“</span>
-                                        )}
+                                        {/* Committee Edit is available for Pending, Accepted, and Rejected expenses */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingCommExpense(exp);
+                                            setShowCommExpenseForm(true);
+                                            setCommExpenseDesc(exp.description || '');
+                                            setCommExpenseAmount(String(exp.amount || ''));
+                                            setCommExpenseDate(exp.date || '');
+                                            setCommExpensePayee(exp.payee || '');
+                                            setCommExpensePaidByType(exp.paidByType || (exp.isPersonalPayment ? 'resident' : 'event_treasury') as any);
+                                            setCommExpensePaidByName(exp.paidByName || '');
+                                            setCommExpensePaidByResidentId(exp.paidByResidentId || '');
+                                            setCommExpensePaidByUnit(exp.paidByUnit || '');
+                                            setCommExpensePaidByPhone(exp.paidByPhone || '');
+                                            setCommExpensePaidByEmail(exp.paidByEmail || '');
+                                            setCommExpensePaidBySponsorId(exp.paidBySponsorId || '');
+                                          }}
+                                          className="p-1 hover:bg-emerald-50 text-stone-500 hover:text-[#0f4c2a] rounded-lg transition-colors cursor-pointer"
+                                          title={
+                                            status === 'rejected'
+                                              ? "Edit & Resubmit Rejected Expense"
+                                              : status === 'accepted'
+                                              ? "Edit Accepted Expense (Returns to Pending Finance Review)"
+                                              : "Edit Expense"
+                                          }
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+
+                                        {/* Committee Delete is available for all committee expenses regardless of review status */}
+                                        <button
+                                          type="button"
+                                          disabled={isSubmitting}
+                                          onClick={() => handleRemoveCommitteeExpense(currentComm?.id || '', exp.id)}
+                                          className="p-1 hover:bg-rose-50 text-stone-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                          title="Delete Expense"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
                                     </div>
                                   );
@@ -8768,264 +8983,295 @@ const handleDownloadPDF = () => {
                               </div>
                             )}
 
-                            {editingCommExpense && (
-                              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-900 font-bold">
-                                <div>
-                                  <span className="font-black uppercase tracking-wider text-[10px] block text-amber-800">Resubmitting Rejected Expense:</span>
-                                  <span>{editingCommExpense.description} (OMR {Number(editingCommExpense.amount).toFixed(3)})</span>
-                                </div>
+                            {!showCommExpenseForm && !editingCommExpense ? (
+                              <div className="pt-2 text-center">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setEditingCommExpense(null);
-                                    setCommExpenseDesc('');
-                                    setCommExpenseAmount('');
-                                    setCommExpenseDate('');
-                                    setCommExpensePaidByType('event_treasury');
-                                    setCommExpensePaidByName('');
-                                    setCommExpensePaidByResidentId('');
-                                    setCommExpensePaidByUnit('');
-                                    setCommExpensePaidBySponsorId('');
-                                  }}
-                                  className="px-2.5 py-1 bg-white border border-amber-300 rounded-lg text-[10px] font-black uppercase text-amber-800 hover:bg-amber-100 cursor-pointer"
-                                >
-                                  Cancel Edit
-                                </button>
-                              </div>
-                            )}
-
-                            <div className="bg-stone-50 p-3 rounded-xl border border-stone-150 space-y-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                                <div className="sm:col-span-3 space-y-1">
-                                  <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
-                                  <input
-                                    type="date"
-                                    value={commExpenseDate}
-                                    onChange={(e) => setCommExpenseDate(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                  />
-                                </div>
-                                <div className="sm:col-span-6 space-y-1">
-                                  <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
-                                  <input
-                                    type="text"
-                                    value={commExpenseDesc}
-                                    onChange={(e) => setCommExpenseDesc(e.target.value)}
-                                    placeholder="Expense description..."
-                                    className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                  />
-                                </div>
-                                <div className="sm:col-span-3 space-y-1">
-                                  <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
-                                  <input
-                                    type="number"
-                                    step="0.001"
-                                    value={commExpenseAmount}
-                                    onChange={(e) => setCommExpenseAmount(e.target.value)}
-                                    placeholder="0.000"
-                                    className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                  />
-                                </div>
-                              </div>
-                              
-                              <div className="pt-2 border-t border-stone-200">
-                                <label className="text-[10px] font-black uppercase tracking-wider text-stone-800 block mb-2">Payment Source / Who Paid?</label>
-                                <div className="grid grid-cols-3 gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setCommExpensePaidByType('event_treasury');
-                                      setCommExpensePaidByName('');
-                                      setCommExpensePaidByResidentId('');
-                                      setCommExpensePaidByUnit('');
-                                      setCommExpensePaidBySponsorId('');
-                                    }}
-                                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
-                                      commExpensePaidByType === 'event_treasury'
-                                        ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-xs ring-2 ring-emerald-500/20'
-                                        : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
-                                    }`}
-                                  >
-                                    <CreditCard className={`w-4 h-4 ${commExpensePaidByType === 'event_treasury' ? 'text-emerald-700' : 'text-stone-400'}`} />
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-center">Event<br/>Treasury</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setCommExpensePaidByType('resident');
-                                      setCommExpensePaidBySponsorId('');
-                                    }}
-                                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
-                                      commExpensePaidByType === 'resident'
-                                        ? 'bg-sky-50 border-sky-500 text-sky-950 shadow-xs ring-2 ring-sky-500/20'
-                                        : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
-                                    }`}
-                                  >
-                                    <User className={`w-4 h-4 ${commExpensePaidByType === 'resident' ? 'text-sky-700' : 'text-stone-400'}`} />
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-center">GMK Resident<br/>/ Spouse</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setCommExpensePaidByType('sponsor');
-                                      setCommExpensePaidByName('');
-                                      setCommExpensePaidByResidentId('');
-                                      setCommExpensePaidByUnit('');
-                                    }}
-                                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
-                                      commExpensePaidByType === 'sponsor'
-                                        ? 'bg-amber-50 border-amber-500 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
-                                        : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
-                                    }`}
-                                  >
-                                    <Building className={`w-4 h-4 ${commExpensePaidByType === 'sponsor' ? 'text-amber-700' : 'text-stone-400'}`} />
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-center">Registered<br/>Sponsor</span>
-                                  </button>
-                                </div>
-                                
-                                {commExpensePaidByType === 'resident' && (
-                                  <div className="mt-3 bg-sky-50/50 p-3 rounded-xl border border-sky-200/80 space-y-2">
-                                    <label className="text-[10px] font-black uppercase tracking-wider text-sky-900 block">Select GMK Resident / Spouse</label>
-                                    
-                                    {commExpensePaidByName && commExpensePaidByResidentId ? (
-                                      <div className="bg-white p-2.5 rounded-lg border border-sky-300 flex items-center justify-between">
-                                        <div className="flex items-center space-x-2">
-                                          <CheckCircle2 className="w-4 h-4 text-sky-700 shrink-0" />
-                                          <div>
-                                            <div className="text-xs font-black text-stone-900 flex items-center space-x-1.5">
-                                              <span>{commExpensePaidByName}</span>
-                                              {commExpensePaidByUnit && (
-                                                <span className="text-[10px] font-bold text-sky-700 px-1.5 bg-sky-100 rounded-sm">
-                                                  {commExpensePaidByUnit}
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="text-[9px] font-mono text-stone-500">{commExpensePaidByResidentId}</div>
-                                          </div>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setCommExpensePaidByName('');
-                                            setCommExpensePaidByResidentId('');
-                                            setCommExpensePaidByUnit('');
-                                          }}
-                                          className="text-[10px] uppercase font-black text-sky-600 hover:text-sky-800 px-2 py-1 bg-sky-100 hover:bg-sky-200 rounded-md cursor-pointer transition-colors"
-                                        >
-                                          Change
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
-                                          <Search className="w-3.5 h-3.5 text-sky-400" />
-                                        </div>
-                                        <input
-                                          type="text"
-                                          value={residentSearchQuery}
-                                          onChange={(e) => setResidentSearchQuery(e.target.value)}
-                                          placeholder="Search residents by name or unit..."
-                                          className="w-full pl-8 pr-3 py-2 bg-white border border-sky-200 rounded-lg text-xs text-stone-800 placeholder-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/50 transition-all shadow-sm"
-                                        />
-                                        {residentSearchQuery.trim().length > 0 && (
-                                          <div className="absolute z-10 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-stone-200 rounded-lg shadow-xl divide-y divide-stone-100">
-                                            {residents
-                                              .filter(r => 
-                                                (r.firstName + ' ' + r.lastName).toLowerCase().includes(residentSearchQuery.toLowerCase()) ||
-                                                (r.unit && r.unit.toLowerCase().includes(residentSearchQuery.toLowerCase())) ||
-                                                (r.spouseName && r.spouseName.toLowerCase().includes(residentSearchQuery.toLowerCase()))
-                                              )
-                                              .map(r => (
-                                                <div key={r.id} className="divide-y divide-stone-50">
-                                                  <div 
-                                                    className="px-3 py-2 hover:bg-sky-50 cursor-pointer flex items-center justify-between group"
-                                                    onClick={() => {
-                                                      setCommExpensePaidByName(r.firstName + ' ' + r.lastName);
-                                                      setCommExpensePaidByResidentId(r.id);
-                                                      setCommExpensePaidByUnit(r.unit || '');
-                                                      setResidentSearchQuery('');
-                                                    }}
-                                                  >
-                                                    <div>
-                                                      <div className="text-xs font-bold text-stone-900 group-hover:text-sky-800">
-                                                        {r.firstName} {r.lastName}
-                                                      </div>
-                                                      <div className="text-[10px] text-stone-500 font-mono">Resident â€¢ {r.unit}</div>
-                                                    </div>
-                                                    <div className="opacity-0 group-hover:opacity-100 bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">
-                                                      Select
-                                                    </div>
-                                                  </div>
-                                                  {r.spouseName && (
-                                                    <div 
-                                                      className="px-3 py-2 hover:bg-sky-50 cursor-pointer flex items-center justify-between group bg-stone-50/50"
-                                                      onClick={() => {
-                                                        setCommExpensePaidByName(r.spouseName!);
-                                                        setCommExpensePaidByResidentId(r.id);
-                                                        setCommExpensePaidByUnit(r.unit || '');
-                                                        setResidentSearchQuery('');
-                                                      }}
-                                                    >
-                                                      <div>
-                                                        <div className="text-xs font-bold text-stone-900 group-hover:text-sky-800">
-                                                          {r.spouseName}
-                                                        </div>
-                                                        <div className="text-[10px] text-stone-500 font-mono">Spouse â€¢ {r.unit}</div>
-                                                      </div>
-                                                      <div className="opacity-0 group-hover:opacity-100 bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[9px] font-black uppercase">
-                                                        Select
-                                                      </div>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                                
-                                {commExpensePaidByType === 'sponsor' && (
-                                  <div className="mt-3 bg-amber-50/50 p-3 rounded-xl border border-amber-200/80 space-y-2">
-                                    <label className="text-[10px] font-black uppercase tracking-wider text-amber-950 block">Select Registered Sponsor</label>
-                                    <select
-                                      value={commExpensePaidBySponsorId}
-                                      onChange={(e) => {
-                                        const sponId = e.target.value;
-                                        setCommExpensePaidBySponsorId(sponId);
-                                        const found = (eventFinance?.sponsorshipIncome || []).find((s: any) => s.id === sponId);
-                                        if (found) {
-                                          setCommExpensePaidByName(found.sponsorName || '');
-                                        }
-                                      }}
-                                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all shadow-sm"
-                                    >
-                                      <option value="">-- Choose a Sponsor --</option>
-                                      {(eventFinance?.sponsorshipIncome || []).map((s: any) => (
-                                        <option key={s.id} value={s.id}>
-                                          {s.sponsorName}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                )}
-                              </div>
-                              
-                              <div className="pt-2">
-                                <button
-                                  type="button"
-                                  disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim() || (commExpensePaidByType === 'resident' && !commExpensePaidByResidentId) || (commExpensePaidByType === 'sponsor' && !commExpensePaidBySponsorId)}
-                                  onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
-                                  className="w-full py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-md disabled:opacity-50"
+                                  onClick={() => setShowCommExpenseForm(true)}
+                                  className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-xs font-black uppercase tracking-wider transition-colors inline-flex items-center space-x-1.5 shadow-sm cursor-pointer"
                                 >
                                   <Plus className="w-4 h-4 text-[#d4af37]" />
-                                  <span>{editingCommExpense ? 'Resubmit Expense' : 'Add Expense'}</span>
+                                  <span>Record Expense</span>
                                 </button>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 shadow-sm space-y-4 animate-fadeIn">
+                                {editingCommExpense && (
+                                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-900 font-bold">
+                                    <div>
+                                      <span className="font-black uppercase tracking-wider text-[10px] block text-amber-800">
+                                        {editingCommExpense.financeStatus === 'rejected'
+                                          ? 'Resubmitting Rejected Expense (Will return to Finance Review):'
+                                          : editingCommExpense.financeStatus === 'accepted'
+                                          ? 'Revising Accepted Expense (Will return to Pending Finance Review):'
+                                          : 'Editing Expense (Pending Review):'}
+                                      </span>
+                                      <span>{editingCommExpense.description} (OMR {Number(editingCommExpense.amount).toFixed(3)})</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelExpense}
+                                      className="px-2.5 py-1 bg-white border border-amber-300 rounded-lg text-[10px] font-black uppercase text-amber-800 hover:bg-amber-100 cursor-pointer"
+                                    >
+                                      Cancel Edit
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                                  <div className="sm:col-span-3 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
+                                    <input
+                                      type="date"
+                                      value={commExpenseDate}
+                                      onChange={(e) => setCommExpenseDate(e.target.value)}
+                                      className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-6 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Description</label>
+                                    <input
+                                      type="text"
+                                      value={commExpenseDesc}
+                                      onChange={(e) => setCommExpenseDesc(e.target.value)}
+                                      placeholder="Expense description..."
+                                      className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-3 space-y-1">
+                                    <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      value={commExpenseAmount}
+                                      onChange={(e) => setCommExpenseAmount(e.target.value)}
+                                      placeholder="0.000"
+                                      className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-1 pt-1">
+                                  <label className="text-[10px] uppercase font-black text-stone-500 tracking-wider block">Payee / Vendor <span className="text-stone-400 font-bold normal-case text-[9px]">(Optional)</span></label>
+                                  <div className="relative">
+                                    <input
+                                      type="text"
+                                      value={commExpensePayee}
+                                      onChange={(e) => setCommExpensePayee(e.target.value)}
+                                      placeholder="e.g. Al Mandoos Printing Press"
+                                      className="w-full pl-8 pr-3 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                    />
+                                    <Building className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                  </div>
+                                </div>
+                                
+                                <div className="pt-3 border-t border-stone-200">
+                                  <label className="text-[10px] font-black uppercase tracking-wider text-stone-800 block mb-2">Payment Source / Who Paid?</label>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCommExpensePaidByType('event_treasury');
+                                        setCommExpensePaidByName('');
+                                        setCommExpensePaidByResidentId('');
+                                        setCommExpensePaidByUnit('');
+                                        setCommExpensePaidBySponsorId('');
+                                      }}
+                                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
+                                        commExpensePaidByType === 'event_treasury'
+                                          ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-xs ring-2 ring-emerald-500/20'
+                                          : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                                      }`}
+                                    >
+                                      <CreditCard className={`w-4 h-4 ${commExpensePaidByType === 'event_treasury' ? 'text-emerald-700' : 'text-stone-400'}`} />
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-center">Event<br/>Treasury</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCommExpensePaidByType('resident');
+                                        setCommExpensePaidByName('');
+                                        setCommExpensePaidByResidentId('');
+                                        setCommExpensePaidByUnit('');
+                                        setCommExpensePaidBySponsorId('');
+                                      }}
+                                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
+                                        commExpensePaidByType === 'resident'
+                                          ? 'bg-sky-50 border-sky-500 text-sky-950 shadow-xs ring-2 ring-sky-500/20'
+                                          : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                                      }`}
+                                    >
+                                      <User className={`w-4 h-4 ${commExpensePaidByType === 'resident' ? 'text-sky-700' : 'text-stone-400'}`} />
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-center">GMK Resident<br/>/ Spouse</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCommExpensePaidByType('sponsor');
+                                        setCommExpensePaidByName('');
+                                        setCommExpensePaidByResidentId('');
+                                        setCommExpensePaidByUnit('');
+                                        setCommExpensePaidBySponsorId('');
+                                      }}
+                                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center space-y-1 ${
+                                        commExpensePaidByType === 'sponsor'
+                                          ? 'bg-amber-50 border-amber-500 text-amber-950 shadow-xs ring-2 ring-amber-500/20'
+                                          : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                                      }`}
+                                    >
+                                      <Building className={`w-4 h-4 ${commExpensePaidByType === 'sponsor' ? 'text-amber-700' : 'text-stone-400'}`} />
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-center">Registered<br/>Sponsor</span>
+                                    </button>
+                                  </div>
+                                  
+                                  {commExpensePaidByType === 'resident' && (
+                                    <div className="bg-sky-50/50 p-3 rounded-xl border border-sky-200/80 mt-2 space-y-2 animate-fadeIn">
+                                      <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-black uppercase tracking-wider text-sky-950 block">
+                                          Select Resident / Spouse
+                                        </label>
+                                        <span className="text-[9px] font-bold text-sky-800">Out-of-pocket Payable</span>
+                                      </div>
+                                      
+                                      {commExpensePaidByResidentId ? (
+                                        <div className="bg-white border border-sky-200 rounded-lg p-2.5 flex items-center justify-between">
+                                          <div className="flex items-center space-x-2">
+                                            <div className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 font-bold text-sm shrink-0">
+                                              {commExpensePaidByName.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                              <div className="font-bold text-stone-900 text-sm flex items-center space-x-1.5">
+                                                <span>{commExpensePaidByName}</span>
+                                                {commExpensePaidByResidentId.includes('_spouse') && (
+                                                  <span className="text-[9px] px-1.5 py-0.5 bg-stone-100 text-stone-600 rounded font-black uppercase">Spouse</span>
+                                                )}
+                                              </div>
+                                              <div className="text-[10px] text-stone-500 font-mono">
+                                                {commExpensePaidByResidentId.replace('_spouse', '')} {commExpensePaidByUnit ? `• Unit ${commExpensePaidByUnit}` : ''}
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setCommExpensePaidByResidentId('');
+                                              setCommExpensePaidByName('');
+                                              setCommExpensePaidByUnit('');
+                                              setCommExpensePaidByPhone('');
+                                              setCommExpensePaidByEmail('');
+                                            }}
+                                            className="text-stone-400 hover:text-stone-600 text-xs p-1"
+                                            title="Change Resident"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-1.5">
+                                          <div className="relative">
+                                            <Search className="w-3 h-3 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                            <input
+                                              type="text"
+                                              value={commResidentSearchTerm}
+                                              onChange={(e) => setCommResidentSearchTerm(e.target.value)}
+                                              placeholder="Search resident by name, GMK ID, or unit..."
+                                              className="w-full pl-7 pr-3 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0f4c2a]"
+                                            />
+                                          </div>
+                                          <div className="max-h-36 overflow-y-auto bg-white border border-stone-200 rounded-lg divide-y divide-stone-100 text-xs">
+                                            {filteredResidentCandidates.length === 0 ? (
+                                              <div className="p-3 text-center text-stone-400 font-bold text-[11px]">
+                                                No matching resident or spouse found.
+                                              </div>
+                                            ) : (
+                                              filteredResidentCandidates.map(cand => (
+                                                <button
+                                                  key={cand.key}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setCommExpensePaidByResidentId(cand.residentId);
+                                                    setCommExpensePaidByName(cand.fullName);
+                                                    setCommExpensePaidByUnit(cand.unit);
+                                                    setCommExpensePaidByPhone(cand.phone);
+                                                    setCommExpensePaidByEmail(cand.email);
+                                                    setCommResidentSearchTerm('');
+                                                  }}
+                                                  className="w-full p-2 text-left hover:bg-sky-50/70 transition-colors flex items-center justify-between cursor-pointer"
+                                                >
+                                                  <div>
+                                                    <div className="font-bold text-stone-900 flex items-center space-x-1.5">
+                                                      <span>{cand.fullName}</span>
+                                                      <span className="text-[9px] px-1.5 py-0.5 bg-stone-100 text-stone-600 rounded font-black uppercase">
+                                                        {cand.relationship}
+                                                      </span>
+                                                    </div>
+                                                    <div className="text-[9px] text-stone-500 font-mono">
+                                                      {cand.residentId} * Unit {cand.unit || 'N/A'}
+                                                    </div>
+                                                  </div>
+                                                  <span className="text-[10px] font-black text-sky-700 uppercase">Select</span>
+                                                </button>
+                                              ))
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {commExpensePaidByType === 'sponsor' && (
+                                    <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-200/80 mt-2 space-y-2 animate-fadeIn">
+                                      <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-black uppercase tracking-wider text-amber-950 block">
+                                          Registered Sponsor
+                                        </label>
+                                        <span className="text-[9px] font-bold text-amber-800">Event Sponsorship</span>
+                                      </div>
+                                      <select
+                                        value={commExpensePaidBySponsorId}
+                                        onChange={(e) => {
+                                          const sponId = e.target.value;
+                                          setCommExpensePaidBySponsorId(sponId);
+                                          if (sponId) {
+                                            const sp = (eventFinance?.sponsors || []).find((s: any) => s.id === sponId);
+                                            setCommExpensePaidByName(sp?.companyName || '');
+                                          } else {
+                                            setCommExpensePaidByName('');
+                                          }
+                                        }}
+                                        className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                      >
+                                        <option value="">-- Select Sponsor --</option>
+                                        {(eventFinance?.sponsors || []).map((s: any) => (
+                                          <option key={s.id} value={s.id}>
+                                            {s.companyName}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="pt-4 flex items-center justify-end space-x-2">
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelExpense}
+                                    className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSubmitting || !commExpenseDesc.trim() || !commExpenseAmount.trim() || (commExpensePaidByType === 'resident' && !commExpensePaidByResidentId) || (commExpensePaidByType === 'sponsor' && !commExpensePaidBySponsorId)}
+                                    onClick={() => handleAddCommitteeExpense(currentComm?.id || '')}
+                                    className="px-6 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 shadow-md disabled:opacity-50"
+                                  >
+                                    {editingCommExpense ? <Save className="w-4 h-4 text-[#d4af37]" /> : <Plus className="w-4 h-4 text-[#d4af37]" />}
+                                    <span>{editingCommExpense ? (editingCommExpense.financeStatus === 'rejected' ? 'Resubmit Expense' : editingCommExpense.financeStatus === 'accepted' ? 'Update & Resubmit' : 'Update Expense') : 'Add Expense'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -9136,7 +9382,7 @@ const handleDownloadPDF = () => {
                         <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
                           <div>
                             <strong className="text-stone-900">{progCoordinator.fullName}</strong>
-                            <span className="text-stone-500 block text-[10px]">Unit {progCoordinator.displayUnitNumber} â€¢ {progCoordinator.email}</span>
+                            <span className="text-stone-500 block text-[10px]">Unit {progCoordinator.displayUnitNumber} * {progCoordinator.email}</span>
                           </div>
                           <button
                             type="button"
@@ -9174,7 +9420,7 @@ const handleDownloadPDF = () => {
                                       <div key={res.id} className="p-2 flex items-center justify-between text-[11px] hover:bg-stone-50">
                                         <div>
                                           <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
-                                          <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} â€¢ {res.email}</span>
+                                          <span className="text-[9px] text-stone-500 block">Unit: {res.displayUnitNumber} * {res.email}</span>
                                         </div>
                                         <button
                                           type="button"
@@ -9245,7 +9491,7 @@ const handleDownloadPDF = () => {
                                     </span>
                                     {prog.committeeName && (
                                       <span className="text-[8px] font-bold text-stone-600 bg-stone-100 border border-stone-200 px-1.5 py-0.5 rounded">
-                                        ðŸ›ï¸ {prog.committeeName}
+                                        &gt; {prog.committeeName}
                                       </span>
                                     )}
                                     <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border ${
@@ -9258,7 +9504,7 @@ const handleDownloadPDF = () => {
                                   </div>
                                   <h5 className="text-stone-850 font-black text-xs font-heading capitalize truncate">{prog.title}</h5>
                                   <p className="text-stone-500 text-[10px] font-semibold truncate">
-                                    Coord: {prog.coordinators?.[0]?.fullName || 'Unassigned'} â€¢ Volunteers: {prog.volunteers?.length || 0} â€¢ Participants: {prog.participants?.length || 0}
+                                    Coord: {prog.coordinators?.[0]?.fullName || 'Unassigned'} * Volunteers: {prog.volunteers?.length || 0} * Participants: {prog.participants?.length || 0}
                                   </p>
                                   {totalExp > 0 && (
                                     <p className="text-[9.5px] font-mono text-[#0f4c2a] font-bold">
@@ -9388,7 +9634,7 @@ const handleDownloadPDF = () => {
                                       </span>
                                       {prog.committeeName && (
                                         <span className="text-[9px] font-bold text-stone-600 bg-stone-100 border border-stone-200 px-2 py-0.5 rounded-lg">
-                                          ðŸ›ï¸ {prog.committeeName}
+                                          &gt; {prog.committeeName}
                                         </span>
                                       )}
                                       <span className="text-[9px] font-mono text-stone-400">ID: {prog.id}</span>
@@ -9525,7 +9771,7 @@ const handleDownloadPDF = () => {
                                           <div key={res.id} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                             <div>
                                               <span className="font-extrabold text-stone-900 block">{res.fullName}</span>
-                                              <span className="text-[9px] text-stone-500 block">Unit {res.displayUnitNumber} â€¢ {res.email}</span>
+                                              <span className="text-[9px] text-stone-500 block">Unit {res.displayUnitNumber} * {res.email}</span>
                                             </div>
                                             <button
                                               type="button"
@@ -9633,7 +9879,7 @@ const handleDownloadPDF = () => {
                                               <div key={res.gmkId} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                                 <div>
                                                   <span className="font-extrabold text-stone-900 block">{res.fullName} <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1 rounded ml-1">Primary</span></span>
-                                                  <span className="text-[9px] text-stone-500 block">Flat: {res.displayUnitNumber} â€¢ {res.email}</span>
+                                                  <span className="text-[9px] text-stone-500 block">Flat: {res.displayUnitNumber} * {res.email}</span>
                                                 </div>
                                                 <button
                                                   type="button"
@@ -9656,7 +9902,7 @@ const handleDownloadPDF = () => {
                                                 <div key={fm.id} className="p-2 flex items-center justify-between text-xs hover:bg-stone-50">
                                                   <div>
                                                     <span className="font-extrabold text-stone-900 block">{fm.name} <span className="text-[9px] text-rose-700 font-bold bg-rose-50 px-1 rounded ml-1 capitalize">{fm.relationship || 'Family'}</span></span>
-                                                    <span className="text-[9px] text-stone-500 block">Flat: {primaryRes?.displayUnitNumber || 'N/A'} â€¢ {fm.email || primaryRes?.email || 'N/A'}</span>
+                                                    <span className="text-[9px] text-stone-500 block">Flat: {primaryRes?.displayUnitNumber || 'N/A'} * {fm.email || primaryRes?.email || 'N/A'}</span>
                                                   </div>
                                                   <button
                                                     type="button"
@@ -9739,7 +9985,7 @@ const handleDownloadPDF = () => {
                                           <div key={partId} className="p-2.5 bg-emerald-50/30 border border-emerald-100 rounded-xl flex items-center justify-between">
                                             <div>
                                               <span className="text-xs font-black text-stone-900 block">{partName}</span>
-                                              {partUnit && <span className="text-[9px] text-stone-500 font-bold block">Unit {partUnit} {partPhone ? `â€¢ ðŸ“ž ${partPhone}` : ''}</span>}
+                                              {partUnit && <span className="text-[9px] text-stone-500 font-bold block">Unit {partUnit} {partPhone ? `*  ${partPhone}` : ''}</span>}
                                             </div>
                                             <button
                                               type="button"
@@ -9849,37 +10095,28 @@ const handleDownloadPDF = () => {
                                                       </span>
                                                     )}
                                                   </div>
-                                                  <div className="text-[8.5px] text-stone-500 font-bold truncate">
-                                                    Unit {candidate.unitDisplay} â€¢ {candidate.relationship}
+                                                    <span className="text-[9px] text-stone-500 block truncate">
+                                                      Flat: {candidate.unitDisplay} {candidate.phone ? `• ${candidate.phone}` : ''} {candidate.relationship ? `(${candidate.relationship})` : ''}
+                                                    </span>
                                                   </div>
-                                                  {isChild ? (
-                                                    <div className="text-[8.5px] font-mono text-amber-800 font-bold truncate">
-                                                      ðŸ‘¨â€ðŸ‘©â€ðŸ‘§ Parent Contact: {candidate.phone || 'N/A'}
-                                                    </div>
-                                                  ) : (
-                                                    <div className="text-[8.5px] font-mono text-emerald-800 font-bold truncate">
-                                                      ðŸ“± Phone: {candidate.phone || 'N/A'}
-                                                    </div>
-                                                  )}
+                                                  <button
+                                                    type="button"
+                                                    disabled={isSubmitting}
+                                                    onClick={() => {
+                                                      localAssignParticipant(candidate);
+                                                      setProgParticipantSearchQuery('');
+                                                    }}
+                                                    className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black cursor-pointer shadow-xs shrink-0"
+                                                  >
+                                                    Enroll
+                                                  </button>
                                                 </div>
-
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    localAssignParticipant(candidate);
-                                                    setProgParticipantSearchQuery('');
-                                                  }}
-                                                  className="px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[9px] uppercase tracking-wider font-black shrink-0 cursor-pointer shadow-xs"
-                                                >
-                                                  Enroll
-                                                </button>
-                                              </div>
-                                            );
-                                          });
-                                        })()}
-                                      </div>
-                                    )}
-                                  </div>
+                                              );
+                                            });
+                                          })()}
+                                        </div>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
 
@@ -9887,31 +10124,27 @@ const handleDownloadPDF = () => {
                                 <div className="space-y-3 pt-2 border-t border-stone-150">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-black uppercase text-[#0f4c2a] tracking-wider font-heading flex items-center space-x-1.5">
-                                      <PieChart className="w-3.5 h-3.5 text-[#d4af37]" />
+                                      <Receipt className="w-3.5 h-3.5 text-[#d4af37]" />
                                       <span>Program Expenses (OMR {totalExpense.toFixed(3)})</span>
                                     </span>
                                   </div>
 
                                   {expenses.length === 0 ? (
                                     <p className="text-[11px] text-stone-500 italic font-bold mb-2">
-                                      No expenses recorded for this program yet.
+                                      No expenses recorded for this program.
                                     </p>
                                   ) : (
-                                    <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-150 bg-white">
-                                      <div className="bg-stone-50 p-2.5 grid grid-cols-12 text-[10px] uppercase font-black text-stone-600 tracking-wider">
-                                        <div className="col-span-3">Date</div>
-                                        <div className="col-span-5">Description</div>
-                                        <div className="col-span-3 text-right">Amount (OMR)</div>
-                                        <div className="col-span-1 text-center">Action</div>
-                                      </div>
+                                    <div className="space-y-1.5">
                                       {expenses.map(exp => (
-                                        <div key={exp.id} className="p-2.5 grid grid-cols-12 items-center text-xs font-bold text-stone-850 hover:bg-stone-50/50">
-                                          <div className="col-span-3 font-mono text-[11px] text-stone-600">{exp.date || exp.createdAt?.split('T')[0]}</div>
-                                          <div className="col-span-5 font-semibold text-stone-900 truncate">{exp.title}</div>
-                                          <div className="col-span-3 text-right font-mono font-extrabold text-[#0f4c2a]">
-                                            OMR {(exp.amount || 0).toFixed(3)}
+                                        <div key={exp.id} className="p-2.5 bg-stone-50 border border-stone-200 rounded-xl flex items-center justify-between">
+                                          <div>
+                                            <span className="text-xs font-black text-stone-900 block">{exp.title}</span>
+                                            <span className="text-[9px] text-stone-500 font-mono block">{exp.date}</span>
                                           </div>
-                                          <div className="col-span-1 text-center">
+                                          <div className="flex items-center space-x-2">
+                                            <span className="font-mono font-bold text-xs text-[#0f4c2a]">
+                                              OMR {(exp.amount || 0).toFixed(3)}
+                                            </span>
                                             <button
                                               type="button"
                                               disabled={isSubmitting || !isEditingProgram}
@@ -9926,101 +10159,88 @@ const handleDownloadPDF = () => {
                                     </div>
                                   )}
 
-                                  {/* Add Program Expense */}
                                   {isEditingProgram && (
-                                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end pt-1 bg-stone-50 p-2.5 rounded-xl border border-stone-150">
-                                    <div className="sm:col-span-3 space-y-1">
-                                      <label className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Date</label>
-                                      <input
-                                        type="date"
-                                        value={expenseDate}
-                                        onChange={(e) => setExpenseDate(e.target.value)}
-                                        className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                      />
+                                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1 items-end">
+                                      <div className="sm:col-span-3">
+                                        <label className="text-[9px] uppercase font-bold text-stone-500 block mb-1">Date</label>
+                                        <input
+                                          type="date"
+                                          value={expenseDate}
+                                          onChange={(e) => setExpenseDate(e.target.value)}
+                                          className="w-full px-2.5 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        />
+                                      </div>
+                                      <div className="sm:col-span-5">
+                                        <label className="text-[9px] uppercase font-bold text-stone-500 block mb-1">Expense Title</label>
+                                        <input
+                                          type="text"
+                                          value={expenseTitle}
+                                          onChange={(e) => setExpenseTitle(e.target.value)}
+                                          placeholder="e.g. Props / Costumes"
+                                          className="w-full px-2.5 py-1.5 font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        />
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                        <label className="text-[9px] uppercase font-bold text-stone-500 block mb-1">Amount (OMR)</label>
+                                        <input
+                                          type="number"
+                                          step="0.001"
+                                          value={expenseAmount}
+                                          onChange={(e) => setExpenseAmount(e.target.value)}
+                                          placeholder="0.000"
+                                          className="w-full px-2.5 py-1.5 font-mono font-bold bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
+                                        />
+                                      </div>
+                                      <div className="sm:col-span-2">
+                                        <button
+                                          type="button"
+                                          onClick={localAddExpense}
+                                          disabled={!expenseTitle.trim() || !expenseAmount.trim()}
+                                          className="w-full py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-bold uppercase disabled:opacity-50 cursor-pointer flex items-center justify-center space-x-1"
+                                        >
+                                          <Plus className="w-3.5 h-3.5" />
+                                          <span>Add</span>
+                                        </button>
+                                      </div>
                                     </div>
-                                    <div className="sm:col-span-4 space-y-1">
-                                      <label className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Expense Title</label>
-                                      <input
-                                        type="text"
-                                        value={expenseTitle}
-                                        onChange={(e) => setExpenseTitle(e.target.value)}
-                                        placeholder="Costume rental, props..."
-                                        className="w-full px-2.5 py-1.5 font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                      />
-                                    </div>
-                                    <div className="sm:col-span-3 space-y-1">
-                                      <label className="text-[9px] uppercase font-black text-stone-500 tracking-wider block">Amount (OMR)</label>
-                                      <input
-                                        type="number"
-                                        step="0.001"
-                                        value={expenseAmount}
-                                        onChange={(e) => setExpenseAmount(e.target.value)}
-                                        placeholder="0.000"
-                                        className="w-full px-2.5 py-1.5 font-mono font-bold bg-white border border-stone-200 rounded-lg text-xs text-stone-850 focus:outline-none focus:ring-1 focus:ring-[#0f4c2a]"
-                                      />
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                      <button
-                                        type="button"
-                                        disabled={isSubmitting || !expenseTitle.trim() || !expenseAmount.trim()}
-                                        onClick={localAddExpense}
-                                        className="w-full py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer shadow-xs disabled:opacity-50"
-                                      >
-                                        Log
-                                      </button>
-                                    </div>
-                                  </div>
                                   )}
                                 </div>
 
-                                {/* ACTION BUTTONS */}
-                                <div className="pt-4 border-t border-stone-150 flex items-center justify-between space-x-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveProgForManagement(null)}
-                                    className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2 active:scale-95"
-                                  >
-                                    <ArrowLeft className="w-4 h-4" />
-                                    <span>Back</span>
-                                  </button>
-                                  <div className="flex items-center space-x-3">
-                                    {!isEditingProgram ? (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setWorkingProgram(JSON.parse(JSON.stringify(prog)));
-                                            setIsEditingProgram(true);
-                                          }}
-                                          className="px-6 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs uppercase tracking-wider font-black cursor-pointer shadow-md transition-all flex items-center space-x-2"
-                                        >
-                                          <Edit2 className="w-4 h-4" />
-                                          <span>Modify Workspace</span>
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsEditingProgram(false);
-                                            setWorkingProgram(JSON.parse(JSON.stringify(activePrograms.find(p => p.id === activeProgForManagement) || {})));
-                                            setIsProgramDirty(false);
-                                          }}
-                                          className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs uppercase tracking-wider font-bold cursor-pointer transition-all"
-                                        >
-                                          Cancel Changes
-                                        </button>
-                                        <button
-                                          type="button"
-                                          disabled={!isProgramDirty || isSubmitting}
-                                          onClick={handleSaveProgramWorkspace}
-                                          className="px-3 py-1.5 bg-[#d4af37] hover:bg-[#c4a132] text-stone-900 rounded-lg text-[10px] uppercase tracking-wider font-black cursor-pointer shadow-xs transition-all disabled:opacity-50 flex items-center space-x-1"
-                                        >
-                                          <Save className="w-3.5 h-3.5" />
-                                          <span>Save</span>
-                                        </button>
-                                      </>
+                                {/* SECTION 5: APPROVAL / REJECTION ACTIONS */}
+                                <div className="pt-3 border-t border-stone-150 flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-[10px] uppercase font-black text-stone-500">Status:</span>
+                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${
+                                      prog.status === 'approved' ? 'bg-emerald-50 text-emerald-800 border-emerald-100' :
+                                      prog.status === 'rejected' ? 'bg-rose-50 text-rose-800 border-rose-100' :
+                                      'bg-amber-50 text-amber-800 border-amber-100'
+                                    }`}>
+                                      {prog.status}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center space-x-2">
+                                    {prog.status !== 'approved' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleApproveProgram(prog.id)}
+                                        disabled={isSubmitting}
+                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center space-x-1 cursor-pointer shadow-xs"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Approve</span>
+                                      </button>
+                                    )}
+                                    {prog.status !== 'rejected' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRejectProgram(prog.id)}
+                                        disabled={isSubmitting}
+                                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center space-x-1 cursor-pointer shadow-xs"
+                                      >
+                                        <Ban className="w-3.5 h-3.5" />
+                                        <span>Reject</span>
+                                      </button>
                                     )}
                                   </div>
                                 </div>
@@ -10034,12 +10254,11 @@ const handleDownloadPDF = () => {
                 </div>
               ) : (
                 <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
-                  Select an active event from the top right or Events tab to view programs.
+                  Select an active event from the top right or Events tab to manage programs.
                 </div>
               )}
             </div>
           )}
-
 
           {/* 5. REGISTRATIONS TAB */}
           {activeTab === 'registrations' && (
@@ -10047,39 +10266,18 @@ const handleDownloadPDF = () => {
               <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
-                    Event Registration Console
+                    Event Registrations & Reporting
                   </h3>
-                  <p className="text-stone-550 text-[10px] font-bold">Track, review, and export active registrant tallies in real-time.</p>
+                  <p className="text-stone-550 text-[10px] font-bold">
+                    View, filter, export, and manage household registrations and payment statuses.
+                  </p>
                 </div>
               </div>
 
               {selectedEventId && activeEvent ? (
-                <div className="space-y-6">
-                  {/* Strict Tally KPI Layout (Only 4 specific counts, NO charts, NO dashboards, NO extra KPI widgets) */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-heading">
-                    <div className="bg-white border border-stone-200 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
-                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-wider">Families Registered</span>
-                      <strong className="text-lg text-stone-900 font-black mt-2">{stats.familiesCount}</strong>
-                    </div>
-                    
-                    <div className="bg-white border border-stone-200 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
-                      <span className="text-[10px] uppercase font-black text-stone-500 tracking-wider">Residents Registered</span>
-                      <strong className="text-lg text-stone-900 font-black mt-2">{stats.residentsCount}</strong>
-                    </div>
-
-                    <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
-                      <span className="text-[10px] uppercase font-black text-emerald-800 tracking-wider">Adults</span>
-                      <strong className="text-lg text-[#0f4c2a] font-black mt-2">{stats.adultsCount}</strong>
-                    </div>
-
-                    <div className="bg-amber-50/40 border border-amber-150 p-4 rounded-2xl flex flex-col justify-between shadow-xs">
-                      <span className="text-[10px] uppercase font-black text-amber-800 tracking-wider">Children</span>
-                      <strong className="text-lg text-amber-800 font-black mt-2">{stats.childrenCount}</strong>
-                    </div>
-                  </div>
-
-                                    {registrations.length > 0 && (
-                    <div className="flex justify-end pt-2 mb-4">
+                <div className="space-y-4">
+                  {registrations.length > 0 && isGlobalED && (
+                    <div className="flex justify-end pt-2 mb-2">
                       <button
                         onClick={handleDeleteAllRegistrations}
                         disabled={isSubmitting}
@@ -10091,7 +10289,7 @@ const handleDownloadPDF = () => {
                       </button>
                     </div>
                   )}
-                  <RegistrationReportingWorkspace 
+                  <RegistrationReportingWorkspace
                     events={events}
                     registrations={registrations}
                     families={families}
@@ -10109,569 +10307,147 @@ const handleDownloadPDF = () => {
             </div>
           )}
 
-
           {/* 6. REPORTS TAB */}
           {activeTab === 'reports' && (
-            <div className="space-y-6 animate-fadeIn font-sans">
+            <div className="space-y-6 animate-fadeIn">
               <div className="border-b border-stone-200 pb-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-[#0f4c2a] uppercase tracking-wider font-heading">
-                    Reports : Reports
+                    Comprehensive Event Reports
                   </h3>
-                  <p className="text-stone-550 text-[10px] font-bold">Consolidated review of financial statements, coordination stats, and attendance tallies.</p>
+                  <p className="text-stone-550 text-[10px] font-bold">
+                    Detailed registration, participation, and financial audit logs.
+                  </p>
                 </div>
               </div>
 
               {selectedEventId && activeEvent ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Financial & Tally Sheet Card */}
-                  <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
-                    <div className="border-b border-stone-150 pb-2">
-                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                        <span>ðŸ“Š</span>
-                        <span>Registrations</span>
-                      </h4>
-                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Registrations</p>
-                    </div>
-
-                    {(() => {
-                      const stats = calculateStats();
-                      return (
-                        <div className="space-y-3.5">
-                          <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
-                            <div className="p-3 bg-stone-50 flex justify-between">
-                              <span className="text-stone-500">Event Status:</span>
-                              <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Total Registered Units:</span>
-                              <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Registered:</span>
-                              <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Adult Count:</span>
-                              <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Children Count:</span>
-                              <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
-                            </div>
-                            <div className="p-3 flex justify-between">
-                              <span className="text-stone-500">Event Venue:</span>
-                              <span className="font-extrabold text-stone-900">{configVenue || 'Not Set'}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => setShowSummaryModal(true)}
-                              className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs"
-                            >
-                              Reports
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleExportCSV}
-                              className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg transition-all cursor-pointer shadow-xs"
-                            >
-                              Export Report CSV
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </GMKCard>
-
-                  {/* Program Coordination & Committees Summary Card */}
-                  <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
-                    <div className="border-b border-stone-150 pb-2">
-                      <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                        <span>ðŸ¤</span>
-                        <span>Committees & Programs Readiness</span>
-                      </h4>
-                      <p className="text-[9px] text-stone-500 font-bold mt-0.5">Assigned leadership, coordinator status, and team assignments.</p>
-                    </div>
-
-                    <div className="space-y-3.5 text-xs">
-                      <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150">
-                        <div className="p-3 bg-stone-50 flex justify-between items-center font-semibold">
-                          <span className="text-stone-500">Active Committees:</span>
-                          <span className="font-extrabold text-stone-900">{activeCommittees.length}</span>
-                        </div>
-                        <div className="p-3 flex justify-between items-center font-semibold">
-                          <span className="text-stone-500">Committee Leads Assigned:</span>
-                          <span className="font-extrabold text-stone-900">
-                            {activeCommittees.reduce((acc, curr) => acc + (curr.members || []).filter(m => m.role === 'Lead').length, 0)}
-                          </span>
-                        </div>
-                        <div className="p-3 flex justify-between items-center font-semibold">
-                          <span className="text-stone-500">Active Programs:</span>
-                          <span className="font-extrabold text-stone-900">
-                            {activePrograms.filter(p => p.eventId === selectedEventId).length}
-                          </span>
-                        </div>
-                        <div className="p-3 flex justify-between items-center font-semibold">
-                          <span className="text-stone-500">Total Program Coordinators:</span>
-                          <span className="font-extrabold text-stone-900">
-                            {activePrograms.filter(p => p.eventId === selectedEventId && p.coordinatorGmkId).length}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setShowCommitteeDataModal(true)}
-                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider border border-stone-250 bg-white hover:bg-stone-50 text-stone-700 rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
-                        >
-                          <span>ðŸ‘¥</span>
-                          <span>Committee data</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleExportCommitteeDataPDF}
-                          className="px-3.5 py-2 text-[10px] font-black uppercase tracking-wider bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg transition-all cursor-pointer shadow-xs flex items-center space-x-1.5"
-                        >
-                          <span>ðŸ“„</span>
-                          <span>Export to PDF</span>
-                        </button>
-                      </div>
-
-                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
-                        <p className="text-[10px] text-stone-600 font-bold leading-relaxed">
-                          Want to adjust committee assignments or programs? Go to the <span className="text-[#0f4c2a] underline font-extrabold cursor-pointer" onClick={() => setActiveTab('committees')}>Committees</span> section to assign leads or add events directly.
-                        </p>
-                      </div>
-                    </div>
-                  </GMKCard>
-
-                  {/* Certificates Section */}
-                  <div className="md:col-span-2 pt-4">
-                    <GMKCard className="bg-white border border-stone-200 p-5 rounded-2xl shadow-xs space-y-4">
-                      <div className="border-b border-stone-150 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading flex items-center space-x-1.5">
-                            <span>ðŸ“œ</span>
-                            <span>Certificates</span>
-                          </h4>
-                          <p className="text-[9px] text-stone-500 font-bold mt-0.5">
-                            Generate official PDF certificates for Committee Leads, Coordinators, Volunteers, and Program Participants.
-                          </p>
-                        </div>
-
-                        {(() => {
-                          const recipients = getCertificateRecipients();
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => generateBulkCertificatesPDF(recipients)}
-                              disabled={recipients.length === 0}
-                              className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 shrink-0"
-                            >
-                              <span>ðŸ“¥</span>
-                              <span>Download All Certificates (PDF)</span>
-                            </button>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Filter Sub-Tabs & Search */}
-                      {(() => {
-                        const allRecipients = getCertificateRecipients();
-                        const filteredRecipients = allRecipients.filter(r => {
-                          const matchesTab = certTab === 'all' ? true :
-                            certTab === 'leads' ? r.type === 'Committee Lead' :
-                            certTab === 'coordinators' ? r.type === 'Coordinator' :
-                            certTab === 'volunteers' ? r.type === 'Volunteer' :
-                            certTab === 'participants' ? r.type === 'Participant' : true;
-
-                          const matchesSearch = certSearch.trim() === '' ? true :
-                            r.name.toLowerCase().includes(certSearch.toLowerCase()) ||
-                            r.roleOrProgram.toLowerCase().includes(certSearch.toLowerCase());
-
-                          return matchesTab && matchesSearch;
-                        });
-
-                        return (
-                          <div className="space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                              {/* Filter Tabs */}
-                              <div className="overflow-x-auto hide-scrollbar">
-                                <div className="flex gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200 text-[10px] font-extrabold font-mono min-w-max pb-px">
-                                {[
-                                  { id: 'all', label: 'All', count: allRecipients.length },
-                                  { id: 'leads', label: 'Committee Leads', count: allRecipients.filter(r => r.type === 'Committee Lead').length },
-                                  { id: 'coordinators', label: 'Coordinators', count: allRecipients.filter(r => r.type === 'Coordinator').length },
-                                  { id: 'volunteers', label: 'Volunteers', count: allRecipients.filter(r => r.type === 'Volunteer').length },
-                                  { id: 'participants', label: 'Participants', count: allRecipients.filter(r => r.type === 'Participant').length }
-                                ].map(tab => (
-                                  <button
-                                    key={tab.id}
-                                    type="button"
-                                    onClick={() => setCertTab(tab.id as any)}
-                                    className={`px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1 ${
-                                      certTab === tab.id
-                                        ? 'bg-[#0f4c2a] text-white shadow-xs'
-                                        : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/60'
-                                    }`}
-                                  >
-                                    <span>{tab.label}</span>
-                                    <span className={`px-1.5 py-0.2 rounded-full text-[8px] ${certTab === tab.id ? 'bg-white/20 text-white' : 'bg-stone-200 text-stone-700'}`}>
-                                      {tab.count}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                              </div>
-
-                              {/* Search Box */}
-                              <input
-                                type="text"
-                                value={certSearch}
-                                onChange={(e) => setCertSearch(e.target.value)}
-                                placeholder="Search recipient name..."
-                                className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] w-full sm:w-48"
-                              />
-                            </div>
-
-                            {/* Recipients List Table */}
-                            {filteredRecipients.length === 0 ? (
-                              <div className="text-center py-8 text-stone-400 font-bold text-xs bg-stone-50 border border-dashed border-stone-200 rounded-xl">
-                                No certificate recipients found matching criteria.
-                              </div>
-                            ) : (
-                              <div className="border border-stone-200 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs">
-                                {filteredRecipients.map((rec) => (
-                                  <div key={rec.id} className="p-3.5 bg-white hover:bg-stone-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <div className="space-y-0.5">
-                                      <div className="flex items-center space-x-2">
-                                        <span className="font-extrabold text-stone-900">{rec.name}</span>
-                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
-                                          rec.type === 'Committee Lead' ? 'bg-amber-50 text-amber-800 border-amber-200' :
-                                          rec.type === 'Coordinator' ? 'bg-blue-50 text-blue-800 border-blue-200' :
-                                          rec.type === 'Volunteer' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                                          'bg-purple-50 text-purple-800 border-purple-200'
-                                        }`}>
-                                          {rec.type}
-                                        </span>
-                                      </div>
-                                      <p className="text-[10px] text-stone-500 font-bold">{rec.context}</p>
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => generateSingleCertificatePDF(rec)}
-                                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-200 rounded-xl transition-all cursor-pointer font-extrabold text-[10px] uppercase tracking-wider flex items-center space-x-1 shrink-0"
-                                    >
-                                      <span>ðŸ“œ</span>
-                                      <span>Download PDF Certificate</span>
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </GMKCard>
-                  </div>
-                </div>
+                <RegistrationReportingWorkspace
+                  events={events}
+                  registrations={registrations}
+                  families={families}
+                  familyMembers={familyMembers}
+                  activeEvent={activeEvent}
+                  setPaymentModalReg={setPaymentModalReg}
+                  isSubmitting={isSubmitting}
+                />
               ) : (
                 <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
-                  Select an active event from the top right or Events tab to view analytics.
+                  Select an active event from the top right or Events tab to view reports.
                 </div>
               )}
             </div>
           )}
-
         </main>
       </div>
 
-      {/* Global Summary Modal Overlay */}
-      {showSummaryModal && activeEvent && (() => {
-        const stats = calculateStats();
-        return (
-          <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans">
-              <button
-                onClick={() => setShowSummaryModal(false)}
-                className="absolute right-4 top-4 text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div>
-                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Registrations</span>
-                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">{activeEvent.eventName || activeEvent.title}</h3>
-              </div>
-
-              <div className="border border-stone-150 rounded-2xl overflow-hidden divide-y divide-stone-150 text-xs font-semibold">
-                <div className="p-3 bg-stone-50 flex justify-between">
-                  <span className="text-stone-500">Event Status:</span>
-                  <span className="font-extrabold uppercase text-blue-700">{configStatus}</span>
-                </div>
-                <div className="p-3 flex justify-between">
-                  <span className="text-stone-500">Total Registered Units:</span>
-                  <span className="font-extrabold text-stone-900">{stats.familiesCount} household units</span>
-                </div>
-                <div className="p-3 flex justify-between">
-                  <span className="text-stone-500">Registered:</span>
-                  <span className="font-extrabold text-stone-900">{stats.residentsCount} attendees</span>
-                </div>
-                <div className="p-3 flex justify-between">
-                  <span className="text-stone-500">Adult Count:</span>
-                  <span className="font-extrabold text-stone-900">{stats.adultsCount} adults</span>
-                </div>
-                <div className="p-3 flex justify-between">
-                  <span className="text-stone-500">Children Count:</span>
-                  <span className="font-extrabold text-stone-900">{stats.childrenCount} children</span>
-                </div>
-                <div className="p-3 flex justify-between">
-                  <span className="text-stone-500">Event Venue:</span>
-                  <span className="font-extrabold text-stone-900">{configVenue || 'Not Set'}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowSummaryModal(false)}
-                className="w-full py-2.5 bg-[#0f4c2a] hover:bg-[#125831] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
-              >
-                Close Summary View
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Global Committee Data Modal Overlay */}
-      {showCommitteeDataModal && activeEvent && (
+      {/* MODALS */}
+      {showSummaryModal && activeEvent && (
         <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full shadow-2xl p-6 relative space-y-4 animate-scaleUp text-stone-850 font-sans max-h-[85vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white z-10 flex items-start justify-between border-b border-stone-150 pb-3">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-stone-150 pb-3">
               <div>
-                <span className="text-[10px] font-extrabold font-mono text-[#d4af37] block uppercase tracking-wider">Committee Roster</span>
-                <h3 className="text-sm font-extrabold text-[#0f4c2a] font-heading capitalize mt-0.5">
-                  Committee Data â€” {activeEvent.eventName || activeEvent.title}
-                </h3>
+                <h3 className="text-base font-extrabold text-[#0f4c2a] font-heading">Event Executive Summary</h3>
+                <p className="text-[10px] text-stone-500 font-bold">{activeEvent.eventName || activeEvent.title}</p>
               </div>
               <button
-                onClick={() => setShowCommitteeDataModal(false)}
-                className="text-stone-400 hover:text-stone-900 transition-colors cursor-pointer font-black p-1"
+                type="button"
+                onClick={() => setShowSummaryModal(false)}
+                className="p-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-full cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-4 text-xs font-semibold">
-              {activeCommittees.filter(c => c.status !== 'archived').length === 0 ? (
-                <p className="text-stone-400 italic text-center py-6">No active committees configured.</p>
-              ) : (
-                activeCommittees.filter(c => c.status !== 'archived').map(comm => {
-                  const leads = (comm.members || []).filter(m => m.role === 'Lead').map(m => m.fullName);
-                  const volunteers = (comm.members || []).filter(m => m.role !== 'Lead').map(m => m.fullName);
-
-                  return (
-                    <div key={comm.id} className="border border-stone-200 rounded-2xl p-4 bg-stone-50/50 space-y-3">
-                      <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                        <h4 className="font-extrabold text-[#0f4c2a] font-heading text-xs uppercase">{comm.name}</h4>
-                        <span className="text-[9px] font-bold text-stone-500 bg-white px-2 py-0.5 rounded-md border border-stone-200">
-                          {leads.length} Leads â€¢ {volunteers.length} Volunteers
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div>
-                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Leads:</span>
-                          {leads.length === 0 ? (
-                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {leads.map((name, i) => (
-                                <span key={i} className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg text-[11px] font-bold">
-                                  {name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] font-black uppercase text-stone-500 block mb-1">Volunteers:</span>
-                          {volunteers.length === 0 ? (
-                            <span className="text-stone-400 italic text-[11px]">None assigned</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {volunteers.map((name, i) => (
-                                <span key={i} className="px-2.5 py-1 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-lg text-[11px] font-bold">
-                                  {name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[9px] uppercase font-black text-stone-400 block">Registrations</span>
+                <span className="text-lg font-black text-stone-900 font-mono">{registrations.length}</span>
+              </div>
+              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[9px] uppercase font-black text-stone-400 block">Attendees</span>
+                <span className="text-lg font-black text-stone-900 font-mono">{stats.residentsCount}</span>
+              </div>
+              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[9px] uppercase font-black text-stone-400 block">Committees</span>
+                <span className="text-lg font-black text-stone-900 font-mono">{activeCommittees.length}</span>
+              </div>
+              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+                <span className="text-[9px] uppercase font-black text-stone-400 block">Programs</span>
+                <span className="text-lg font-black text-stone-900 font-mono">{activePrograms.length}</span>
+              </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2 border-t border-stone-150">
+            <div className="space-y-2">
+              <h5 className="text-xs font-black uppercase text-stone-700 tracking-wider">Event Details</h5>
+              <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-1 text-xs">
+                <p><strong>Venue:</strong> {activeEvent.Venue || activeEvent.venue || 'N/A'}</p>
+                <p><strong>Date:</strong> {activeEvent.date ? new Date(activeEvent.date).toLocaleDateString() : 'N/A'}</p>
+                <p><strong>Description:</strong> {activeEvent.description || 'N/A'}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
               <button
                 type="button"
-                onClick={handleExportCommitteeDataPDF}
-                className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer shadow-xs flex items-center space-x-1"
+                onClick={() => setShowSummaryModal(false)}
+                className="px-5 py-2 bg-stone-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-black cursor-pointer"
               >
-                <span>ðŸ“„</span>
-                <span>Export to PDF</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCommitteeDataModal(false)}
-                className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold uppercase tracking-wider text-[10px] rounded-xl cursor-pointer"
-              >
-                Close
+                Close Summary
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* RECORD / PROCESS PAYMENT OVERLAY MODAL */}
-      {paymentModalReg && (() => {
-        const amtDue = paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0;
-        const amtRecNum = parseFloat(paymentModalAmtRec) || 0;
-        const diff = amtRecNum - amtDue;
-
-        return (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="bg-white border border-stone-200 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-scaleUp text-left">
-              <div className="flex justify-between items-start border-b border-stone-150 pb-3">
-                <div>
-                  <span className="text-[9px] font-mono font-bold text-[#d4af37] uppercase tracking-wider block">Finance Committee Operational Tool</span>
-                  <h3 className="text-base font-black text-[#0f4c2a] font-heading">Record / Process Registration Payment</h3>
+      {paymentModalReg && (
+        <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+            <div className="bg-[#0f4c2a] p-5 text-white">
+              <h3 className="font-heading font-black text-lg tracking-wider">Record Payment</h3>
+              <p className="text-emerald-100 text-[10px] font-bold mt-1 uppercase tracking-widest">
+                Registration: {paymentModalReg.primaryMemberGmkId || paymentModalReg.primaryMemberEmail}
+              </p>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Amount Due</label>
+                <div className="text-xl font-black text-rose-700 font-mono">
+                  OMR {(paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0).toFixed(3)}
                 </div>
+              </div>
+              
+              <div>
+                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Amount Received (OMR)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={paymentModalAmtRec}
+                  onChange={(e) => setPaymentModalAmtRec(e.target.value)}
+                  placeholder="0.000"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm font-bold text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Finance Remarks (Optional)</label>
+                <textarea
+                  value={paymentModalRemarks}
+                  onChange={(e) => setPaymentModalRemarks(e.target.value)}
+                  placeholder="e.g. Cash collected by..."
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-900 focus:outline-none focus:border-[#0f4c2a] min-h-[80px]"
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setPaymentModalReg(null)}
-                  className="p-1 hover:bg-stone-100 rounded-lg text-stone-400 hover:text-stone-700 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* HOUSEHOLD DETAILS */}
-              <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 space-y-2">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-stone-500 font-bold uppercase text-[9px]">GMK Household ID</span>
-                  <span className="font-mono font-black text-stone-900 bg-stone-200/80 px-2 py-0.5 rounded text-[10px]">
-                    {paymentModalReg.primaryMemberGmkId || 'N/A'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-stone-500 font-bold uppercase text-[9px]">Primary Member Email</span>
-                  <span className="font-semibold text-stone-800">{paymentModalReg.primaryMemberEmail}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-stone-500 font-bold uppercase text-[9px]">Total Registered Attendees</span>
-                  <span className="font-mono font-black text-[#0f4c2a]">{paymentModalReg.totalParticipants || 1} Persons</span>
-                </div>
-              </div>
-
-              {/* PAYMENT ENTRY & CALCULATION */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 p-3 rounded-2xl">
-                  <span className="text-xs font-bold text-emerald-900 uppercase">Total Registration Fee Due</span>
-                  <span className="text-base font-mono font-black text-[#0f4c2a]">OMR {amtDue.toFixed(3)}</span>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
-                    Amount Received from Resident (OMR)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 font-mono text-stone-400 text-xs font-bold">OMR</span>
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={paymentModalAmtRec}
-                      onChange={(e) => setPaymentModalAmtRec(e.target.value)}
-                      placeholder="0.000"
-                      className="w-full pl-12 pr-4 py-2 font-mono font-black bg-stone-50 hover:bg-stone-100 focus:bg-white border border-stone-300 focus:border-[#0f4c2a] rounded-xl text-sm text-stone-900 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* STATUS BADGE / CALCULATION PREVIEW */}
-                <div className={`p-3 rounded-xl border text-xs font-bold ${
-                  (amtRecNum === 0 && amtDue > 0) ? 'bg-stone-50 border-stone-300 text-stone-700' :
-                  Math.abs(diff) < 0.0001 ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
-                  diff < 0 ? 'bg-amber-50 border-amber-300 text-amber-950' :
-                  'bg-blue-50 border-blue-300 text-blue-950'
-                }`}>
-                  <div className="flex justify-between items-center">
-                    <span className="uppercase text-[9px]">Calculated Payment Status</span>
-                    <span className="font-black uppercase">
-                      {(amtRecNum === 0 && amtDue > 0) ? 'Pending' : Math.abs(diff) < 0.0001 ? 'Fully Paid' : diff < 0 ? 'Partially Paid' : 'Overpaid / Refund Due'}
-                    </span>
-                  </div>
-                  {diff < 0 && (
-                    <p className="text-[10px] mt-1 text-amber-800">
-                      Remaining Balance Due: <strong className="font-mono font-black">OMR {Math.abs(diff).toFixed(3)}</strong>
-                    </p>
-                  )}
-                  {diff > 0 && (
-                    <p className="text-[10px] mt-1 text-blue-800">
-                      Refund Amount Owed to Resident: <strong className="font-mono font-black">OMR {diff.toFixed(3)}</strong>
-                    </p>
-                  )}
-                </div>
-
-                {/* PRESETS */}
-                <div className="flex items-center space-x-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentModalAmtRec(amtDue.toString())}
-                    className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[10px] font-bold uppercase rounded-lg border border-stone-250 transition-all cursor-pointer"
-                  >
-                    Set Full Amount
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPaymentModalAmtRec('0');
-                      setPaymentModalRemarks('Fee Waived by Finance Committee');
-                    }}
-                    className="flex-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-900 text-[10px] font-bold uppercase rounded-lg border border-blue-200 transition-all cursor-pointer"
-                  >
-                    Mark Waived
-                  </button>
-                </div>
-
-                {/* REMARKS */}
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-black text-stone-600 tracking-wider block">
-                    Finance Committee Remarks / Payment Ref #
-                  </label>
-                  <input
-                    type="text"
-                    value={paymentModalRemarks}
-                    onChange={(e) => setPaymentModalRemarks(e.target.value)}
-                    placeholder="e.g. Bank Transfer Ref #12345 / Cash collected at desk..."
-                    className="w-full px-3 py-2 font-bold bg-stone-50 border border-stone-250 rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#0f4c2a]"
-                  />
-                </div>
-              </div>
-
-              {/* ACTIONS */}
-              <div className="flex items-center space-x-2 pt-2 border-t border-stone-150">
-                <button
-                  type="button"
-                  onClick={() => setPaymentModalReg(null)}
+                  onClick={() => {
+                    setPaymentModalReg(null);
+                    setPaymentModalAmtRec('');
+                    setPaymentModalRemarks('');
+                  }}
                   className="flex-1 py-2.5 bg-stone-150 hover:bg-stone-200 text-stone-700 font-extrabold text-xs uppercase tracking-wider rounded-xl cursor-pointer"
                 >
                   Cancel
@@ -10680,22 +10456,22 @@ const handleDownloadPDF = () => {
                   type="button"
                   disabled={isSubmitting}
                   onClick={handleRecordPaymentSubmit}
-                  className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                 >
                   {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-[#d4af37]" />
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
-                      <Check className="w-4 h-4 text-[#d4af37]" />
-                      <span>Confirm & Record Payment</span>
+                      <Check className="w-4 h-4" />
+                      <span>Confirm Payment</span>
                     </>
                   )}
                 </button>
               </div>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {isConfirmOpen && confirmOptions && (
         <GEASConfirmationDialogUI

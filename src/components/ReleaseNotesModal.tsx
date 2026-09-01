@@ -19,6 +19,18 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.8",
+    title: "Finance Reports Consolidation & Ledger Filter Aesthetic Polish (RTCO-086G)",
+    releaseDate: "2026-08-31",
+    author: "Core Platform Team",
+    notes: [
+      "Consolidated all Excel and PDF export tools from Centralized Expense Ledger and Refunds & Payables into the Finance Workspace Reports tab.",
+      "Expanded Finance Workspace Reports with four dedicated audit-ready cards for Financial Statements, Committee Budgets, Expense Ledgers, and Refunds & Payables.",
+      "Streamlined Centralized Expense Ledger and Refunds & Payables headers for a cleaner, action-focused operational view.",
+      "Redesigned the 'RUN' filter button in Centralized Expense Ledger to a compact, inline design matching the font size and aesthetic of filter dropdowns, significantly reducing space usage."
+    ]
+  },
+  {
     version: "v1.5.7",
     title: "Finance & Workflow Polish, Filter Execution Controls & Sponsorship Editing (RTCO-086F)",
     releaseDate: "2026-08-31",

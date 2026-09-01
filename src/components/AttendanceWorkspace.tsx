@@ -356,7 +356,8 @@ export default function AttendanceWorkspace({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-150 pb-4">
         <div>
           <h4 className="font-extrabold text-[#0f4c2a] text-lg uppercase tracking-wider font-heading flex items-center space-x-2">
-            <span>🎟️ {committeeName} Workspace</span>
+            <QrCode className="w-5 h-5 text-[#0f4c2a] shrink-0" />
+            <span>{committeeName} Workspace</span>
           </h4>
           <p className="text-stone-500 text-xs font-bold mt-1">
             Gate QR entry pass verification & real-time event attendance tracking
