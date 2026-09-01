@@ -4,6 +4,7 @@ import AttendanceWorkspace from "./AttendanceWorkspace";
 import React, { useState, useEffect, useMemo } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { db, useAuth, storage, auth, functions } from '../context/AuthContext';
 import { httpsCallable } from 'firebase/functions';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
@@ -84,6 +85,7 @@ import {
   Award,
   Coins,
   Circle,
+  Eye,
   ClipboardCheck
 } from 'lucide-react';
 import { GMKCard, GMKBadge } from './gmk/DesignSystem';
@@ -464,6 +466,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [explicitCompletion, setExplicitCompletion] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   const [showCommitteeDataModal, setShowCommitteeDataModal] = useState<boolean>(false);
+  const [showRegReportModal, setShowRegReportModal] = useState<boolean>(false);
+  const [showFinanceReportModal, setShowFinanceReportModal] = useState<boolean>(false);
+  const [showCertReportModal, setShowCertReportModal] = useState<boolean>(false);
   const [certTab, setCertTab] = useState<'all' | 'leads' | 'coordinators' | 'volunteers' | 'participants'>('all');
   const [certSearch, setCertSearch] = useState<string>('');
   const [showAssetManager, setShowAssetManager] = useState<boolean>(false);
@@ -2376,10 +2381,11 @@ const handleDownloadPDF = () => {
     type: 'Committee Lead' | 'Coordinator' | 'Volunteer' | 'Participant';
     roleOrProgram: string;
     context: string;
+    gmkId?: string;
   }
 
-  // Get all eligible certificate recipients
-  const getCertificateRecipients = (): CertRecipient[] => {
+  // Get all eligible certificate recipients with optional filter
+  const getCertificateRecipients = (filter?: 'all' | 'leads' | 'coordinators' | 'volunteers' | 'participants'): CertRecipient[] => {
     const list: CertRecipient[] = [];
 
     // 1. Committee Leads & Committee Volunteers
@@ -2392,7 +2398,8 @@ const handleDownloadPDF = () => {
             name: mem.fullName,
             type: 'Committee Lead',
             roleOrProgram: comm.name,
-            context: `Committee: ${comm.name}`
+            context: `Committee: ${comm.name}`,
+            gmkId: mem.gmkId || mem.residentId
           });
         } else {
           list.push({
@@ -2400,7 +2407,8 @@ const handleDownloadPDF = () => {
             name: mem.fullName,
             type: 'Volunteer',
             roleOrProgram: comm.name,
-            context: `Committee: ${comm.name}`
+            context: `Committee: ${comm.name}`,
+            gmkId: mem.gmkId || mem.residentId
           });
         }
       });
@@ -2416,7 +2424,8 @@ const handleDownloadPDF = () => {
           name: coord.fullName,
           type: 'Coordinator',
           roleOrProgram: prog.title,
-          context: `Program: ${prog.title}`
+          context: `Program: ${prog.title}`,
+          gmkId: coord.gmkId || coord.residentId
         });
       });
 
@@ -2427,7 +2436,8 @@ const handleDownloadPDF = () => {
           name: vol.fullName,
           type: 'Volunteer',
           roleOrProgram: prog.title,
-          context: `Program: ${prog.title}`
+          context: `Program: ${prog.title}`,
+          gmkId: vol.gmkId || vol.residentId
         });
       });
 
@@ -2438,11 +2448,17 @@ const handleDownloadPDF = () => {
           name: part.fullName,
           type: 'Participant',
           roleOrProgram: prog.title,
-          context: `Program: ${prog.title}`
+          context: `Program: ${prog.title}`,
+          gmkId: part.gmkId || part.residentId
         });
       });
     });
 
+    if (!filter || filter === 'all') return list;
+    if (filter === 'leads') return list.filter(r => r.type === 'Committee Lead');
+    if (filter === 'coordinators') return list.filter(r => r.type === 'Coordinator');
+    if (filter === 'volunteers') return list.filter(r => r.type === 'Volunteer');
+    if (filter === 'participants') return list.filter(r => r.type === 'Participant');
     return list;
   };
 
@@ -2661,6 +2677,152 @@ const handleDownloadPDF = () => {
     });
 
     doc.save(`${activeEvent.eventName || activeEvent.title}_All_Certificates.pdf`);
+  };
+
+  // Computed Finance Summary for Event Director (Statement of Accounts)
+  const openingBalance = eventFinance?.openingBalance !== undefined ? Number(eventFinance.openingBalance) : 0;
+  
+  const totalRegistrationRec = useMemo(() => {
+    return registrations.reduce((acc, curr) => {
+      const due = curr.amountDue ?? curr.paymentAmount ?? curr.paymentSummary?.totalAmount ?? 0;
+      const rec = curr.amountReceived ?? (curr.paymentStatus === 'paid' || curr.paymentStatus === 'approved' ? due : 0);
+      return acc + (Number(rec) || 0);
+    }, 0);
+  }, [registrations]);
+
+  const sponsorshipIncomeList = useMemo(() => {
+    return (eventFinance?.sponsorshipIncome || []) as Array<{ id?: string; name?: string; sponsorName?: string; amount: number }>;
+  }, [eventFinance]);
+
+  const sponsorshipIncome = useMemo(() => {
+    return sponsorshipIncomeList.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  }, [sponsorshipIncomeList]);
+
+  const grossIncome = totalRegistrationRec + sponsorshipIncome;
+
+  const centralizedExpensesList = useMemo(() => {
+    const eventLevelExpenses: Array<EventCommitteeExpense & { isFinanceOwned: boolean }> = 
+      ((eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[]).map(exp => ({
+        ...exp,
+        isFinanceOwned: true
+      }));
+
+    const committeeExpenses: Array<EventCommitteeExpense & { isFinanceOwned: boolean }> = 
+      activeCommittees.flatMap(c => 
+        (c.expenses || []).map(exp => ({
+          ...exp,
+          isFinanceOwned: false
+        }))
+      );
+
+    const expenseMap = new Map<string, EventCommitteeExpense & { isFinanceOwned: boolean }>();
+    committeeExpenses.forEach(exp => expenseMap.set(exp.id, exp));
+    eventLevelExpenses.forEach(exp => expenseMap.set(exp.id, exp));
+    return Array.from(expenseMap.values());
+  }, [eventFinance, activeCommittees]);
+
+  const acceptedExpensesList = useMemo(() => {
+    return centralizedExpensesList.filter(e => 
+      e.financeStatus === 'accepted' || (e.isFinanceOwned && e.financeStatus !== 'rejected')
+    );
+  }, [centralizedExpensesList]);
+
+  const totalExpenses = useMemo(() => {
+    return acceptedExpensesList.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  }, [acceptedExpensesList]);
+
+  const availableBalance = openingBalance + grossIncome - totalExpenses;
+
+  // Registration Report PDF Generator
+  const generateRegistrationReportPDF = () => {
+    if (!activeEvent) return;
+    const doc = new jsPDF();
+    const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Event';
+    const dateStr = new Date().toISOString().slice(0, 10);
+
+    doc.setFontSize(16);
+    doc.setTextColor(15, 76, 42);
+    doc.text('EVENT REGISTRATION & AUDIT REPORT', 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Event: ${eventTitle}`, 14, 28);
+    doc.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 14, 34);
+
+    const totalRegistrants = registrations.length;
+    const totalAttendeesCount = registrations.reduce((sum, r) => sum + (r.totalParticipants || 1), 0);
+    const paidCount = registrations.filter(r => r.paymentStatus === 'paid' || r.paymentStatus === 'approved').length;
+    const pendingCount = registrations.filter(r => r.paymentStatus === 'pending').length;
+
+    doc.text(`Total Registrations: ${totalRegistrants} | Total Attendees: ${totalAttendeesCount} | Paid: ${paidCount} | Pending: ${pendingCount}`, 14, 42);
+
+    const rows = registrations.map((reg, idx) => {
+      const fam = families.find(f => f.id === reg.familyId);
+      const name = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Resident');
+      const unit = fam?.displayUnitNumber || 'N/A';
+      const due = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+      const rec = reg.amountReceived ?? (reg.paymentStatus === 'paid' || reg.paymentStatus === 'approved' ? due : 0);
+      const status = reg.paymentStatus || 'pending';
+      return [
+        idx + 1,
+        reg.primaryMemberGmkId || 'N/A',
+        name,
+        unit,
+        reg.totalParticipants || 1,
+        `OMR ${due.toFixed(3)}`,
+        `OMR ${rec.toFixed(3)}`,
+        status.toUpperCase()
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 48,
+      head: [['#', 'GMK ID', 'Registrant Name', 'Unit', 'Headcount', 'Amount Due', 'Amount Paid', 'Status']],
+      body: rows.length > 0 ? rows : [['-', '-', 'No registrations found', '-', '-', '-', '-', '-']],
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: { fillColor: [15, 76, 42], textColor: [255, 255, 255], fontStyle: 'bold' }
+    });
+
+    doc.save(`Registration_Report_${eventTitle.replace(/\s+/g, '_')}_${dateStr}.pdf`);
+    setToastMessage("Registration Report PDF generated successfully.");
+  };
+
+  // Financial Statement PDF Generator
+  const generateFinancialStatementPDF = () => {
+    if (!activeEvent) return;
+    const doc = new jsPDF();
+    const eventTitle = activeEvent.eventName || activeEvent.title || 'Community Gathering';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    
+    // Header
+    doc.setFontSize(18);
+    doc.setTextColor(15, 76, 42); // #0f4c2a
+    doc.text('FINANCIAL STATEMENT & STATEMENT OF ACCOUNTS', 14, 20);
+    
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Event: ${eventTitle}`, 14, 28);
+    doc.text(`Report Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 14, 34);
+
+    // Summary Table
+    autoTable(doc, {
+      startY: 42,
+      head: [['Financial Account / Ledger Item', 'Classification', 'Amount (OMR)']],
+      body: [
+        ['Opening Balance (Carried Forward)', 'Asset / Reserve', `OMR ${openingBalance.toFixed(3)}`],
+        ['Registration Income (Collected)', 'Revenue', `OMR ${totalRegistrationRec.toFixed(3)}`],
+        ['Sponsorship Income (Received / Confirmed)', 'Revenue', `OMR ${sponsorshipIncome.toFixed(3)}`],
+        ['TOTAL GROSS REVENUE', 'Total Income', `OMR ${grossIncome.toFixed(3)}`],
+        ['Total Approved Operating Expenses', 'Operating Expenditure', `OMR ${totalExpenses.toFixed(3)}`],
+        ['NET AVAILABLE CLOSING BALANCE', 'Net Position', `OMR ${availableBalance.toFixed(3)}`]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [15, 76, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+      styles: { fontSize: 10, cellPadding: 4 }
+    });
+
+    doc.save(`Financial_Statement_${eventTitle.replace(/\s+/g, '_')}_${dateStr}.pdf`);
+    setToastMessage("Financial Statement PDF generated successfully.");
   };
 
   const runIntegrityAudit = async () => {
@@ -10316,21 +10478,159 @@ const handleDownloadPDF = () => {
                     Comprehensive Event Reports
                   </h3>
                   <p className="text-stone-550 text-[10px] font-bold">
-                    Detailed registration, participation, and financial audit logs.
+                    Official registration details, event financial statements, and verifiable participation certificates.
                   </p>
                 </div>
               </div>
 
               {selectedEventId && activeEvent ? (
-                <RegistrationReportingWorkspace
-                  events={events}
-                  registrations={registrations}
-                  families={families}
-                  familyMembers={familyMembers}
-                  activeEvent={activeEvent}
-                  setPaymentModalReg={setPaymentModalReg}
-                  isSubmitting={isSubmitting}
-                />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Card 1: Registration Details */}
+                  <div className="bg-white rounded-3xl border border-stone-200 shadow-xs p-6 flex flex-col justify-between hover:shadow-md transition-shadow">
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-3 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-100">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-stone-900 font-heading">
+                            Registration Details
+                          </h4>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-md">
+                            Participant Directory
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-stone-600 font-semibold leading-relaxed">
+                        Comprehensive registry of attendees, member headcount breakdowns, unit numbers, contact data, and real-time payment audit statuses.
+                      </p>
+
+                      <div className="p-3 bg-stone-50 rounded-2xl border border-stone-150 flex items-center justify-between text-xs font-bold text-stone-700">
+                        <span>Total Registrations:</span>
+                        <span className="font-mono font-black text-stone-900">{registrations.length} families</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-stone-150 flex items-center space-x-2 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setShowRegReportModal(true)}
+                        className="flex-1 py-2.5 px-3 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all shadow-xs cursor-pointer flex items-center justify-center space-x-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View Registrations</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={generateRegistrationReportPDF}
+                        title="Download Registration Report PDF"
+                        className="py-2.5 px-3.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <Download className="w-3.5 h-3.5 text-rose-600" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Event Financial Statement */}
+                  <div className="bg-white rounded-3xl border border-stone-200 shadow-xs p-6 flex flex-col justify-between hover:shadow-md transition-shadow">
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-3 bg-indigo-50 text-indigo-800 rounded-2xl border border-indigo-100">
+                          <PieChart className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-stone-900 font-heading">
+                            Event Financial Statement
+                          </h4>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-100/70 px-2 py-0.5 rounded-md">
+                            Statement of Accounts
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-stone-600 font-semibold leading-relaxed">
+                        Official audited Statement of Accounts showing opening reserves, registration revenues, sponsorship funds, approved expenses, and net position.
+                      </p>
+
+                      <div className="p-3 bg-stone-50 rounded-2xl border border-stone-150 flex items-center justify-between text-xs font-bold text-stone-700">
+                        <span>Net Position:</span>
+                        <span className={`font-mono font-black ${availableBalance >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          OMR {availableBalance.toFixed(3)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-stone-150 flex items-center space-x-2 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setShowFinanceReportModal(true)}
+                        className="flex-1 py-2.5 px-3 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all shadow-xs cursor-pointer flex items-center justify-center space-x-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View Statement</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={generateFinancialStatementPDF}
+                        title="Download Statement of Accounts PDF"
+                        className="py-2.5 px-3.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <Download className="w-3.5 h-3.5 text-rose-600" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Certificates */}
+                  <div className="bg-white rounded-3xl border border-stone-200 shadow-xs p-6 flex flex-col justify-between hover:shadow-md transition-shadow">
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-3 bg-amber-50 text-amber-800 rounded-2xl border border-amber-100">
+                          <Award className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-stone-900 font-heading">
+                            Certificates
+                          </h4>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded-md">
+                            Official Recognition
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-stone-600 font-semibold leading-relaxed">
+                        Verified certificates of appreciation and participation for Committee Leads, Coordinators, Volunteers, and Program Participants.
+                      </p>
+
+                      <div className="p-3 bg-stone-50 rounded-2xl border border-stone-150 flex items-center justify-between text-xs font-bold text-stone-700">
+                        <span>Eligible Recipients:</span>
+                        <span className="font-mono font-black text-stone-900">{getCertificateRecipients().length} people</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-stone-150 flex items-center space-x-2 mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setShowCertReportModal(true)}
+                        className="flex-1 py-2.5 px-3 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all shadow-xs cursor-pointer flex items-center justify-center space-x-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>View Certificates</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => generateBulkCertificatesPDF(getCertificateRecipients())}
+                        title="Download All Certificates as PDF"
+                        className="py-2.5 px-3.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <Download className="w-3.5 h-3.5 text-amber-600" />
+                        <span>PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
                   Select an active event from the top right or Events tab to view reports.
@@ -10466,6 +10766,430 @@ const handleDownloadPDF = () => {
                       <span>Confirm Payment</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1. REGISTRATION DETAILS POP-UP MODAL */}
+      {showRegReportModal && activeEvent && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 md:p-6 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl flex flex-col max-h-[90vh] overflow-hidden border border-stone-200">
+            {/* Header */}
+            <div className="p-4 md:p-6 bg-gradient-to-r from-emerald-950 to-[#0f4c2a] text-white flex items-center justify-between shrink-0 shadow-xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-white/10 rounded-2xl">
+                  <FileText className="w-6 h-6 text-emerald-300" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-wide font-heading text-white">
+                    Registration & Participant Directory
+                  </h3>
+                  <p className="text-xs text-emerald-200/90 font-medium">
+                    {activeEvent.eventName || activeEvent.title} * {registrations.length} Registered Households
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRegReportModal(false)}
+                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable */}
+            <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-stone-50/50">
+              <RegistrationReportingWorkspace
+                events={events}
+                registrations={registrations}
+                families={families}
+                familyMembers={familyMembers}
+                activeEvent={activeEvent}
+                setPaymentModalReg={setPaymentModalReg}
+                isSubmitting={isSubmitting}
+              />
+            </div>
+
+            {/* Persistent Bottom Sticky Action Bar */}
+            <div className="p-4 bg-white border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-stone-500 font-bold">
+                Showing live registration audit logs & attendee breakdowns.
+              </div>
+              <div className="flex items-center space-x-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={generateRegistrationReportPDF}
+                  className="flex-1 sm:flex-none py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-2 border border-stone-300"
+                >
+                  <Download className="w-4 h-4 text-rose-600" />
+                  <span>Download Registration PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRegReportModal(false)}
+                  className="flex-1 sm:flex-none py-2.5 px-6 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer shadow-xs"
+                >
+                  Close Window
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. EVENT FINANCIAL STATEMENT POP-UP MODAL */}
+      {showFinanceReportModal && activeEvent && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 md:p-6 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden border border-stone-200">
+            {/* Header */}
+            <div className="p-4 md:p-6 bg-gradient-to-r from-indigo-950 to-indigo-800 text-white flex items-center justify-between shrink-0 shadow-xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-white/10 rounded-2xl">
+                  <PieChart className="w-6 h-6 text-indigo-300" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-wide font-heading text-white">
+                    Event Financial Statement
+                  </h3>
+                  <p className="text-xs text-indigo-200/90 font-medium">
+                    {activeEvent.eventName || activeEvent.title} * Statement of Accounts
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFinanceReportModal(false)}
+                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body - Scrollable */}
+            <div className="p-4 md:p-6 overflow-y-auto flex-1 space-y-6 bg-stone-50/40">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase text-stone-500 block tracking-wider">Opening Balance</span>
+                  <span className="text-xl font-black text-stone-900 font-mono mt-1 block">
+                    OMR {openingBalance.toFixed(3)}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-medium mt-0.5 block">Allocated / Reserves</span>
+                </div>
+
+                <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase text-stone-500 block tracking-wider">Gross Income</span>
+                  <span className="text-xl font-black text-emerald-700 font-mono mt-1 block">
+                    OMR {grossIncome.toFixed(3)}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-medium mt-0.5 block">
+                    Reg: {totalRegistrationRec.toFixed(3)} | Spons: {sponsorshipIncome.toFixed(3)}
+                  </span>
+                </div>
+
+                <div className="p-4 bg-white rounded-2xl border border-stone-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase text-stone-500 block tracking-wider">Approved Expenses</span>
+                  <span className="text-xl font-black text-rose-700 font-mono mt-1 block">
+                    OMR {totalExpenses.toFixed(3)}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-medium mt-0.5 block">
+                    {acceptedExpensesList.length} Authorized items
+                  </span>
+                </div>
+
+                <div className={`p-4 rounded-2xl border shadow-2xs ${availableBalance >= 0 ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'}`}>
+                  <span className="text-[10px] font-black uppercase text-stone-500 block tracking-wider">Net Position</span>
+                  <span className={`text-xl font-black font-mono mt-1 block ${availableBalance >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+                    OMR {availableBalance.toFixed(3)}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-medium mt-0.5 block">
+                    {availableBalance >= 0 ? 'Surplus / Available' : 'Operating Deficit'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Statement of Accounts Detailed Breakdown */}
+              <div className="bg-white rounded-3xl border border-stone-200 shadow-2xs overflow-hidden">
+                <div className="p-4 bg-stone-100/70 border-b border-stone-200 flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-stone-800 font-heading">
+                    Official Statement of Accounts
+                  </h4>
+                  <span className="text-[10px] font-bold text-stone-500">Currency: OMR (Omani Rial)</span>
+                </div>
+
+                <div className="divide-y divide-stone-150 text-xs font-medium">
+                  <div className="p-4 flex items-center justify-between hover:bg-stone-50/50">
+                    <div>
+                      <div className="font-bold text-stone-900">Opening Balance (Carried Forward)</div>
+                      <div className="text-[11px] text-stone-500">Seed allocation and uncommitted event reserves</div>
+                    </div>
+                    <div className="font-mono font-bold text-stone-900 text-sm">
+                      OMR {openingBalance.toFixed(3)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 flex items-center justify-between hover:bg-stone-50/50">
+                    <div>
+                      <div className="font-bold text-emerald-800">Registration Income (Total Collected)</div>
+                      <div className="text-[11px] text-stone-500">
+                        Paid entries across {registrations.filter(r => (r.amountReceived || 0) > 0 || r.paymentStatus === 'paid' || r.paymentStatus === 'approved').length} confirmed registered families
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-emerald-700 text-sm">
+                      + OMR {totalRegistrationRec.toFixed(3)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 flex items-center justify-between hover:bg-stone-50/50">
+                    <div>
+                      <div className="font-bold text-emerald-800">Sponsorship & External Contributions</div>
+                      <div className="text-[11px] text-stone-500">
+                        {sponsorshipIncomeList.length > 0 ? `${sponsorshipIncomeList.length} verified sponsor contributions` : 'No sponsorship funds recorded'}
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-emerald-700 text-sm">
+                      + OMR {sponsorshipIncome.toFixed(3)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-emerald-50/40 flex items-center justify-between font-bold">
+                    <div className="text-emerald-950 font-black">TOTAL GROSS REVENUE (Registrations + Sponsorships)</div>
+                    <div className="font-mono text-emerald-900 text-sm font-black">
+                      OMR {grossIncome.toFixed(3)}
+                    </div>
+                  </div>
+
+                  <div className="p-4 flex items-center justify-between hover:bg-stone-50/50">
+                    <div>
+                      <div className="font-bold text-rose-800">Total Approved Operating Expenses</div>
+                      <div className="text-[11px] text-stone-500">
+                        {acceptedExpensesList.length} expenses verified and approved by Finance Committee
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-rose-700 text-sm">
+                      - OMR {totalExpenses.toFixed(3)}
+                    </div>
+                  </div>
+
+                  <div className={`p-4 flex items-center justify-between ${availableBalance >= 0 ? 'bg-emerald-100/50 text-emerald-950' : 'bg-rose-100/50 text-rose-950'}`}>
+                    <div>
+                      <div className="text-sm font-black tracking-wide font-heading">
+                        NET AVAILABLE CLOSING BALANCE
+                      </div>
+                      <div className="text-[11px] font-bold opacity-80">
+                        Opening Balance + Gross Revenue - Approved Expenses
+                      </div>
+                    </div>
+                    <div className="font-mono text-base font-black">
+                      OMR {availableBalance.toFixed(3)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Itemized Sponsorship Listing if any */}
+              {sponsorshipIncomeList.length > 0 && (
+                <div className="bg-white rounded-3xl border border-stone-200 shadow-2xs p-4 space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-stone-800 font-heading">
+                    Sponsorship Breakdown
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {sponsorshipIncomeList.map((spons, idx) => (
+                      <div key={spons.id || idx} className="p-3 bg-stone-50 rounded-xl border border-stone-150 flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-bold text-stone-900">{spons.name || spons.sponsorName || `Sponsor #${idx + 1}`}</div>
+                          <div className="text-[10px] text-stone-500">Direct Contribution</div>
+                        </div>
+                        <div className="font-mono font-black text-xs text-emerald-700">
+                          OMR {Number(spons.amount || 0).toFixed(3)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Persistent Bottom Sticky Action Bar */}
+            <div className="p-4 bg-white border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-stone-500 font-bold">
+                Statement of Accounts derived from verified ledger entries and registration records.
+              </div>
+              <div className="flex items-center space-x-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={generateFinancialStatementPDF}
+                  className="flex-1 sm:flex-none py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-2 border border-stone-300"
+                >
+                  <Download className="w-4 h-4 text-rose-600" />
+                  <span>Download Statement PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFinanceReportModal(false)}
+                  className="flex-1 sm:flex-none py-2.5 px-6 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer shadow-xs"
+                >
+                  Close Window
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. CERTIFICATES POP-UP MODAL */}
+      {showCertReportModal && activeEvent && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 md:p-6 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] overflow-hidden border border-stone-200">
+            {/* Header */}
+            <div className="p-4 md:p-6 bg-gradient-to-r from-amber-950 to-amber-800 text-white flex items-center justify-between shrink-0 shadow-xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-white/10 rounded-2xl">
+                  <Award className="w-6 h-6 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-black tracking-wide font-heading text-white">
+                    Event Certificates Directory
+                  </h3>
+                  <p className="text-xs text-amber-200/90 font-medium">
+                    {activeEvent.eventName || activeEvent.title} * Verified Certificate Generation Hub
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCertReportModal(false)}
+                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="p-4 bg-stone-100/80 border-b border-stone-200 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+                {(['all', 'leads', 'coordinators', 'volunteers', 'participants'] as const).map((tab) => {
+                  const count = getCertificateRecipients(tab).length;
+                  const isActive = certTab === tab;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setCertTab(tab)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-[#0f4c2a] text-white shadow-xs'
+                          : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
+                      }`}
+                    >
+                      {tab} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="relative w-full md:w-64">
+                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search recipient name..."
+                  value={certSearch}
+                  onChange={(e) => setCertSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 placeholder-stone-400 focus:outline-none focus:border-[#0f4c2a]"
+                />
+              </div>
+            </div>
+
+            {/* Modal Body - Scrollable Recipients Grid */}
+            <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-stone-50/40">
+              {(() => {
+                const recipients = getCertificateRecipients(certTab).filter(r =>
+                  r.name.toLowerCase().includes(certSearch.toLowerCase()) ||
+                  (r.gmkId && r.gmkId.toLowerCase().includes(certSearch.toLowerCase())) ||
+                  r.roleOrProgram.toLowerCase().includes(certSearch.toLowerCase())
+                );
+
+                if (recipients.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-stone-500 font-bold bg-white rounded-2xl border border-stone-150">
+                      No certificate recipients found matching the filter criteria.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {recipients.map((rec, idx) => (
+                      <div
+                        key={idx}
+                        className="bg-white rounded-2xl border border-stone-200 p-4 shadow-2xs flex flex-col justify-between hover:border-amber-300 hover:shadow-xs transition-all space-y-3"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-900">
+                              {rec.type.toUpperCase()}
+                            </span>
+                            {rec.gmkId && (
+                              <span className="text-[10px] font-mono font-bold text-stone-500">
+                                {rec.gmkId}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-sm font-black text-stone-900 leading-tight">
+                            {rec.name}
+                          </h4>
+                          <p className="text-xs text-stone-600 font-medium">
+                            {rec.roleOrProgram}
+                          </p>
+                          {rec.context && (
+                            <p className="text-[10px] text-stone-400 font-bold truncate">
+                              {rec.context}
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => generateSingleCertificatePDF(rec)}
+                          className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Generate Certificate</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Persistent Bottom Sticky Action Bar */}
+            <div className="p-4 bg-white border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-stone-500 font-bold">
+                Total {getCertificateRecipients(certTab).length} certificates in current view.
+              </div>
+              <div className="flex items-center space-x-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => generateBulkCertificatesPDF(getCertificateRecipients(certTab))}
+                  className="flex-1 sm:flex-none py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
+                >
+                  <Download className="w-4 h-4 text-white" />
+                  <span>Download All ({getCertificateRecipients(certTab).length}) as PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCertReportModal(false)}
+                  className="flex-1 sm:flex-none py-2.5 px-6 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer shadow-xs"
+                >
+                  Close Window
                 </button>
               </div>
             </div>

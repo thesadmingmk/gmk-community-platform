@@ -19,6 +19,19 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.5.9",
+    title: "Comprehensive Event Reports Hub, Modal Workspaces & Certificates Directory (RTCO-087)",
+    releaseDate: "2026-09-01",
+    author: "Core Platform Team",
+    notes: [
+      "Introduced the Comprehensive Event Reports Hub in Event Director Dashboard featuring 3 dedicated audit cards: Registration Details, Event Financial Statement, and Certificates.",
+      "Engineered independent pop-up modal workspaces for each report view with full internal vertical scrolling and sticky persistent close controls.",
+      "Added direct one-click PDF downloads beside all report view triggers and inside modal persistent action bars.",
+      "Implemented official Statement of Accounts view displaying live Opening Reserves, Collected Registration Income, Sponsorship Contributions, Operating Expenditures, and Net Available Closing Balance.",
+      "Integrated complete Certificate generation directory with role-based filters (Leads, Coordinators, Volunteers, Participants), live search, single recipient PDF generation, and bulk batch downloads."
+    ]
+  },
+  {
     version: "v1.5.8",
     title: "Finance Reports Consolidation & Ledger Filter Aesthetic Polish (RTCO-086G)",
     releaseDate: "2026-08-31",

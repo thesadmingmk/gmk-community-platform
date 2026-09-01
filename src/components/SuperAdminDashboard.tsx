@@ -2818,7 +2818,7 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
             GMK Governance Console • Developed by Elite IT
           </div>
           <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.7 (Release Notes)</button>
+            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.9 (Release Notes)</button>
           </div>
         </div>
       </div>
