@@ -1219,20 +1219,6 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                         )}
                       </div>
 
-                      {/* Program Highlights */}
-                      {evt.highlights && evt.highlights.length > 0 && (
-                        <div className="p-2.5 bg-emerald-50/20 border border-emerald-100/30 rounded-xl space-y-1 text-left text-[10px]">
-                          <span className="font-extrabold text-emerald-800 text-[8px] uppercase tracking-wider block font-heading">Program Highlights</span>
-                          <div className="flex flex-wrap gap-1 pt-0.5">
-                            {evt.highlights.map((hl, index) => (
-                              <span key={index} className="bg-emerald-50/60 border border-emerald-100 px-2 py-0.5 rounded-full text-[9px] font-bold text-stone-800">
-                                ⭐ {hl}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
                       {!evt.date && !evt.venue ? (
                         <div className="p-3 bg-amber-50 border border-amber-100 rounded-2xl text-center text-[10px] text-amber-900 uppercase tracking-widest font-black">
                           Coming Soon

@@ -870,20 +870,6 @@ export default function ResidentDashboard({ activeEmail }: { activeEmail: string
                   </div>
                 </div>
 
-                {/* Program Highlights */}
-                {viewingEventDetails.highlights && viewingEventDetails.highlights.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] uppercase font-black text-[#0f4c2a] tracking-wider font-heading">Program Highlights</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {viewingEventDetails.highlights.map((hl, idx) => (
-                        <div key={idx} className="flex items-center space-x-1.5 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full text-stone-800 text-[10px] font-bold">
-                          <span>⭐ {hl}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* User's RSVP State */}
                 {reg ? (
                   <div className="bg-emerald-50 border border-emerald-150 p-5 rounded-2xl space-y-3 animate-fadeIn">

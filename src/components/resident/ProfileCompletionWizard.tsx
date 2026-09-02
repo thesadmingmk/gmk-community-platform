@@ -360,6 +360,29 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
   const [spouseEmail, setSpouseEmail] = useState('');
   const [spouseExistedInDb, setSpouseExistedInDb] = useState(false);
 
+  // Spouse name change / save tracking
+  const [initialSpouseName, setInitialSpouseName] = useState('');
+  const [lastSavedSpouseName, setLastSavedSpouseName] = useState('');
+  const [isSpouseNameEdited, setIsSpouseNameEdited] = useState(false);
+  const [isSpouseNameSaved, setIsSpouseNameSaved] = useState(false);
+
+  const handleSpouseNameChange = (val: string) => {
+    setSpouseName(val);
+    setIsSpouseNameEdited(true);
+    if (val.trim() !== lastSavedSpouseName.trim()) {
+      setIsSpouseNameSaved(false);
+    } else {
+      setIsSpouseNameSaved(true);
+    }
+  };
+
+  const handleSaveSpouseName = () => {
+    const cleaned = normalizeName(spouseName) || spouseName.trim();
+    setSpouseName(cleaned);
+    setLastSavedSpouseName(cleaned);
+    setIsSpouseNameSaved(true);
+  };
+
   // Children list accumulator
   const [childFormName, setChildFormName] = useState('');
   const [childGender, setChildGender] = useState<'male' | 'female' | ''>('');
@@ -509,6 +532,14 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
           if (famData.spouseDoctorConsent !== undefined) {
             setSpouseDoctorConsent(famData.spouseDoctorConsent);
           }
+          if (famData.spouseName) {
+            setSpouseName(famData.spouseName);
+            setInitialSpouseName(famData.spouseName);
+            setLastSavedSpouseName(famData.spouseName);
+            setIsSpouseNameEdited(false);
+            setIsSpouseNameSaved(false);
+            setSpouseEnabled(true);
+          }
         }
 
         const memSnap = await getDocs(query(collection(db, "familyMembers"), where("familyId", "==", familyId)));
@@ -521,7 +552,12 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
             const mem = doc.data();
             if (mem.relationship === 'spouse') {
               setSpouseEnabled(true);
-              setSpouseName(mem.name || '');
+              const loadedSpouseName = mem.name || '';
+              setSpouseName(loadedSpouseName);
+              setInitialSpouseName(loadedSpouseName);
+              setLastSavedSpouseName(loadedSpouseName);
+              setIsSpouseNameEdited(false);
+              setIsSpouseNameSaved(false);
               setSpouseGender(mem.gender || '');
               const rawWa = mem.whatsAppNumber || '';
               let waCodeMatched = false;
@@ -552,9 +588,10 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
               });
             }
           });
-          if (hasChild) setChildrenApplicable(true);
-          if (hasParent) setParentsApplicable(true);
-          if (hasDependent) setDependentsApplicable(true);
+          // Default Add Child / Parent / Dependent toggles to NO (false)
+          setChildrenApplicable(false);
+          setParentsApplicable(false);
+          setDependentsApplicable(false);
           if (loadedMembers.length > 0) {
             setFamilyMembersList(loadedMembers);
           }
@@ -639,6 +676,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
     setChildFormName('');
     setChildYob('');
     setChildGender('');
+    setChildrenApplicable(false);
   };
 
   const handleAddParent = () => {
@@ -673,6 +711,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
     setParentFormName('');
     setParentNotes('');
     setParentGender('');
+    setParentsApplicable(false);
   };
 
   const handleAddDependent = () => {
@@ -707,6 +746,7 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
     setDepFormName('');
     setDepNotes('');
     setDepGender('');
+    setDependentsApplicable(false);
   };
 
   const handleRemoveMemberAt = (idx: number) => {
@@ -1266,6 +1306,13 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
         `Resident ${fullName} completed five-stage profile compilation wizard and set up family directory permissions.`
       );
 
+      // Once final submission is done, reset spouse edit tracking so save button vanishes
+      const finalCleanedSpouse = normalizeName(spouseName) || spouseName.trim();
+      setLastSavedSpouseName(finalCleanedSpouse);
+      setInitialSpouseName(finalCleanedSpouse);
+      setIsSpouseNameEdited(false);
+      setIsSpouseNameSaved(false);
+
       onComplete();
     } catch (err: any) {
       console.error("❌ Profile onboarding failed:", err);
@@ -1535,22 +1582,48 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                       <tbody className="divide-y divide-stone-150 bg-white shadow-inner">
                         {spouseEnabled && spouseName.trim() && (
                           <tr>
-                            <td className="px-4 py-3 font-extrabold text-stone-850">{spouseName}</td>
+                            <td className="px-4 py-3 font-extrabold text-stone-850">
+                              <div className="flex items-center space-x-2">
+                                <span>{spouseName}</span>
+                                {isSpouseNameEdited && isSpouseNameSaved && (
+                                  <span className="text-[9px] px-1.5 py-0.5 bg-emerald-50 text-emerald-800 rounded font-bold border border-emerald-200 uppercase tracking-wider">
+                                    Saved
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 font-extrabold uppercase text-[9px]">Spouse</span></td>
                             <td className="px-4 py-3 font-semibold text-stone-800 capitalize">{spouseGender}</td>
                             <td className="px-4 py-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSpouseEnabled(false);
-                                  setSpouseName('');
-                                  setSpouseGender('');
-                                  setSpouseWhatsApp('');
-                                }}
-                                className="text-red-650 font-black hover:underline cursor-pointer text-xs"
-                              >
-                                Remove
-                              </button>
+                              <div className="flex items-center justify-end space-x-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const el = document.getElementById('spouse_name_input');
+                                    if (el) {
+                                      el.focus();
+                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                  }}
+                                  className="text-[#0f4c2a] font-bold hover:underline cursor-pointer text-xs"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSpouseEnabled(false);
+                                    setSpouseName('');
+                                    setSpouseGender('');
+                                    setSpouseWhatsApp('');
+                                    setIsSpouseNameEdited(true);
+                                    setIsSpouseNameSaved(false);
+                                  }}
+                                  className="text-red-650 font-black hover:underline cursor-pointer text-xs"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -1599,6 +1672,8 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                         setSpouseName('');
                         setSpouseGender('');
                         setSpouseWhatsApp('');
+                        setIsSpouseNameEdited(true);
+                        setIsSpouseNameSaved(false);
                       }
                     }}
                     className="h-4 w-4 text-[#0f4c2a] focus:ring-[#0f4c2a] border-stone-300 rounded cursor-pointer"
@@ -1619,6 +1694,8 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                         setSpouseName('');
                         setSpouseGender('');
                         setSpouseWhatsApp('');
+                        setIsSpouseNameEdited(true);
+                        setIsSpouseNameSaved(false);
                       }}
                       className="text-red-650 hover:text-red-800 hover:underline font-black text-xs cursor-pointer"
                     >
@@ -1631,12 +1708,38 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-fadeIn">
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] uppercase font-bold text-stone-800 font-extrabold mb-1">Spouse Name *</label>
-                      <input
-                        type="text"
-                        value={spouseName}
-                        onChange={(e) => setSpouseName(e.target.value)}
-                        className="block w-full px-2.5 py-1.5 border border-stone-250 rounded-lg text-xs text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a]"
-                      />
+                      <div className="flex items-center space-x-2">
+                        <input
+                          id="spouse_name_input"
+                          type="text"
+                          value={spouseName}
+                          onChange={(e) => handleSpouseNameChange(e.target.value)}
+                          placeholder="Enter spouse full name"
+                          className="block flex-1 min-w-0 px-2.5 py-1.5 border border-stone-250 rounded-lg text-xs text-stone-900 font-semibold focus:ring-1 focus:ring-[#0f4c2a]"
+                        />
+                        {isSpouseNameEdited && (
+                          <button
+                            type="button"
+                            disabled={isSpouseNameSaved || !spouseName.trim()}
+                            onClick={handleSaveSpouseName}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-all inline-flex items-center shrink-0 ${
+                              isSpouseNameSaved
+                                ? "bg-stone-150 text-stone-500 border border-stone-250 cursor-not-allowed opacity-80"
+                                : "bg-[#0f4c2a] hover:bg-[#125831] text-white shadow-xs cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            }`}
+                            title={isSpouseNameSaved ? "Spouse name saved" : "Save spouse name"}
+                          >
+                            {isSpouseNameSaved ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-700 mr-1" />
+                                <span>Saved</span>
+                              </>
+                            ) : (
+                              <span>Save</span>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-stone-800 font-extrabold mb-1">Gender *</label>
@@ -2163,17 +2266,41 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
                         <label className="block text-[10px] uppercase font-bold tracking-wider text-stone-850 font-black mb-1.5 font-heading text-xs">
                           Spouse Full Name *
                         </label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Enter spouse full name"
-                          value={spouseName}
-                          onChange={(e) => {
-                            setSpouseName(e.target.value);
-                            setSpouseEnabled(true);
-                          }}
-                          className="block w-full px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
-                        />
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder="Enter spouse full name"
+                            value={spouseName}
+                            onChange={(e) => {
+                              handleSpouseNameChange(e.target.value);
+                              setSpouseEnabled(true);
+                            }}
+                            className="block flex-1 min-w-0 px-3 py-2.5 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-white font-semibold"
+                          />
+                          {isSpouseNameEdited && (
+                            <button
+                              type="button"
+                              disabled={isSpouseNameSaved || !spouseName.trim()}
+                              onClick={handleSaveSpouseName}
+                              className={`px-3.5 py-2.5 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all inline-flex items-center shrink-0 ${
+                                isSpouseNameSaved
+                                  ? "bg-stone-150 text-stone-500 border border-stone-250 cursor-not-allowed opacity-80"
+                                  : "bg-[#0f4c2a] hover:bg-[#125831] text-white shadow-xs cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                              }`}
+                              title={isSpouseNameSaved ? "Spouse name saved" : "Save spouse name"}
+                            >
+                              {isSpouseNameSaved ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-700 mr-1" />
+                                  <span>Saved</span>
+                                </>
+                              ) : (
+                                <span>Save</span>
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
