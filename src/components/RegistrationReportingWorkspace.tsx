@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { GMKCard } from './gmk/DesignSystem';
+import { getRegistrationDisplayId, formatExternalGmkId } from '../utils/gmkIdHelper';
+import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
 
 interface RegistrationReportingWorkspaceProps {
   events: CommunityEvent[];
@@ -166,10 +168,12 @@ export default function RegistrationReportingWorkspace({
       const q = appliedFilters.searchQuery.toLowerCase().trim();
       regs = regs.filter(r => {
         const fam = families.find(f => f.id === r.familyId);
-        const primaryName = fam ? fam.fullName.toLowerCase() : (r.primaryMemberEmail ? r.primaryMemberEmail.split('@')[0].toLowerCase() : '');
-        const gmk = (r.primaryMemberGmkId || r.id.split('_')?.[1] || '').toLowerCase();
-        const email = (r.primaryMemberEmail || '').toLowerCase();
-        return primaryName.includes(q) || gmk.includes(q) || email.includes(q);
+        const primaryName = (r.primaryRegistrantName || (fam ? fam.fullName : '') || (r.primaryMemberEmail ? r.primaryMemberEmail.split('@')[0] : '')).toLowerCase();
+        const displayId = (getRegistrationDisplayId(r) || r.primaryMemberGmkId || r.publicReference || r.id.split('_')?.[1] || '').toLowerCase();
+        const email = (r.primaryRegistrantEmail || r.primaryMemberEmail || '').toLowerCase();
+        const category = (r.externalRegistrationTypeName || '').toLowerCase();
+        const passNo = (r.entryPassNumber || '').toLowerCase();
+        return primaryName.includes(q) || displayId.includes(q) || email.includes(q) || category.includes(q) || passNo.includes(q);
       });
     }
 
@@ -212,11 +216,21 @@ export default function RegistrationReportingWorkspace({
   const generateReportData = () => {
     return filteredRegistrations.map((reg, index) => {
       const fam = families.find(f => f.id === reg.familyId);
-      const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
-      const unit = fam ? fam.displayUnitNumber : 'Unknown';
-      const phone = fam ? fam.phone : 'Unknown';
-      const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
+      const isExternal = Boolean(reg.isExternal || reg.externalRegistrationTypeId || (reg.id && reg.id.startsWith('reg_ext_')));
       const participants = reg.participants || [];
+      const primaryName = isExternal
+        ? (reg.primaryRegistrantName || (participants.length > 0 ? participants[0] : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Guest')))
+        : (fam ? fam.fullName : (reg.primaryRegistrantName || (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown')));
+      const unit = isExternal
+        ? (reg.externalRegistrationTypeName || 'External')
+        : (fam ? fam.displayUnitNumber : (reg.unitNumber || 'N/A'));
+      const phone = isExternal
+        ? (formatPhoneWithCountryCode(reg.primaryRegistrantPhone || reg.primaryRegistrantWhatsapp) || 'N/A')
+        : (fam ? fam.phone : 'Unknown');
+      const email = isExternal
+        ? (reg.primaryRegistrantEmail || reg.primaryMemberEmail || 'N/A')
+        : (reg.primaryMemberEmail || 'N/A');
+      const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
       
       let adults = 0;
       let children = 0;
@@ -248,16 +262,18 @@ export default function RegistrationReportingWorkspace({
       const pStatus = reg.paymentStatus || (amountToPay === 0 ? 'waived' : 'pending');
       const received = reg.amountReceived ?? (pStatus === 'paid' ? amountToPay : 0);
       const bal = Math.max(0, amountToPay - received);
+      const displayGmkId = getRegistrationDisplayId(reg) || (isExternal ? (formatExternalGmkId(reg.publicReference) || reg.publicReference) : (reg.primaryMemberGmkId || 'N/A'));
 
       return {
         'Serial No.': index + 1,
-        'GMK ID': reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A',
+        'GMK ID': displayGmkId,
         'Registration ID': reg.id,
         'Registrant Name': primaryName,
         'Participants': participants.join(', '),
-        'Email': reg.primaryMemberEmail,
+        'Email': email,
         'Phone': phone,
         'Unit': unit,
+        'Category / Unit': unit,
         'Registration Date': new Date(reg.createdAt).toLocaleDateString(),
         'Attendees': reg.totalParticipants || (adults + children),
         'Adults': adults,
@@ -570,7 +586,7 @@ export default function RegistrationReportingWorkspace({
               <tr className="border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
                 <th className="p-3">GMK / Reg ID</th>
                 <th className="p-3">Registrant Name</th>
-                <th className="p-3">Unit</th>
+                <th className="p-3">Unit / Category</th>
                 <th className="p-3 text-center">Attendees</th>
                 <th className="p-3 text-right">Amount to Pay</th>
                 <th className="p-3 text-center">Status</th>
@@ -580,8 +596,13 @@ export default function RegistrationReportingWorkspace({
             <tbody className="divide-y divide-stone-150 text-stone-750 font-bold font-sans text-xs">
               {filteredRegistrations.map(reg => {
                 const fam = families.find(f => f.id === reg.familyId);
-                const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
-                const unit = fam ? fam.displayUnitNumber : 'Unknown';
+                const isExternal = Boolean(reg.isExternal || reg.externalRegistrationTypeId || (reg.id && reg.id.startsWith('reg_ext_')));
+                const primaryName = isExternal
+                  ? (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown')))
+                  : (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown'))));
+                
+                const unit = isExternal ? (reg.externalRegistrationTypeName || 'External') : (fam ? fam.displayUnitNumber : (reg.unitNumber || 'N/A'));
+                const referenceId = getRegistrationDisplayId(reg) || (isExternal ? (formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id) : (reg.primaryMemberGmkId || 'N/A'));
                 const { due: amountToPay, status: pStatus } = getDerivedStatus(reg);
                 const isPaid = pStatus === 'paid' || pStatus === 'approved';
                 const isWaived = pStatus === 'waived';
@@ -590,7 +611,7 @@ export default function RegistrationReportingWorkspace({
                 return (
                   <tr key={reg.id} className="hover:bg-stone-50/50 cursor-pointer" onClick={() => setPaymentModalReg && setPaymentModalReg(reg)}>
                     <td className="p-3 font-mono text-[10px] text-stone-600 uppercase">
-                      {reg.primaryMemberGmkId || reg.id.split('_')?.[1] || 'N/A'}
+                      {referenceId}
                     </td>
                     <td className="p-3">
                       <span className="text-stone-900 font-black block">{primaryName}</span>

@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPhoneWithCountryCode } from '../../utils/phoneValidation';
+import { formatExternalGmkId } from '../../utils/gmkIdHelper';
 
 type FilterState = 'ALL' | 'REGISTERED_PAID' | 'REGISTERED_NOT_PAID' | 'NOT_REGISTERED';
 
@@ -21,7 +22,7 @@ export interface AttendanceReportRow {
   paymentStatusDisplay: string;
 }
 
-export default function AttendanceReport({ initialEventId }: { initialEventId?: string }) {
+export default function AttendanceReport({ initialEventId, hideSelector }: { initialEventId?: string; hideSelector?: boolean }) {
   const [events, setEvents] = useState<CommunityEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>(initialEventId || '');
   const [residents, setResidents] = useState<ResidentProfile[]>([]);
@@ -168,7 +169,7 @@ export default function AttendanceReport({ initialEventId }: { initialEventId?: 
       const pCount = matchingReg.totalParticipants || (Array.isArray(matchingReg.participants) ? matchingReg.participants.length : 0) || 1;
 
       // Registration Reference
-      const ref = matchingReg.entryPassNumber || matchingReg.receiptNumber || (matchingReg.id ? (matchingReg.id.length > 12 ? matchingReg.id.slice(-8).toUpperCase() : matchingReg.id) : '-');
+      const ref = matchingReg.entryPassNumber || formatExternalGmkId(matchingReg.publicReference) || matchingReg.publicReference || matchingReg.receiptNumber || (matchingReg.id ? (matchingReg.id.length > 12 ? matchingReg.id.slice(-8).toUpperCase() : matchingReg.id) : '-');
 
       // Registration Date
       let dateDisplay = '-';
@@ -344,24 +345,26 @@ export default function AttendanceReport({ initialEventId }: { initialEventId?: 
           </div>
           
           <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="w-full md:w-80">
-              <label className="text-[9px] uppercase font-black text-stone-500 tracking-wider block mb-1">
-                Select Community Event
-              </label>
-              <select
-                value={selectedEventId}
-                onChange={e => setSelectedEventId(e.target.value)}
-                className="w-full px-4 py-2 border border-stone-250 rounded-xl bg-stone-50 text-stone-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0f4c2a]"
-                disabled={loading}
-              >
-                {events.length === 0 && <option value="">No active events found</option>}
-                {events.map(e => (
-                  <option key={e.id} value={e.id}>
-                    {e.eventCode || e.eventId || e.id} — {e.title || e.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {!hideSelector && (
+              <div className="w-full md:w-80">
+                <label className="text-[9px] uppercase font-black text-stone-500 tracking-wider block mb-1">
+                  Select Community Event
+                </label>
+                <select
+                  value={selectedEventId}
+                  onChange={e => setSelectedEventId(e.target.value)}
+                  className="w-full px-4 py-2 border border-stone-250 rounded-xl bg-stone-50 text-stone-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0f4c2a]"
+                  disabled={loading}
+                >
+                  {events.length === 0 && <option value="">No active events found</option>}
+                  {events.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.eventCode || e.eventId || e.id} — {e.title || e.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <button
               onClick={handleManualRefresh}
               disabled={loading || refreshing}

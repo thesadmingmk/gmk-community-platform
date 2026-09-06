@@ -31,7 +31,7 @@ import { ResidentLifecycleService, VerificationReport } from '../services/Reside
 import { classifyResidentRoleAssignments } from '../utils/governanceLifecycle';
 import LogCenter from './LogCenter';
 import ReleaseNotesModal from './ReleaseNotesModal';
-import AttendanceReport from './shared/AttendanceReport';
+import AdminEventsWorkspace from './AdminEventsWorkspace';
 import { 
   Users, 
   UserCheck, 
@@ -72,7 +72,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
   const { profile } = useAuth();
   const { confirm: showConfirm, isOpen: isConfirmOpen, options: confirmOptions, handleCancel: handleConfirmCancel, handleConfirm: handleConfirmSubmit } = useLocalGEASConfirmation();
   const [mainTab, setMainTab] = useState<'administration' | 'log_center' | 'system'>('administration');
-  const [activeTab, setActiveTab] = useState<'residents' | 'archived' | 'add_resident' | 'log_center'>('residents');
+  const [activeTab, setActiveTab] = useState<'residents' | 'archived' | 'add_resident' | 'events' | 'log_center'>('residents');
 
   useEffect(() => {
     if (hideHeaderAndTabs) {
@@ -2141,35 +2141,18 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               </button>
               <button
                 onClick={() => {
-                  setActiveTab('events' as any);
+                  setActiveTab('events');
                   setIsCreating(false);
                   setHighlightedPendingUid(null);
                 }}
                 className={`px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer ${
-                  activeTab === ('events' as any)
+                  activeTab === 'events'
                     ? 'bg-emerald-50 text-[#0f4c2a] border border-emerald-250 shadow-2xs'
                     : 'bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200'
                 }`}
               >
                 Events
               </button>
-
-              <div className="relative group z-40">
-                <button
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Expertise Report
-                </button>
-                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
-                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
-                  </button>
-                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
-                  </button>
-                </div>
-              </div>
             </div>
 
             
@@ -2178,7 +2161,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         )}
 
         {/* Global Tab Search Header */}
-        {mainTab === 'administration' && activeTab !== 'add_resident' && (
+        {mainTab === 'administration' && (activeTab === 'residents' || activeTab === 'archived') && (
           <div className="bg-white border border-stone-250 p-4 rounded-3xl flex items-center justify-between gap-4">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-stone-600 absolute left-3.5 top-3" />
@@ -2947,23 +2930,6 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 [Cancel]
               </button>
-
-              <div className="relative group z-40">
-                <button
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Expertise Report
-                </button>
-                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
-                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
-                  </button>
-                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
-                  </button>
-                </div>
-              </div>
             </div>
 
             <form onSubmit={handleCreateResidentFromScratch} className="space-y-4 text-xs font-semibold">
@@ -3594,23 +3560,6 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 Cancel
               </button>
-
-              <div className="relative group z-40">
-                <button
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Expertise Report
-                </button>
-                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
-                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
-                  </button>
-                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -3667,33 +3616,14 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
               >
                 Cancel
               </button>
-
-              <div className="relative group z-40">
-                <button
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all cursor-pointer bg-stone-50 hover:bg-stone-100 text-stone-600 border border-stone-200 flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Expertise Report
-                </button>
-                <div className="absolute right-0 mt-1 hidden group-hover:block bg-white border border-stone-200 shadow-lg rounded-lg py-1 w-36">
-                  <button onClick={exportExpertiseExcel} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Excel
-                  </button>
-                  <button onClick={exportExpertisePDF} className="w-full text-left px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> PDF
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
       )}
 
       {/* E. EVENTS TAB */}
-      {!loading && mainTab === 'administration' && activeTab === ('events' as any) && (
-        <div className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
-          <AttendanceReport />
-        </div>
+      {!loading && mainTab === 'administration' && activeTab === 'events' && (
+        <AdminEventsWorkspace />
       )}
 
       {/* Unified Platform Version Footer */}
@@ -3702,7 +3632,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           Resident Administration Portal • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.9 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.6.2 (Release Notes)</button>
         </div>
       </footer>
 

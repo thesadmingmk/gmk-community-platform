@@ -4,6 +4,8 @@ export interface PhoneValidationResult {
   isValid: boolean;
   error: string | null;
   normalized: string;
+  fullNumber: string;
+  countryCode: string;
 }
 
 // Map of country code to expected number lengths
@@ -15,6 +17,8 @@ export const COUNTRY_PHONE_METADATA: Record<string, { name: string; lengths: num
   "+965": { name: "Kuwait", lengths: [8], formatHelp: "8 digits" },
   "+974": { name: "Qatar", lengths: [8], formatHelp: "8 digits" },
   "+973": { name: "Bahrain", lengths: [8], formatHelp: "8 digits" },
+  "+44": { name: "United Kingdom", lengths: [10], formatHelp: "10 digits" },
+  "+1": { name: "United States / Canada", lengths: [10], formatHelp: "10 digits" },
 };
 
 /**
@@ -28,7 +32,7 @@ export function validateAndNormalizePhoneNumber(
 ): PhoneValidationResult {
   // If optional and empty, it's valid
   if (isOptional && !number.trim()) {
-    return { isValid: true, error: null, normalized: "" };
+    return { isValid: true, error: null, normalized: "", fullNumber: "", countryCode: code };
   }
 
   // Retrieve raw digits only
@@ -40,6 +44,8 @@ export function validateAndNormalizePhoneNumber(
       isValid: false,
       error: "Phone number is required and must contain digits.",
       normalized: "",
+      fullNumber: "",
+      countryCode: code,
     };
   }
 
@@ -62,6 +68,8 @@ export function validateAndNormalizePhoneNumber(
       isValid: false,
       error: `Oman Phone Number must be exactly 8 digits.`,
       normalized: cleaned,
+      fullNumber: `${code} ${cleaned}`,
+      countryCode: code,
     };
   }
 
@@ -70,6 +78,8 @@ export function validateAndNormalizePhoneNumber(
       isValid: false,
       error: `India Phone Number must be exactly 10 digits. Captured: ${cleaned.length}/10`,
       normalized: cleaned,
+      fullNumber: `${code} ${cleaned}`,
+      countryCode: code,
     };
   }
 
@@ -79,6 +89,8 @@ export function validateAndNormalizePhoneNumber(
         isValid: false,
         error: `UAE Phone Number must be exactly 9 digits (excluding the local trunk prefix '0'). Captured: ${cleaned.length}/9`,
         normalized: cleaned,
+        fullNumber: `${code} ${cleaned}`,
+        countryCode: code,
       };
     }
   }
@@ -90,6 +102,8 @@ export function validateAndNormalizePhoneNumber(
       isValid: false,
       error: `${countryName} phone number must be ${helpText}. Captured: ${cleaned.length} digits`,
       normalized: cleaned,
+      fullNumber: `${code} ${cleaned}`,
+      countryCode: code,
     };
   }
 
@@ -97,22 +111,61 @@ export function validateAndNormalizePhoneNumber(
     isValid: true,
     error: null,
     normalized: cleaned,
+    fullNumber: `${code} ${cleaned}`,
+    countryCode: code,
   };
 }
 
-export function formatPhoneWithCountryCode(phone: string | undefined | null): string {
+/**
+ * Universal phone number formatter preserving international country codes.
+ * Ensures numbers are displayed cleanly (e.g. "+91 8589055855", "+968 91234567")
+ * while safely recognizing legacy numbers without explicit country codes.
+ */
+export function formatPhoneWithCountryCode(phone: string | undefined | null, fallbackCode = '+968'): string {
   if (!phone) return '';
-  let cleaned = phone.trim();
-  
-  // Remove duplicate "+968" or "968" prefixes
-  let digits = cleaned.replace(/\D/g, '');
-  while (digits.startsWith('968968')) {
-    digits = digits.substring(3);
+  const trimmed = phone.trim();
+
+  // If already starts with '+', format cleanly with a single space after country code
+  if (trimmed.startsWith('+')) {
+    const knownCodes = ['+968', '+971', '+966', '+965', '+974', '+973', '+91', '+44', '+1'];
+    for (const code of knownCodes) {
+      if (trimmed.startsWith(code)) {
+        const rest = trimmed.substring(code.length).replace(/\D/g, '');
+        return `${code} ${rest}`;
+      }
+    }
+    // Generic '+' code: match up to 4 digits prefix
+    const match = trimmed.match(/^(\+\d{1,4})\s*(.*)$/);
+    if (match) {
+      const rest = match[2].replace(/\D/g, '');
+      return `${match[1]} ${rest}`;
+    }
   }
-  if (digits.startsWith('968') && digits.length > 8) {
-    digits = digits.substring(3);
+
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Check if digits already include country code prefix (e.g. "96891234567" or "918589055855")
+  if (digits.startsWith('968') && digits.length === 11) {
+    return `+968 ${digits.substring(3)}`;
   }
-  
-  return `+968 ${digits}`;
+  if (digits.startsWith('91') && digits.length === 12) {
+    return `+91 ${digits.substring(2)}`;
+  }
+  if (digits.startsWith('971') && digits.length === 12) {
+    return `+971 ${digits.substring(3)}`;
+  }
+
+  // 10 digits starting with 6,7,8,9 -> India (+91)
+  if (digits.length === 10 && ['6', '7', '8', '9'].includes(digits[0])) {
+    return `+91 ${digits}`;
+  }
+
+  // 8 digits -> Oman (+968)
+  if (digits.length === 8) {
+    return `+968 ${digits}`;
+  }
+
+  return `${fallbackCode} ${digits}`;
 }
 

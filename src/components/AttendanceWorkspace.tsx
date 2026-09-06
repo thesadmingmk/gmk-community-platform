@@ -8,6 +8,11 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import AttendanceReport from './shared/AttendanceReport';
+import { getRegistrationDisplayId, formatExternalGmkId, isExternalGmkId } from '../utils/gmkIdHelper';
+import { 
+  sendEntryPassWhatsAppNotification, 
+  hasEntryPassNotificationBeenSent 
+} from '../services/WhatsAppEntryPassService';
 
 interface Props {
   activeEvent: CommunityEvent;
@@ -55,20 +60,63 @@ export default function AttendanceWorkspace({
     setScannedReg(null);
     setSelectedParticipants({});
     
-    let searchCode = code.trim().toUpperCase();
+    const rawCode = code.trim();
+    let searchCode = rawCode.toUpperCase();
     if (!isNaN(Number(searchCode)) && searchCode !== '') {
-        searchCode = `GMK-${searchCode}`;
+      searchCode = `GMK-${searchCode}`;
     }
+    const formattedExternalSearch = formatExternalGmkId(rawCode);
+    const bareNumber = rawCode.replace(/[^0-9]/g, '');
         
     let reg = registrations.find(r => {
+      // Exclude operationally cleaned up external registrations
+      if ((r as any).operationalStatus === 'cleaned_up' || (r as any).isOperationalCleanedUp === true) {
+        return false;
+      }
+
       const storedPass = (r.entryPassNumber || '').trim().toUpperCase();
-      if (storedPass && storedPass === searchCode) return true;
+      if (storedPass && (storedPass === searchCode || storedPass === rawCode.toUpperCase())) return true;
 
       const derivedPass = `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${r.primaryMemberGmkId || r.id.slice(-6).toUpperCase()}`;
       if (derivedPass.toUpperCase() === searchCode) return true;
 
-      if (r.id.toUpperCase() === searchCode) return true;
-      if (r.primaryMemberGmkId?.toUpperCase() === searchCode) return true;
+      if (r.id.toUpperCase() === searchCode || r.id.toUpperCase() === rawCode.toUpperCase()) return true;
+
+      const primaryGmk = (r.primaryMemberGmkId || '').trim().toUpperCase();
+      const primaryGmkFormatted = formatExternalGmkId(primaryGmk);
+      if (primaryGmk && (
+        primaryGmk === searchCode ||
+        primaryGmk === formattedExternalSearch ||
+        primaryGmkFormatted === searchCode ||
+        primaryGmkFormatted === formattedExternalSearch
+      )) return true;
+
+      const publicRef = (r.publicReference || '').trim().toUpperCase();
+      const publicRefFormatted = formatExternalGmkId(publicRef);
+      if (publicRef && (
+        publicRef === searchCode ||
+        publicRef === rawCode.toUpperCase() ||
+        publicRef === formattedExternalSearch ||
+        publicRefFormatted === searchCode ||
+        publicRefFormatted === formattedExternalSearch
+      )) return true;
+
+      const displayId = getRegistrationDisplayId(r);
+      const displayIdFormatted = formatExternalGmkId(displayId);
+      if (displayId && (
+        displayId.toUpperCase() === searchCode ||
+        displayId.toUpperCase() === formattedExternalSearch ||
+        displayIdFormatted.toUpperCase() === searchCode ||
+        displayIdFormatted.toUpperCase() === formattedExternalSearch
+      )) return true;
+
+      // Numeric comparison for 5-6 digit IDs (e.g. 875572)
+      if (bareNumber.length >= 5) {
+        const rBareRef = (r.publicReference || '').replace(/[^0-9]/g, '');
+        const rBareGmk = (r.primaryMemberGmkId || '').replace(/[^0-9]/g, '');
+        if (rBareRef && rBareRef === bareNumber) return true;
+        if (rBareGmk && rBareGmk === bareNumber) return true;
+      }
 
       return false;
     });
@@ -89,7 +137,7 @@ export default function AttendanceWorkspace({
 
   const handleCheckIn = async (reg: EventRegistration) => {
     if (!reg || !activeEvent.id) return;
-    const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1];
+    const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id.split('_')?.[1] || reg.id;
     if (!gmkId) {
       setErrorMsg("Cannot process check-in: Missing GMK ID.");
       return;
@@ -208,14 +256,49 @@ export default function AttendanceWorkspace({
     return { adults, children };
   };
 
-  // Filter valid registrations for Attendance
+  const [waProcessingId, setWaProcessingId] = useState<string | null>(null);
+
+  const handleSendWhatsAppEntryPass = async (reg: EventRegistration) => {
+    setWaProcessingId(reg.id);
+    setErrorMsg('');
+    setSuccessMsg('');
+    
+    try {
+      const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id;
+      const passNumber = reg.entryPassNumber || `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${gmkId}`;
+      const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(passNumber)}&size=500&margin=1&dark=0f4c2a`;
+
+      const regWithPass = { ...reg, entryPassNumber: passNumber };
+
+      const result = await sendEntryPassWhatsAppNotification(regWithPass, activeEvent, {
+        dryRun: false,
+        headerImageUrl: qrUrl,
+        forceResend: hasEntryPassNotificationBeenSent(selectedReg)
+      });
+      
+      if (result.success) {
+        setSuccessMsg(`Entry Pass successfully dispatched via WhatsApp to ${result.recipientPhone}.`);
+      } else {
+        setErrorMsg(`WhatsApp failed: ${result.error}`);
+      }
+    } catch (err: any) {
+      setErrorMsg(`Error: ${err.message}`);
+    } finally {
+      setWaProcessingId(null);
+    }
+  };
+
+  // Filter valid registrations for Attendance (excluding operationally cleaned up)
   const validRegs = registrations.filter(r => {
+    if ((r as any).operationalStatus === 'cleaned_up' || (r as any).isOperationalCleanedUp === true) {
+      return false;
+    }
     const st = r.paymentStatus || 'pending';
     return st === 'paid' || st === 'approved' || st === 'waived' || st === 'partially_paid' || st === 'overpaid';
   });
 
   const getAttendanceStatus = (reg: EventRegistration) => {
-    const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1];
+    const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id.split('_')?.[1] || reg.id;
     const att = attendances.find(a => (a as any).primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${activeEvent.id}`);
     
     if (!att) return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att, arrivedNames: [] };
@@ -261,13 +344,17 @@ export default function AttendanceWorkspace({
       else totalNotChecked++;
 
       const fam = families.find(f => f.id === reg.familyId);
-      const unit = fam?.displayUnitNumber || 'N/A';
-      const name = fam?.fullName || reg.primaryMemberEmail;
+      const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
+      const unit = isExt
+        ? (reg.externalRegistrationTypeName || 'External Guest')
+        : (fam?.displayUnitNumber || reg.unitNumber || 'Resident');
+      const name = fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail || 'N/A';
+      const displayGmk = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || 'N/A';
 
       return [
         (index + 1).toString(),
         reg.entryPassNumber || `PASS-${reg.id.slice(-4)}`,
-        reg.primaryMemberGmkId || 'N/A',
+        displayGmk,
         name,
         unit,
         adultsCount.toString(),
@@ -284,7 +371,7 @@ export default function AttendanceWorkspace({
 
     (doc as any).autoTable({
       startY: 60,
-      head: [['#', 'Pass #', 'GMK', 'Name', 'Unit', 'Adults', 'Children', 'Total', 'Status', 'Time']],
+      head: [['#', 'Pass #', 'GMK', 'Name', 'Unit / Category', 'Adults', 'Children', 'Total', 'Status', 'Time']],
       body: tableData,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [15, 76, 42] }
@@ -315,12 +402,21 @@ export default function AttendanceWorkspace({
       else totalNotChecked++;
 
       const fam = families.find(f => f.id === reg.familyId);
+      const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
+      const categoryOrUnit = isExt
+        ? (reg.externalRegistrationTypeName || 'External Guest')
+        : (fam?.displayUnitNumber || reg.unitNumber || 'Resident');
+      const name = fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail || 'N/A';
+      const displayGmk = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || 'N/A';
+
       return {
         'Sl. No.': index + 1,
         'Entry Pass Number': reg.entryPassNumber || `PASS-${reg.id.slice(-4)}`,
-        'GMK ID': reg.primaryMemberGmkId || 'N/A',
-        'Primary Registrant': fam?.fullName || reg.primaryMemberEmail,
-        'Unit': fam?.displayUnitNumber || 'N/A',
+        'GMK ID': displayGmk,
+        'Primary Registrant': name,
+        'Unit': !isExt ? categoryOrUnit : '-',
+        'Registration Category': isExt ? categoryOrUnit : 'Resident',
+        'Unit / Category': categoryOrUnit,
         'Adults': adultsCount,
         'Children': childrenCount,
         'Total Attendees': reg.totalParticipants || 0,
@@ -406,20 +502,26 @@ export default function AttendanceWorkspace({
                 </p>
                 <form onSubmit={handleManualSearch} className="flex items-center space-x-2">
                   <div className="relative flex-1 flex items-center bg-white border border-stone-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-[#0f4c2a]">
-                    <Search className="ml-3 w-4 h-4 text-stone-400" />
-                    <span className="pl-2 font-bold text-stone-500 text-xs">GMK-</span>
+                    <Search className="ml-3 w-4 h-4 text-stone-400 shrink-0" />
+                    <span className="pl-2 font-bold text-stone-500 text-xs shrink-0">GMK-</span>
                     <input
                       type="text"
                       value={scanInput}
-                      onChange={(e) => setScanInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="1001"
-                      className="w-full pl-1 pr-3 py-2 font-bold text-stone-900 text-xs focus:outline-none"
+                      onChange={(e) => {
+                        let val = e.target.value.trim().toUpperCase();
+                        if (val.startsWith('GMK-')) {
+                          val = val.slice(4);
+                        }
+                        setScanInput(val);
+                      }}
+                      placeholder="1001 or 875572"
+                      className="w-full pl-1 pr-3 py-2 font-bold text-stone-900 text-xs focus:outline-none font-mono"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={!scanInput.trim()}
-                    className="px-4 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                    className="px-4 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider disabled:opacity-50 transition-all cursor-pointer shadow-xs shrink-0"
                   >
                     Verify
                   </button>
@@ -459,8 +561,13 @@ export default function AttendanceWorkspace({
               const isPartiallyEntered = attStatus.partially;
               
               const fam = families.find(f => f.id === scannedReg.familyId);
-              const primaryName = fam ? fam.fullName : (scannedReg.primaryMemberEmail ? scannedReg.primaryMemberEmail.split('@')[0] : 'Unknown');
+              const primaryName = fam ? fam.fullName : (scannedReg.primaryRegistrantName || (scannedReg.primaryMemberEmail ? scannedReg.primaryMemberEmail.split('@')[0] : 'Unknown'));
               
+              const isExt = scannedReg.isExternal || isExternalGmkId(scannedReg.publicReference) || isExternalGmkId(scannedReg.primaryMemberGmkId);
+              const categoryOrUnit = isExt
+                ? (scannedReg.externalRegistrationTypeName || 'External Guest')
+                : (fam?.displayUnitNumber || scannedReg.unitNumber || 'Resident');
+
               const { adults, children } = getParticipantDetails(scannedReg);
               const alreadyArrived = attStatus.arrivedNames || [];
               const showCheckboxes = isApproved && !isFullyEntered;
@@ -497,13 +604,19 @@ export default function AttendanceWorkspace({
                       <p className="text-sm font-black text-stone-900">{primaryName}</p>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Entry Pass ID</p>
-                        <p className="text-xs font-mono font-bold text-stone-700">{scannedReg.entryPassNumber || scannedReg.id}</p>
+                        <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">
+                          {isExt ? 'Category' : 'Property Unit'}
+                        </p>
+                        <p className="text-xs font-bold text-stone-900">{categoryOrUnit}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Total Participants</p>
+                        <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Entry Pass / GMK</p>
+                        <p className="text-xs font-mono font-bold text-stone-700">{scannedReg.entryPassNumber || getRegistrationDisplayId(scannedReg) || scannedReg.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Attendees</p>
                         <p className="text-xs font-black text-stone-900">{scannedReg.totalParticipants}</p>
                       </div>
                     </div>
@@ -703,15 +816,21 @@ export default function AttendanceWorkspace({
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                     <div>
                       <span className="block text-[9px] uppercase font-bold text-stone-500">Primary Registrant</span>
-                      <span className="block text-xs font-black">{fam?.fullName || selectedReg.primaryMemberEmail}</span>
+                      <span className="block text-xs font-black">{fam?.fullName || selectedReg.primaryRegistrantName || selectedReg.primaryMemberEmail}</span>
                     </div>
                     <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Unit</span>
-                      <span className="block text-xs font-black">{fam?.displayUnitNumber || 'N/A'}</span>
+                      <span className="block text-[9px] uppercase font-bold text-stone-500">
+                        {selectedReg.isExternal ? 'Registration Category' : 'Property Unit'}
+                      </span>
+                      <span className="block text-xs font-black">
+                        {selectedReg.isExternal 
+                          ? (selectedReg.externalRegistrationTypeName || 'External Guest') 
+                          : (fam?.displayUnitNumber || selectedReg.unitNumber || 'Resident')}
+                      </span>
                     </div>
                     <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Entry Pass</span>
-                      <span className="block text-xs font-black font-mono">{selectedReg.entryPassNumber || selectedReg.id.slice(-6)}</span>
+                      <span className="block text-[9px] uppercase font-bold text-stone-500">Entry Pass / GMK</span>
+                      <span className="block text-xs font-black font-mono">{selectedReg.entryPassNumber || getRegistrationDisplayId(selectedReg) || selectedReg.id.slice(-6)}</span>
                     </div>
                     <div>
                       <span className="block text-[9px] uppercase font-bold text-stone-500">Status</span>
@@ -721,7 +840,7 @@ export default function AttendanceWorkspace({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4 mb-6 p-3 bg-stone-50 rounded-xl">
+                  <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-stone-50 rounded-xl">
                     <div>
                       <span className="block text-[9px] uppercase font-bold text-stone-500">Total Participants</span>
                       <span className="block text-sm font-black">{selectedReg.totalParticipants}</span>
@@ -734,6 +853,28 @@ export default function AttendanceWorkspace({
                       <span className="block text-[9px] uppercase font-bold text-stone-500">Children</span>
                       <span className="block text-sm font-black">{childrenCount}</span>
                     </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-emerald-50/50 rounded-xl mb-6 border border-emerald-100">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-emerald-800 tracking-wider">Send Entry Pass (WhatsApp)</p>
+                      <p className="text-[9px] font-bold text-emerald-600">
+                        {hasEntryPassNotificationBeenSent(selectedReg) 
+                          ? `Already Sent (${new Date(selectedReg.entryPassNotificationSentAt || '').toLocaleDateString()})` 
+                          : 'Push Entry Pass & QR Code'}
+                      </p>
+                    </div>
+                    <button
+                      disabled={waProcessingId === selectedReg.id}
+                      onClick={() => handleSendWhatsAppEntryPass(selectedReg)}
+                      className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all shadow-xs ${
+                        hasEntryPassNotificationBeenSent(selectedReg)
+                          ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 border border-emerald-300'
+                      }`}
+                    >
+                      {waProcessingId === selectedReg.id ? 'Sending...' : (hasEntryPassNotificationBeenSent(selectedReg) ? 'Resend' : 'Send WhatsApp')}
+                    </button>
                   </div>
 
                   {errorMsg && (
@@ -828,7 +969,7 @@ export default function AttendanceWorkspace({
                     <th className="px-4 py-3">Pass #</th>
                     <th className="px-4 py-3">GMK ID</th>
                     <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Unit</th>
+                    <th className="px-4 py-3">Unit / Category</th>
                     <th className="px-4 py-3 text-center">Total</th>
                     <th className="px-4 py-3 text-center">Adults / Kids</th>
                     <th className="px-4 py-3">Status</th>
@@ -840,6 +981,10 @@ export default function AttendanceWorkspace({
                     const stat = getAttendanceStatus(reg);
                     const fam = families.find(f => f.id === reg.familyId);
                     const { adultsCount, childrenCount } = getCounts(reg);
+                    const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
+                    const categoryOrUnit = isExt
+                      ? (reg.externalRegistrationTypeName || 'External Guest')
+                      : (fam?.displayUnitNumber || reg.unitNumber || '-');
 
                     return (
                       <tr 
@@ -855,9 +1000,9 @@ export default function AttendanceWorkspace({
                         <td className="px-4 py-3 font-mono font-bold text-stone-600">
                           {reg.entryPassNumber || reg.id.slice(-6)}
                         </td>
-                        <td className="px-4 py-3 font-bold text-stone-900">{reg.primaryMemberGmkId || '-'}</td>
-                        <td className="px-4 py-3 font-black text-stone-900">{fam?.fullName || reg.primaryMemberEmail}</td>
-                        <td className="px-4 py-3 font-bold text-stone-600">{fam?.displayUnitNumber || '-'}</td>
+                        <td className="px-4 py-3 font-bold text-stone-900">{getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || '-'}</td>
+                        <td className="px-4 py-3 font-black text-stone-900">{fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail}</td>
+                        <td className="px-4 py-3 font-bold text-stone-600">{categoryOrUnit}</td>
                         <td className="px-4 py-3 text-center font-black">{reg.totalParticipants}</td>
                         <td className="px-4 py-3 text-center font-bold text-stone-500">{adultsCount} / {childrenCount}</td>
                         <td className="px-4 py-3">

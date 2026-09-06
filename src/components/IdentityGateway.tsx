@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { 
   signInWithEmailAndPassword, 
@@ -12,13 +12,33 @@ import { getFirestore } from 'firebase/firestore';
 import { auth, db, functions } from '../context/AuthContext';
 import { httpsCallable } from 'firebase/functions';
 import { doc, setDoc, query, collection, where, getDocs, getDoc } from 'firebase/firestore';
-import { Mail, Lock, User, Phone, Home, RefreshCw, Sparkles, Compass, Users, Heart, Check, ArrowRight } from 'lucide-react';
+import { 
+  Mail, 
+  Lock, 
+  User, 
+  Phone, 
+  Home, 
+  RefreshCw, 
+  Sparkles, 
+  Compass, 
+  Users, 
+  Heart, 
+  Check, 
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
+  Calendar,
+  Tag
+} from 'lucide-react';
 import { createAuditLog } from '../utils/audit';
 import { sanitizeFirestorePayload } from '../utils/sanitize';
 import { normalizeUnit } from '../utils/unitNormalization';
 import { normalizeName } from '../utils/nameNormalization';
 import ReleaseNotesModal from './ReleaseNotesModal';
 import firebaseConfig from '../firebase-applet-config.json';
+import { CommunityEvent, ExternalRegistrationTypeConfig } from '../types';
+import ExternalRegistrationForm from './external/ExternalRegistrationForm';
 
 // Initialize secondary isolated validation app to perform unauthenticated uniqueness checks securely in the background
 const getValidationApp = () => {
@@ -119,6 +139,91 @@ export default function IdentityGateway() {
 
   // Platform Version state
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
+
+  // RTCO-088: Generic External Event Registration States
+  const [showExternalFlow, setShowExternalFlow] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('external') === 'true' || window.location.hash === '#external';
+    }
+    return false;
+  });
+  const [selectedExternalType, setSelectedExternalType] = useState<ExternalRegistrationTypeConfig | null>(null);
+  const [externalActiveEvent, setExternalActiveEvent] = useState<CommunityEvent | null>(null);
+  const [loadingExternalEvent, setLoadingExternalEvent] = useState(false);
+  const [externalEventError, setExternalEventError] = useState<string | null>(null);
+
+  const handleOpenExternalRegistration = async () => {
+    setShowExternalFlow(true);
+    setSelectedExternalType(null);
+    setLoadingExternalEvent(true);
+    setExternalEventError(null);
+
+    try {
+      // 1. Silently authenticate the isolated validation client if not logged in
+      if (!validationAuth.currentUser) {
+        try {
+          await signInWithEmailAndPassword(validationAuth, "gmk_registrations@gmail.com", "gmkCommunityRules321");
+        } catch (signInErr: any) {
+          if (signInErr.code === "auth/user-not-found" || signInErr.code === "auth/invalid-credential" || signInErr.code === "auth/wrong-password") {
+            try {
+              const guestUserCred = await createUserWithEmailAndPassword(validationAuth, "gmk_registrations@gmail.com", "gmkCommunityRules321");
+              const registrationAuthUser = guestUserCred.user;
+              await setDoc(doc(validationDb, "users", registrationAuthUser.uid), {
+                uid: registrationAuthUser.uid,
+                email: "gmk_registrations@gmail.com",
+                roles: ["admin"],
+                isActive: true,
+                createdAt: new Date().toISOString()
+              }, { merge: true });
+            } catch (createErr: any) {
+              if (createErr.code === "auth/email-already-in-use") {
+                try {
+                  await signInWithEmailAndPassword(validationAuth, "gmk_registrations@gmail.com", "gmkCommunityRules321");
+                } catch (retryErr) {
+                  console.error("Silent authentication retry failed:", retryErr);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Fetch events
+      const eventsRef = collection(validationDb, "events");
+      const snap = await getDocs(eventsRef);
+      const eventsList = snap.docs.map(d => ({ id: d.id, ...d.data() } as CommunityEvent));
+
+      // 3. Find active event with external registration active and at least one type configured
+      const eligibleEvents = eventsList.filter(ev => 
+        ev.status !== 'archived' && 
+        ev.externalRegistrationSettings?.enabled === true &&
+        Array.isArray(ev.externalRegistrationSettings?.types) &&
+        ev.externalRegistrationSettings.types.length > 0
+      );
+
+      if (eligibleEvents.length === 0) {
+        setExternalActiveEvent(null);
+        setExternalEventError("External Event Registration is currently unavailable. There are no active events open for external guest registration at this time. Please check back later or contact the GMK Event Committee.");
+      } else {
+        // Prefer published event, otherwise the first eligible one
+        const activeOne = eligibleEvents.find(ev => ev.status === 'published') || eligibleEvents[0];
+        setExternalActiveEvent(activeOne);
+      }
+    } catch (err: any) {
+      console.error("Error loading external event registration:", err);
+      setExternalEventError("Unable to retrieve event registration details at this moment. Please check your network connection and try again.");
+    } finally {
+      setLoadingExternalEvent(false);
+    }
+  };
+
+  // Auto-fetch if direct URL used
+  useEffect(() => {
+    if (showExternalFlow && !externalActiveEvent && !loadingExternalEvent && !externalEventError) {
+      handleOpenExternalRegistration();
+    }
+  }, [showExternalFlow]);
 
   // Real-time unique constraints validation
   React.useEffect(() => {
@@ -688,7 +793,146 @@ export default function IdentityGateway() {
         <span>Greens Malayalee Koottayma • Community • Culture • Connection</span>
       </div>
 
-      <div className="flex-1 flex flex-col-reverse md:flex-row items-center justify-center p-6 md:p-12 max-w-7xl mx-auto w-full gap-8">
+      {showExternalFlow ? (
+        <div className="flex-1 max-w-4xl mx-auto w-full p-4 sm:p-6 md:p-8 animate-fadeIn flex flex-col justify-center">
+          {/* Top navigation back to portal */}
+          <div className="mb-6 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                setShowExternalFlow(false);
+                setSelectedExternalType(null);
+                setExternalEventError(null);
+              }}
+              className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-stone-600 hover:text-[#0f4c2a] transition-colors cursor-pointer py-2 px-3.5 rounded-xl bg-white border border-stone-200 shadow-2xs hover:border-[#0f4c2a]"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Back to Member Portal Login</span>
+            </button>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-stone-500 bg-white py-1 px-3 rounded-full border border-stone-200 shadow-2xs">
+              <Sparkles className="w-3.5 h-3.5 text-[#d4af37]" />
+              <span>Public Event Gateway</span>
+            </div>
+          </div>
+
+          {selectedExternalType && externalActiveEvent ? (
+            /* Render External Registration Form */
+            <div className="bg-white border border-stone-200 rounded-3xl shadow-xl shadow-stone-200/40 p-6 md:p-8">
+              <ExternalRegistrationForm
+                event={externalActiveEvent}
+                typeConfig={selectedExternalType}
+                validationDb={validationDb}
+                onBack={() => setSelectedExternalType(null)}
+              />
+            </div>
+          ) : (
+            /* Registration Type Selector Screen */
+            <div className="space-y-6">
+              <div className="bg-white border border-stone-200 rounded-3xl shadow-xl shadow-stone-200/40 p-6 md:p-8 space-y-6">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-[#0f4c2a]">
+                      External Registration
+                    </span>
+                    <span className="text-stone-300">•</span>
+                    <span className="text-[11px] font-bold text-stone-500">No Account or GMK ID Required</span>
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-extrabold text-[#0f4c2a] font-heading mt-2 uppercase tracking-wide">
+                    External Registration
+                  </h2>
+                  <p className="text-stone-600 text-xs md:text-sm font-medium mt-1">
+                    Select your registration category below to proceed.
+                  </p>
+                </div>
+
+                {loadingExternalEvent ? (
+                  <div className="py-16 text-center space-y-3">
+                    <RefreshCw className="w-8 h-8 text-[#0f4c2a] animate-spin mx-auto" />
+                    <p className="text-xs font-bold text-stone-600">Checking for active external registrations...</p>
+                  </div>
+                ) : externalEventError ? (
+                  <div className="p-8 bg-stone-50 border border-stone-200 rounded-2xl text-center space-y-4">
+                    <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto text-amber-700">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1.5 max-w-md mx-auto">
+                      <h4 className="text-sm font-bold text-stone-850">Registration Unavailable</h4>
+                      <p className="text-xs text-stone-500 leading-relaxed">
+                        {externalEventError}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowExternalFlow(false)}
+                      className="px-4 py-2 bg-[#0f4c2a] text-white text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer hover:bg-[#125831] transition-all shadow-xs"
+                    >
+                      Return to Member Portal
+                    </button>
+                  </div>
+                ) : externalActiveEvent?.externalRegistrationSettings?.types && externalActiveEvent.externalRegistrationSettings.types.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-stone-500 font-heading">
+                        Select Registration Category ({externalActiveEvent.externalRegistrationSettings.types.length})
+                      </h3>
+                      <span className="text-[11px] text-stone-400 font-medium">
+                        Configured Registration Categories
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {externalActiveEvent.externalRegistrationSettings.types.map((type) => {
+                        const isFamily = type.entryType === 'family';
+                        return (
+                          <div
+                            key={type.id}
+                            className="p-5 bg-stone-50/70 hover:bg-white border-2 border-stone-200 hover:border-[#0f4c2a] rounded-2xl transition-all shadow-2xs hover:shadow-md flex flex-col justify-between space-y-4 group"
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className={`px-2.5 py-0.5 text-[9px] font-bold rounded-md uppercase tracking-wider ${
+                                  isFamily ? 'bg-blue-150 text-blue-850 border border-blue-250' : 'bg-purple-150 text-purple-850 border border-purple-250'
+                                }`}>
+                                  {isFamily ? 'Family Registration' : 'Single Registration'}
+                                </span>
+                              </div>
+                              <h4 className="text-base font-black text-stone-900 group-hover:text-[#0f4c2a] transition-colors font-heading">
+                                {type.name}
+                              </h4>
+                              <p className="text-[11px] text-stone-600 font-medium leading-relaxed">
+                                {isFamily
+                                  ? 'Register your primary contact along with spouse, children, parents, and other family members.'
+                                  : 'Individual participant entry. Reusable unit / flat / room number supported.'}
+                              </p>
+                            </div>
+
+                            <div className="pt-3 border-t border-stone-200/80 flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExternalType(type)}
+                                className="px-4 py-2 bg-[#0f4c2a] group-hover:bg-[#125831] text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                              >
+                                <span>Select</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-8 bg-stone-50 border border-stone-200 rounded-2xl text-center space-y-2">
+                    <p className="text-xs font-bold text-stone-700">No registration categories are currently open.</p>
+                    <p className="text-[11px] text-stone-500">Please check back later or contact the Event Committee.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col-reverse md:flex-row items-center justify-center p-6 md:p-12 max-w-7xl mx-auto w-full gap-8">
         
         {/* Editorial Left Branding Column */}
         <div className="w-full md:w-1/2 space-y-6 text-center md:text-left md:pr-8 animate-fadeIn">
@@ -958,16 +1202,13 @@ export default function IdentityGateway() {
                     Mobile Number (Oman)
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-stone-750 font-bold text-xs">
-                      +968
-                    </div>
                     <input
                       type="text"
                       required
                       maxLength={8}
                       value={phone}
                       onChange={(e) => handlePhoneChange(e.target.value)}
-                      className="block w-full pl-14 pr-3 py-2.5 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55 font-semibold"
+                      className="block w-full px-3 py-2.5 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs text-stone-900 bg-stone-50/55 font-semibold"
                     />
                   </div>
                   <p className="text-[10px] text-stone-650 font-semibold mt-1">Oman mobile number containing exactly 8 digits</p>
@@ -1220,7 +1461,7 @@ export default function IdentityGateway() {
             )}
 
             {/* Submit Action Block */}
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <button
                 type="submit"
                 disabled={loading || (isSignUp && !isSetupPassword && (!!duplicateEmailError || !!duplicatePhoneError || !!duplicateUnitError || !!generalValidationMsg))}
@@ -1239,6 +1480,16 @@ export default function IdentityGateway() {
                   "Sign In"
                 )}
               </button>
+
+              {!isSignUp && !isSetupPassword && (
+                <button
+                  type="button"
+                  onClick={handleOpenExternalRegistration}
+                  className="w-full flex justify-center py-2.5 px-4 rounded-xl border border-stone-250 hover:border-[#0f4c2a] text-stone-700 hover:text-[#0f4c2a] bg-stone-50 hover:bg-stone-100 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer text-center shadow-2xs"
+                >
+                  External Registration
+                </button>
+              )}
             </div>
           </form>
 
@@ -1258,6 +1509,7 @@ export default function IdentityGateway() {
 
         </div>
       </div>
+      )}
 
       {/* Modern Centered Footer */}
       <footer className="w-full max-w-lg mx-auto text-center font-sans text-xs space-y-1 py-6 border-t border-stone-250 mb-4 shrink-0 text-stone-500">
@@ -1265,7 +1517,7 @@ export default function IdentityGateway() {
           GMK Community Platform • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.5.9 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.6.2 (Release Notes)</button>
         </div>
       </footer>
 

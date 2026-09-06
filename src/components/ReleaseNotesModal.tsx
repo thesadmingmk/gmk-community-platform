@@ -19,6 +19,55 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.6.2",
+    title: "Event Timezone Precision, Registration Categories, International Numbers & UI Refinements",
+    releaseDate: "2026-09-06",
+    author: "Core Platform Team",
+    notes: [
+      "Event Date & Time Fix: Pinned event date/time handling strictly to Asia/Muscat (UTC+4), preventing date shifting or corruption caused by browser-local timezones. Event emails now display the correct configured Event Date and Event Time with hardcoded event-time fallback removed.",
+      "Email Category Fix: Entry Pass & Payment Confirmed emails now dynamically resolve and display the exact Event Director-configured registration category instead of incorrectly defaulting to 'External Guest'.",
+      "WhatsApp Infrastructure Fix: Updated the client-side WhatsApp notification implementation to interface with the dedicated Firebase callable function/CORS architecture (live deployment and verification scheduled after Git deployment).",
+      "International Phone Number Handling: External registrations preserve selected international country codes (+968, +971, +966, +965, +974, +973, +91, +44, +1) across records, Admin views, and Reporting workspaces, while normalizing Meta WhatsApp recipient numbers to E.164 digits-only format.",
+      "Reusable Phone/WhatsApp Numbers: Permitted mobile and WhatsApp numbers to be reused across multiple External Registrations within the same event, removing phone-based duplicate blockers while maintaining strict per-event email duplicate protection.",
+      "External Registration Address Field: Replaced 'Unit Number / Room / Flat' with a general 'Address' field across input placeholders, helper text, validation rules, and review summaries.",
+      "Admin UI/UX Improvements: Removed the resident search bar from the Events workspace (retaining search strictly for Residents and Archived views) and removed the Expertise Report tab and associated menu controls."
+    ]
+  },
+  {
+    version: "v1.6.1",
+    title: "External Attendance ID Compatibility, Notifications & Archive (RTCO-098 / RTCO-099)",
+    releaseDate: "2026-09-06",
+    author: "Core Platform Team",
+    notes: [
+      "Unified WhatsApp Notification Deployment (RTCO-099): Live integration of Meta-approved templates (gmk_external_registration_update & gmk_entry_pass_ready).",
+      "Dynamic Entry Pass QR Code Headers: WhatsApp gmk_entry_pass_ready template now seamlessly injects scannable high-resolution QR codes dynamically generated via QuickChart for instant gate access.",
+      "Manual Resident WhatsApp Push: Empowered Event Directors to manually push Official Entry Pass WhatsApp notifications directly to residents via the Attendance Workspace.",
+      "WhatsApp Delivery Audits & Controls: Built-in strict delivery status checks, duplicate send protections, and manual resend capability for External Registrations.",
+      "Standardized 6-Digit Numeric External GMK ID: Formatted all external registration identifiers to canonical 6-digit numeric sequences (GMK-XXXXXX) with robust backwards compatibility across legacy alphanumeric formats.",
+      "Authoritative Event Configuration in Emails: Synced all 5 External Registration email templates to strictly derive event configuration from the central event source.",
+      "High-Resolution Scannable QR Codes: Integrated scannable QR codes with Content-ID (CID) inline embedding into official Entry Pass emails.",
+      "Uniform Email Templating & Placeholder Normalization: Standardized typography, color palettes, and container structures across all external emails.",
+      "Seamless Gate Attendance Lookup: Enhanced Attendance scanner and search to match registrations by canonical 6-digit GMK ID, entry pass number, or QR scan.",
+      "Safe Post-Refund Admin Operational Cleanup: Added safe operational archive capability for external registrations after refund settlement in ExternalRegistrationsManager.",
+      "On-Demand Refund Settlement Vouchers: Preserved on-demand generation and download for official refund vouchers without automatic disruptive browser downloads."
+    ]
+  },
+  {
+    version: "v1.6.0",
+    title: "External Registration Action Cleanup & Refund Integrity (RTCO-094)",
+    releaseDate: "2026-09-05",
+    author: "Core Platform Team",
+    notes: [
+      "Removed the Delete action completely from the Approved External Registrations tab.",
+      "Fixed the 'False Financial History Block' allowing proper deletion of Rejected registrations with true zero financial history.",
+      "Implemented a comprehensive Admin Edit Registration workflow for External Registrations preserving existing payment amounts and recalculating balances.",
+      "Ensured proper Email Fallback for Entry Pass notifications when mobile number is absent.",
+      "Fixed a Resident Refund regression where cancelled resident registrations would silently lose refund history upon re-registration.",
+      "Added a persistent Settled Refund History tab capability across all registrations.",
+      "Introduced an official PDF 'Refund Settlement Proof' generated upon refund settlement for rigorous financial auditability."
+    ]
+  },
+  {
     version: "v1.5.9",
     title: "Comprehensive Event Reports Hub, Modal Workspaces & Certificates Directory (RTCO-087)",
     releaseDate: "2026-09-01",
@@ -313,18 +362,20 @@ export default function ReleaseNotesModal({ isOpen, onClose }: ReleaseNotesModal
             });
           });
           
-          // Merge with DEFAULT_NOTES to make sure v1.1.0 and v1.0.0 are always present
+          // Merge with DEFAULT_NOTES to make sure all versions (including updated v1.6.2 and v1.6.1) are always current
           DEFAULT_NOTES.forEach(dn => {
-            if (!list.some(item => item.version === dn.version)) {
+            const idx = list.findIndex(item => item.version === dn.version);
+            if (idx === -1) {
               list.push(dn);
-              // Try to write it back so DB is updated
-              const docId = dn.version.replace('.', '_');
-              setDoc(doc(db, "releaseNotes", docId), dn).catch(() => {});
+            } else if (dn.version === "v1.6.2" || dn.version === "v1.6.1") {
+              list[idx] = dn;
             }
+            const docId = dn.version.replace(/\./g, '_');
+            setDoc(doc(db, "releaseNotes", docId), dn, { merge: true }).catch(() => {});
           });
           
           // Sort list by version descending
-          list.sort((a, b) => b.version.localeCompare(a.version));
+          list.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true, sensitivity: 'base' }));
           setNotesList(list);
         }
       } catch (err) {

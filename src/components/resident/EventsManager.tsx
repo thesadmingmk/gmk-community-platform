@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth, useAuth } from '../../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, writeBatch, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { CommunityEvent, EventRegistration, Family, FamilyMember, ResidentProfile } from '../../types';
+import { CommunityEvent, EventRegistration, EventRegistrationRefund, Family, FamilyMember, ResidentProfile } from '../../types';
 import { Calendar, Check, Clock, AlertCircle, RefreshCw, X, Users, MapPin, ArrowLeft, ChevronDown, ChevronUp, QrCode } from 'lucide-react';
 import { createAuditLog } from '../../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from '../gmk/GEASConfirmationDialog';
@@ -548,17 +548,19 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       // Step B: PREPARE RESIDENT-OWNED PAYLOADS
       
       let nextPaymentStatus = 'pending';
-      let originalAmountPaid = oldReg ? (oldReg.amountReceived || (oldReg.paymentStatus === 'paid' ? oldReg.paymentAmount : 0)) : 0;
+      const originalAmountPaid = oldReg ? (oldReg.amountReceived || 0) : 0;
+      const totalAlreadyRefunded = oldReg ? (oldReg.refundedAmount || 0) : 0;
+      const netPaid = originalAmountPaid - totalAlreadyRefunded;
       let existingAmountDue = oldReg?.amountDue;
       let existingBalanceDue = oldReg?.balanceDue;
-      let refundDue = oldReg?.refundDue || 0;
+      let refundDue = 0;
 
-      if (oldReg && ['paid', 'waived', 'overpaid', 'refund_due', 'approved'].includes(oldReg.paymentStatus!)) {
-        if (pricingResult.totalAmount < originalAmountPaid) {
+      if (oldReg && oldReg.paymentStatus !== 'pending' && oldReg.paymentStatus !== 'cancelled') {
+        if (pricingResult.totalAmount < netPaid) {
           nextPaymentStatus = 'refund_due';
-          refundDue = originalAmountPaid - pricingResult.totalAmount;
-        } else if (pricingResult.totalAmount === originalAmountPaid) {
-          nextPaymentStatus = oldReg.paymentStatus;
+          refundDue = netPaid - pricingResult.totalAmount;
+        } else if (pricingResult.totalAmount === netPaid) {
+          nextPaymentStatus = 'paid';
         } else {
           nextPaymentStatus = 'partially_paid';
         }
@@ -580,7 +582,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
         qrCode: oldReg?.qrCode || null,
         amountReceived: originalAmountPaid,
         amountDue: pricingResult.totalAmount,
+        balanceDue: Math.max(0, pricingResult.totalAmount - netPaid),
         refundDue: refundDue,
+        refundedAmount: totalAlreadyRefunded,
+        refundHistory: oldReg ? (oldReg.refundHistory || []) : [],
         ...(oldReg?.receiptNumber ? { receiptNumber: oldReg.receiptNumber } : {}),
         ...(oldReg?.entryPassNumber ? { entryPassNumber: oldReg.entryPassNumber } : {}),
         ...(oldReg?.paymentProcessedAt ? { paymentProcessedAt: oldReg.paymentProcessedAt } : {}),
@@ -986,16 +991,41 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
 
       const oldRevenue = regData?.paymentAmount || 0;
       const amountReceived = regData?.amountReceived || (regData?.paymentStatus === 'paid' ? regData?.paymentAmount : 0);
-      const isPaid = ['paid', 'waived', 'overpaid', 'refund_due', 'approved', 'partially_paid'].includes(regData?.paymentStatus!);
+      const refundedAmount = regData?.refundedAmount || 0;
+      const netPaid = amountReceived - refundedAmount;
 
       // STEP 3: EXECUTE PRIMARY CANCELLATION (CRITICAL OPERATION)
-      if (isPaid && amountReceived > 0) {
+      if (netPaid > 0) {
         console.log(`[PRIMARY CANCELLATION] Updating event_registrations/${regId} to cancelled/refund_due`);
+        const refundId = `ref_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+        const registrantName = regData?.primaryRegistrantName || (regData?.participants?.[0]) || regData?.primaryMemberEmail || residentProfile?.fullName || 'Resident';
+        const pendingRefundRecord: EventRegistrationRefund = {
+          id: refundId,
+          registrationId: regId,
+          publicReference: regData?.publicReference || '',
+          gmkId: regData?.primaryMemberGmkId || residentProfile.gmkId || '',
+          registrantName: registrantName,
+          eventId: eventId,
+          eventName: title || 'Community Event',
+          amountPaid: amountReceived,
+          amount: netPaid,
+          status: 'pending',
+          refundReason: 'Resident Registration Cancellation',
+          paymentReference: regData?.receiptNumber || '',
+          date: new Date().toISOString(),
+          refundedBy: ''
+        };
+
+        const existingRefundHistory = Array.isArray(regData?.refundHistory) ? regData.refundHistory : [];
+
         await setDoc(regRef, { 
           paymentStatus: 'cancelled',
-          refundDue: amountReceived,
+          refundDue: netPaid,
+          amountReceived: amountReceived, // Preserves actual received amount for audit
           amountDue: 0,
           paymentAmount: 0,
+          refundHistory: [...existingRefundHistory, pendingRefundRecord],
+          entryPassNumber: "",
           updatedAt: new Date().toISOString()
         }, { merge: true });
         console.log(`[PRIMARY CANCELLATION SUCCESS] Registration ${regId} marked as cancelled with refund due.`);
@@ -1186,10 +1216,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                       <div className="flex items-start justify-between">
                         {reg ? (
                           <>
-                            {reg.paymentStatus === 'cancelled' ? (
+                            {(reg.paymentStatus === 'cancelled' || reg.paymentStatus === 'refunded') ? (
                               <span className="flex items-center space-x-1 text-red-800 bg-red-100 border border-red-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
                                 <AlertCircle className="w-3 h-3" />
-                                <span>Cancelled & Refund Pending</span>
+                                <span>{reg.paymentStatus === 'refunded' ? 'Cancelled & Refunded' : 'Cancelled & Refund Pending'}</span>
                               </span>
                             ) : reg.paymentStatus === 'refund_due' ? (
                               <span className="flex items-center space-x-1 text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold font-mono tracking-wider uppercase">
@@ -1248,10 +1278,10 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                     </div>
 
                     <div className="pt-2 border-t border-stone-150 flex flex-col space-y-2 font-heading">
-                      {reg ? (
-                        /* WHEN REGISTRATION IS COMPLETED */
+                      {(reg && reg.paymentStatus !== 'cancelled' && reg.paymentStatus !== 'refunded') ? (
+                        /* WHEN REGISTRATION IS COMPLETED AND ACTIVE */
                         <div className="flex flex-col space-y-2">
-                          {reg.paymentStatus === 'cancelled' || reg.paymentStatus === 'refund_due' ? (
+                          {reg.paymentStatus === 'refund_due' ? (
                             <button
                               type="button"
                               onClick={() => setViewingRegDetails(reg)}
@@ -1354,15 +1384,20 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
               <span>Current Registrations</span>
             </h4>
             
-            {registrations.length === 0 ? (
-              <p className="text-stone-750 font-semibold italic leading-relaxed">
-                You have not registered for any upcoming events yet. Search open registrations on the left to confirm your household participation details.
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {registrations.map(reg => {
-                  const evt = events.find(e => e.id === reg.eventId);
-                  if (!evt) return null;
+            {(() => {
+              const activeRegs = registrations.filter(r => r.paymentStatus !== 'cancelled' && r.paymentStatus !== 'refunded');
+              if (activeRegs.length === 0) {
+                return (
+                  <p className="text-stone-750 font-semibold italic leading-relaxed">
+                    You have not registered for any upcoming events yet. Search open registrations on the left to confirm your household participation details.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-4">
+                  {activeRegs.map(reg => {
+                    const evt = events.find(e => e.id === reg.eventId);
+                    if (!evt) return null;
                   
                   return (
                     <div key={reg.id} className="bg-white border border-stone-250 rounded-2xl p-4 space-y-3 shadow-sm shadow-emerald-950/5">
@@ -1404,8 +1439,9 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
                   );
                 })}
               </div>
-            )}
-          </div>
+            );
+          })()}
+        </div>
         </div>
 
       </div>

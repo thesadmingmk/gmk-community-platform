@@ -1,6 +1,8 @@
 import FinanceWorkspace from "./FinanceWorkspace";
 import RegistrationReportingWorkspace from "./RegistrationReportingWorkspace";
 import AttendanceWorkspace from "./AttendanceWorkspace";
+import { formatExternalGmkId, resolveEventDetails } from '../utils/gmkIdHelper';
+import { NotificationService } from '../services/NotificationService';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { jsPDF } from 'jspdf';
@@ -36,7 +38,10 @@ import {
   Family,
   FamilyMember,
   PaymentAccount,
-  EventPricingConfig
+  EventPricingConfig,
+  ExternalRegistrationSettings,
+  ExternalRegistrationTypeConfig,
+  hasGenuineFinancialHistory
 } from '../types';
 import { 
   Calendar, 
@@ -100,34 +105,69 @@ const MONTH_NAMES = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ];
 
+function getOmanDateTimeParts(iso: string): { year: number; month: number; day: number; hour: number; minute: number } {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) {
+    return { year: 2026, month: 8, day: 1, hour: 9, minute: 0 };
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Muscat",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false
+  }).formatToParts(d);
+  const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value || "0", 10);
+  let hour = get("hour");
+  if (hour === 24) hour = 0;
+  return {
+    year: get("year"),
+    month: get("month") - 1, // 0-indexed month
+    day: get("day"),
+    hour,
+    minute: get("minute")
+  };
+}
+
+function omanToUTCISO(year: number, monthIdx: number, day: number, hour: number, minute: number): string {
+  // Asia/Muscat is UTC+4 year-round (no daylight saving time)
+  const ms = Date.UTC(year, monthIdx, day, hour - 4, minute, 0);
+  return new Date(ms).toISOString();
+}
+
 function formatISOToDateInput(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  const day = d.getDate();
-  const m = MONTH_NAMES[d.getMonth()];
-  const y = d.getFullYear();
-  return `${day} ${m} ${y}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Muscat",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).formatToParts(d);
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const year = parts.find(p => p.type === 'year')?.value || '';
+  return `${day} ${month} ${year}`;
 }
 
 function formatISOToTimeInput(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  let hr = d.getHours();
-  const mn = d.getMinutes().toString().padStart(2, '0');
-  const ampm = hr >= 12 ? "PM" : "AM";
-  hr = hr % 12;
-  if (hr === 0) hr = 12;
-  return `${hr}:${mn} ${ampm}`;
+  return d.toLocaleTimeString("en-US", {
+    timeZone: "Asia/Muscat",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
 }
 
-function parseTypedDate(str: string): Date | null {
+function parseTypedDate(str: string): { year: number; month: number; day: number } | null {
   const clean = str.trim();
   if (!clean) return null;
-  
-  const firstTry = new Date(clean);
-  if (!isNaN(firstTry.getTime())) return firstTry;
   
   const regex = /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/;
   const match = clean.match(regex);
@@ -138,8 +178,17 @@ function parseTypedDate(str: string): Date | null {
     
     const monthIdx = MONTH_NAMES.findIndex(m => monthStr.startsWith(m.toLowerCase()));
     if (monthIdx >= 0 && day >= 1 && day <= 31 && year >= 2000 && year <= 2100) {
-      return new Date(year, monthIdx, day);
+      return { year, month: monthIdx, day };
     }
+  }
+
+  const d = new Date(clean);
+  if (!isNaN(d.getTime())) {
+    return {
+      year: d.getFullYear(),
+      month: d.getMonth(),
+      day: d.getDate()
+    };
   }
   return null;
 }
@@ -165,30 +214,26 @@ function parseTypedTime(str: string): { hour: number; minute: number } | null {
   return null;
 }
 
-function mergeDateAndISO(dateObj: Date, originalISO: string): string {
-  const original = originalISO ? new Date(originalISO) : new Date();
-  const merged = new Date(
-    dateObj.getFullYear(),
-    dateObj.getMonth(),
-    dateObj.getDate(),
-    isNaN(original.getTime()) ? 9 : original.getHours(),
-    isNaN(original.getTime()) ? 0 : original.getMinutes(),
-    0
+function mergeDateAndISO(dateObj: { year: number; month: number; day: number }, originalISO: string): string {
+  const current = getOmanDateTimeParts(originalISO);
+  return omanToUTCISO(
+    dateObj.year,
+    dateObj.month,
+    dateObj.day,
+    current.hour,
+    current.minute
   );
-  return merged.toISOString();
 }
 
 function mergeTimeAndISO(timeObj: { hour: number; minute: number }, originalISO: string): string {
-  const original = originalISO ? new Date(originalISO) : new Date();
-  const merged = new Date(
-    isNaN(original.getTime()) ? new Date().getFullYear() : original.getFullYear(),
-    isNaN(original.getTime()) ? new Date().getMonth() : original.getMonth(),
-    isNaN(original.getTime()) ? new Date().getDate() : original.getDate(),
+  const current = getOmanDateTimeParts(originalISO);
+  return omanToUTCISO(
+    current.year,
+    current.month,
+    current.day,
     timeObj.hour,
-    timeObj.minute,
-    0
+    timeObj.minute
   );
-  return merged.toISOString();
 }
 
 function CompactEditableInput({ 
@@ -448,6 +493,10 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   // External participant states (Sprint GMK-ARCH-002)
   const [configAllowExternal, setConfigAllowExternal] = useState<boolean>(false);
   const [configExternalRate, setConfigExternalRate] = useState<number>(0);
+
+  // RTCO-088: Generic External Event Registrations
+  const [configExternalEnabled, setConfigExternalEnabled] = useState<boolean>(false);
+  const [configExternalTypes, setConfigExternalTypes] = useState<ExternalRegistrationTypeConfig[]>([]);
 
   // Managed Program Highlights
   const [configHighlights, setConfigHighlights] = useState<string[]>([]);
@@ -857,6 +906,12 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         isSaved: acc.isSaved !== undefined ? acc.isSaved : true
       }));
       setConfigPaymentAccounts(existingAccounts);
+
+      // Sync External Registration Settings (RTCO-088)
+      const extSettings = activeEvent.externalRegistrationSettings;
+      setConfigExternalEnabled(extSettings?.enabled === true);
+      setConfigExternalTypes(extSettings?.types ? [...extSettings.types] : []);
+
       setIsTimelinesEditing(false);
       setExplicitCompletion(false);
     }
@@ -2009,7 +2064,9 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
       isFinanceApprovedAuto !== origChkFinApp ||
       isPresApprovedAuto !== origChkPres ||
       chkCertificatesGenerated !== origChkCert ||
-      JSON.stringify(configPaymentAccounts) !== JSON.stringify(activeEvent?.paymentTransferAccounts || [])
+      JSON.stringify(configPaymentAccounts) !== JSON.stringify(activeEvent?.paymentTransferAccounts || []) ||
+      configExternalEnabled !== (activeEvent?.externalRegistrationSettings?.enabled === true) ||
+      JSON.stringify(configExternalTypes) !== JSON.stringify(activeEvent?.externalRegistrationSettings?.types || [])
     );
   };
 
@@ -2021,11 +2078,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   };
 
   const handleEventDateChange = (newISO: string) => {
-    const parsedDate = new Date(newISO);
-    if (!isNaN(parsedDate.getTime())) {
-      const updatedStart = mergeDateAndISO(parsedDate, configEventStart);
-      const updatedEnd = mergeDateAndISO(parsedDate, configEventEnd);
-      setConfigEventStart(updatedStart);
+    setConfigEventStart(newISO);
+    if (configEventEnd) {
+      const startParts = getOmanDateTimeParts(newISO);
+      const endParts = getOmanDateTimeParts(configEventEnd);
+      const updatedEnd = omanToUTCISO(startParts.year, startParts.month, startParts.day, endParts.hour, endParts.minute);
       setConfigEventEnd(updatedEnd);
     }
   };
@@ -2097,7 +2154,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
         },
         configurationStatus: 'completed',
         highlights: configHighlights,
-        paymentTransferAccounts: configPaymentAccounts
+        paymentTransferAccounts: configPaymentAccounts,
+        externalRegistrationSettings: {
+          enabled: configExternalEnabled,
+          types: configExternalTypes
+        }
       };
 
       const eventDocRef = doc(db, "events", selectedEventId);
@@ -5968,29 +6029,47 @@ const handleDownloadPDF = () => {
 
       if (data && data.success) {
         if (data.paymentStatus === 'paid' || data.paymentStatus === 'waived' || data.paymentStatus === 'overpaid') {
-          try {
-            await addDoc(collection(db, "emailQueue"), {
-              to: paymentModalReg.primaryMemberEmail,
-              template: "payment_receipt_entry_pass",
-              notificationType: "ENTRY_PASS",
-              status: "pending",
-              attempts: 0,
-              createdAt: new Date().toISOString(),
-              data: {
-                residentName: paymentModalReg.participants?.[0] || paymentModalReg.primaryMemberEmail,
-                gmkId: paymentModalReg.primaryMemberGmkId || '',
-                eventName: activeEvent?.title || 'Community Event',
-                eventDate: activeEvent?.date || '',
+          const recipientEmail = (paymentModalReg.primaryRegistrantEmail || paymentModalReg.primaryMemberEmail || '').trim().toLowerCase();
+          if (recipientEmail) {
+            try {
+              const eventDetails = resolveEventDetails(activeEvent);
+              const category = paymentModalReg.isExternal
+                ? (
+                    paymentModalReg.externalRegistrationTypeName ||
+                    activeEvent?.externalRegistrationSettings?.types?.find((t: any) => t.id === paymentModalReg.externalRegistrationTypeId)?.name ||
+                    paymentModalReg.category ||
+                    paymentModalReg.registrationTypeName ||
+                    'External Guest'
+                  )
+                : (
+                    paymentModalReg.category ||
+                    paymentModalReg.registrationTypeName ||
+                    'Resident'
+                  );
+
+              await NotificationService.sendPaymentReceiptEntryPass(recipientEmail, {
+                residentName: paymentModalReg.primaryRegistrantName || paymentModalReg.participants?.[0] || paymentModalReg.primaryMemberEmail || 'Guest',
+                recipientName: paymentModalReg.primaryRegistrantName || paymentModalReg.participants?.[0] || paymentModalReg.primaryMemberEmail || 'Guest',
+                gmkId: formatExternalGmkId(paymentModalReg.publicReference) || paymentModalReg.primaryMemberGmkId || '',
+                eventName: eventDetails.eventName,
+                eventDate: eventDetails.eventDate,
+                eventTime: eventDetails.eventTime,
+                eventVenue: eventDetails.eventVenue,
+                venue: eventDetails.eventVenue,
+                category,
+                registrationTypeName: category,
+                totalParticipants: paymentModalReg.totalParticipants || (paymentModalReg.participants ? paymentModalReg.participants.length : 1),
                 amountReceived: amtRec,
                 receiptNumber: data.receiptNumber || '',
                 entryPassNumber: data.entryPassNumber || '',
-                paymentStatus: data.paymentStatus
-              },
-              isTemplate: false
-            });
-            console.log("[EMAIL-QUEUE] Successfully enqueued email for", paymentModalReg.primaryMemberEmail);
-          } catch (emailErr) {
-            console.error("[EMAIL-QUEUE] Failed to enqueue email:", emailErr);
+                paymentStatus: data.paymentStatus,
+                isExternal: paymentModalReg.isExternal || false,
+                publicReference: formatExternalGmkId(paymentModalReg.publicReference) || paymentModalReg.publicReference || paymentModalReg.id
+              });
+              console.log("[EMAIL-QUEUE] Successfully enqueued payment receipt & entry pass email for", recipientEmail);
+            } catch (emailErr) {
+              console.error("[EMAIL-QUEUE] Failed to enqueue email:", emailErr);
+            }
           }
         }
 
@@ -6013,7 +6092,7 @@ const handleDownloadPDF = () => {
   const handleGateCheckInSubmit = async (reg: EventRegistration) => {
     if (!reg || !selectedEventId) return;
 
-    const gmkId = reg.primaryMemberGmkId || reg.id.split('_')?.[1];
+    const gmkId = formatExternalGmkId(reg.publicReference) || reg.primaryMemberGmkId || reg.id.split('_')?.[1] || reg.id;
     if (!gmkId) {
       setErrorMsg("Cannot process check-in: Missing GMK ID on registration.");
       return;
@@ -6381,7 +6460,7 @@ const handleDownloadPDF = () => {
             <FinanceWorkspace
               activeEvent={activeEvent}
               events={events}
-              registrations={registrations}
+              registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r) || (r.amountReceived && r.amountReceived > 0) || (r.refundDue && r.refundDue > 0) || r.paymentStatus === 'cancelled' || r.paymentStatus === 'refunded' || r.paymentStatus === 'refund_due')}
               eventFinance={eventFinance}
               setPaymentModalReg={setPaymentModalReg}
               handleUpdateFinance={handleUpdateFinance}
@@ -7294,6 +7373,261 @@ const handleDownloadPDF = () => {
                             </div>
                           );
                         })}
+                      </div>
+                    )}
+                  </GMKCard>
+
+                  {/* SECTION: EXTERNAL REGISTRATIONS (RTCO-088) */}
+                  <GMKCard className="p-6 bg-white border border-stone-200 space-y-5">
+                    <div className="border-b border-stone-150 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h4 className="font-extrabold text-[#0f4c2a] text-xs uppercase tracking-wider font-heading">
+                            EXTERNAL REGISTRATIONS
+                          </h4>
+                          <span className={`px-2 py-0.5 text-[9px] font-bold rounded-md uppercase tracking-wider ${
+                            configExternalEnabled
+                              ? 'bg-emerald-100 text-emerald-850 border border-emerald-300'
+                              : 'bg-stone-100 text-stone-600 border border-stone-200'
+                          }`}>
+                            {configExternalEnabled ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                          Configure dynamic public registration categories for non-residents, partner groups, and corporate guests (e.g. Team Greens, Apollo Hospital Staff).
+                        </p>
+                      </div>
+
+                      {/* Active / Inactive Toggle Switch */}
+                      <div className="flex items-center space-x-2 bg-stone-100 p-1 rounded-xl border border-stone-200 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => setConfigExternalEnabled(false)}
+                          disabled={configStatus === 'completed'}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            !configExternalEnabled
+                              ? 'bg-white text-stone-900 shadow-xs border border-stone-200'
+                              : 'text-stone-500 hover:text-stone-800'
+                          }`}
+                        >
+                          Inactive
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfigExternalEnabled(true)}
+                          disabled={configStatus === 'completed'}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            configExternalEnabled
+                              ? 'bg-[#0f4c2a] text-white shadow-xs'
+                              : 'text-stone-500 hover:text-stone-800'
+                          }`}
+                        >
+                          Active
+                        </button>
+                      </div>
+                    </div>
+
+                    {!configExternalEnabled ? (
+                      <div className="p-4 text-center text-stone-500 font-medium text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl space-y-1">
+                        <p className="font-bold text-stone-700">External Registrations are currently Inactive.</p>
+                        <p className="text-[11px] text-stone-400">
+                          No external registration access is available publicly. Any saved categories below remain preserved and will become available when activated.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-stone-700 uppercase tracking-wider">
+                            Configured Registration Types ({configExternalTypes.length})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newId = `ext_type_${Date.now()}`;
+                              const activePolicyRef = getPolicyMetadata(activeEvent, activeEvent?.pricing).ref;
+                              setConfigExternalTypes(prev => [
+                                ...prev,
+                                {
+                                  id: newId,
+                                  name: '',
+                                  entryType: 'family',
+                                  pricingPolicyRef: activePolicyRef,
+                                  fixedCostPerParticipant: 0,
+                                  isActive: true,
+                                  createdAt: new Date().toISOString()
+                                }
+                              ]);
+                            }}
+                            disabled={configStatus === 'completed'}
+                            className="px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-1 disabled:opacity-50"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Registration Type</span>
+                          </button>
+                        </div>
+
+                        {configExternalTypes.length === 0 ? (
+                          <div className="p-6 text-center text-stone-500 font-medium text-xs bg-stone-50 border border-dashed border-stone-200 rounded-2xl space-y-2">
+                            <p className="font-bold text-stone-700">No external registration types configured yet.</p>
+                            <p className="text-[11px] text-stone-400">
+                              Click "+ Add Registration Type" to configure categories such as Team Greens, Apollo Hospital, Corporate Guests, or Partner Organizations.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {configExternalTypes.map((extType, index) => {
+                              return (
+                                <div key={extType.id || index} className="p-4 bg-stone-50/70 border border-stone-200 rounded-2xl space-y-4">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-200/80 pb-2 gap-2">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-[10px] uppercase font-black text-[#0f4c2a] font-heading">
+                                        Type #{index + 1}
+                                      </span>
+                                      <span className="text-stone-300">•</span>
+                                      <span className="text-xs font-bold text-stone-850">
+                                        {extType.name.trim() || 'Untitled Registration Type'}
+                                      </span>
+                                      <span className={`px-2 py-0.5 text-[9px] font-bold rounded-md uppercase tracking-wider ${
+                                        extType.entryType === 'family'
+                                          ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                          : 'bg-purple-50 text-purple-800 border border-purple-200'
+                                      }`}>
+                                        {extType.entryType === 'family' ? 'Family' : 'Single'}
+                                      </span>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setConfigExternalTypes(prev => prev.filter((_, i) => i !== index));
+                                      }}
+                                      disabled={configStatus === 'completed'}
+                                      className="text-red-600 hover:text-red-800 text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer self-end sm:self-auto"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                    {/* 1. Registration Name */}
+                                    <div>
+                                      <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">
+                                        Registration Name <span className="text-red-500">*</span>
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="e.g. Team Greens, Apollo Hospital, Staff, Guests"
+                                        value={extType.name || ''}
+                                        disabled={configStatus === 'completed'}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setConfigExternalTypes(prev => prev.map((item, i) => i === index ? { ...item, name: val } : item));
+                                        }}
+                                        className="w-full bg-white border border-stone-200 p-2.5 rounded-xl text-stone-850 font-bold focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100 disabled:text-stone-500"
+                                      />
+                                      <p className="text-[8px] text-stone-400 font-semibold mt-1">
+                                        Enter the specific group or organization name. This is displayed dynamically to registrants.
+                                      </p>
+                                    </div>
+
+                                    {/* 2. Entry Type */}
+                                    <div>
+                                      <label className="block text-[9px] uppercase font-black text-stone-500 mb-1">
+                                        Entry Type <span className="text-red-500">*</span>
+                                      </label>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const activePolicyRef = getPolicyMetadata(activeEvent, activeEvent?.pricing).ref;
+                                            setConfigExternalTypes(prev => prev.map((item, i) => i === index ? { ...item, entryType: 'family', pricingPolicyRef: activePolicyRef } : item));
+                                          }}
+                                          disabled={configStatus === 'completed'}
+                                          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all text-center border cursor-pointer ${
+                                            extType.entryType === 'family'
+                                              ? 'bg-white border-[#0f4c2a] text-[#0f4c2a] shadow-xs font-black'
+                                              : 'bg-stone-50 border-stone-250 text-stone-600 hover:bg-white'
+                                          }`}
+                                        >
+                                          Family
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setConfigExternalTypes(prev => prev.map((item, i) => i === index ? { ...item, entryType: 'single', fixedCostPerParticipant: item.fixedCostPerParticipant ?? 0 } : item));
+                                          }}
+                                          disabled={configStatus === 'completed'}
+                                          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all text-center border cursor-pointer ${
+                                            extType.entryType === 'single'
+                                              ? 'bg-white border-[#0f4c2a] text-[#0f4c2a] shadow-xs font-black'
+                                              : 'bg-stone-50 border-stone-250 text-stone-600 hover:bg-white'
+                                          }`}
+                                        >
+                                          Single
+                                        </button>
+                                      </div>
+                                      <p className="text-[8px] text-stone-400 font-semibold mt-1">
+                                        Select whether registrants register as families or individual participants.
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* Dynamic Configuration based on Entry Type */}
+                                  {extType.entryType === 'family' ? (
+                                    <div className="p-3.5 bg-blue-50/70 border border-blue-150 rounded-xl space-y-1.5 text-xs text-blue-900">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-extrabold text-[10.5px] uppercase tracking-wider text-blue-950 flex items-center gap-1.5">
+                                          <span>Applicable Pricing Policy</span>
+                                          <span className="px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 text-[9px] font-mono font-bold rounded">
+                                            {getPolicyMetadata(activeEvent, activeEvent?.pricing).ref}
+                                          </span>
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-blue-800 font-medium leading-relaxed">
+                                        Reuses the active GMK Event Pricing Policy for this gathering. Family rates apply automatically:
+                                        Single (OMR {configIndividualFee.toFixed(3)}), Couple (OMR {configCoupleFee.toFixed(3)}), Family Cap (OMR {configFamilyFee.toFixed(3)}), Children brackets (&lt;{configFreeChildAge} free, &lt;{configHalfChildAge} 50%), Parents (OMR {configParentFee.toFixed(3)}), and Others (OMR {configOtherFee.toFixed(3)}).
+                                      </p>
+                                      <p className="text-[9.5px] text-blue-700 font-semibold italic">
+                                        The registration form will capture Primary Registrant, Spouse, Children (with YOB), Parents, and Others. No Guest category is allowed.
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <div className="p-3.5 bg-purple-50/70 border border-purple-150 rounded-xl space-y-3 text-xs text-purple-900">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div>
+                                          <label className="block text-[9px] uppercase font-black text-purple-950 mb-1">
+                                            Cost per Participant (OMR) <span className="text-red-500">*</span>
+                                          </label>
+                                          <div className="relative w-48">
+                                            <span className="absolute inset-y-0 left-0 pl-3 flex items-center font-bold text-xs text-stone-500 pointer-events-none">
+                                              OMR
+                                            </span>
+                                            <input
+                                              type="number"
+                                              step="0.100"
+                                              min="0"
+                                              placeholder="0.000"
+                                              value={extType.fixedCostPerParticipant ?? 0}
+                                              disabled={configStatus === 'completed'}
+                                              onChange={(e) => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                setConfigExternalTypes(prev => prev.map((item, i) => i === index ? { ...item, fixedCostPerParticipant: val } : item));
+                                              }}
+                                              className="w-full bg-white border border-purple-250 pl-14 pr-3 py-2 rounded-xl text-purple-950 font-mono font-bold text-xs focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] disabled:bg-stone-100"
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <p className="text-[10px] text-purple-800 font-medium leading-relaxed">
+                                        Fixed cost charged per individual participant. The registration form captures Full Name, Email, Mobile Number, WhatsApp Number, and a <strong>reusable Unit / Flat / Room Number</strong> (multiple individuals can register separately under the same unit).
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </GMKCard>
@@ -8966,7 +9300,7 @@ const handleDownloadPDF = () => {
                             {attendanceTab !== 'expenses' && (
                               <AttendanceWorkspace 
                                 activeEvent={activeEvent}
-                                registrations={registrations}
+                                registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved')}
                                 attendances={activeAttendances}
                                 families={families}
                                 familyMembers={familyMembers}
@@ -10928,7 +11262,7 @@ const handleDownloadPDF = () => {
                   )}
                   <RegistrationReportingWorkspace
                     events={events}
-                    registrations={registrations}
+                    registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
                     families={families}
                     familyMembers={familyMembers}
                     activeEvent={activeEvent}
@@ -11186,15 +11520,32 @@ const handleDownloadPDF = () => {
             </div>
             
             <div className="p-6 space-y-4">
+              <div className="flex justify-between items-center bg-stone-50 p-3 rounded-xl border border-stone-200">
+                <div>
+                  <label className="text-[9px] font-black uppercase text-stone-500 block mb-0.5">Registration Total</label>
+                  <div className="text-sm font-black text-stone-700 font-mono">
+                    OMR {(paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0).toFixed(3)}
+                  </div>
+                </div>
+                {(paymentModalReg.amountReceived || 0) > 0 && (
+                  <div className="text-right">
+                    <label className="text-[9px] font-black uppercase text-emerald-600 block mb-0.5">Already Paid</label>
+                    <div className="text-sm font-black text-emerald-700 font-mono">
+                      OMR {(paymentModalReg.amountReceived || 0).toFixed(3)}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
               <div>
-                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Amount Due</label>
+                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Outstanding Balance</label>
                 <div className="text-xl font-black text-rose-700 font-mono">
-                  OMR {(paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0).toFixed(3)}
+                  OMR {Math.max(0, (paymentModalReg.amountDue ?? paymentModalReg.paymentAmount ?? paymentModalReg.paymentSummary?.totalAmount ?? 0) - (paymentModalReg.amountReceived || 0)).toFixed(3)}
                 </div>
               </div>
               
               <div>
-                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">Amount Received (OMR)</label>
+                <label className="text-[10px] font-black uppercase text-stone-600 block mb-1">New Payment Received (OMR)</label>
                 <input
                   type="number"
                   step="0.001"
@@ -11229,7 +11580,7 @@ const handleDownloadPDF = () => {
                 </button>
                 <button
                   type="button"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !paymentModalAmtRec || isNaN(parseFloat(paymentModalAmtRec)) || parseFloat(paymentModalAmtRec) <= 0}
                   onClick={handleRecordPaymentSubmit}
                   className="flex-1 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
                 >
@@ -11281,7 +11632,7 @@ const handleDownloadPDF = () => {
             <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-stone-50/50">
               <RegistrationReportingWorkspace
                 events={events}
-                registrations={registrations}
+                registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
                 families={families}
                 familyMembers={familyMembers}
                 activeEvent={activeEvent}

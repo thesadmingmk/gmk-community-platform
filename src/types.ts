@@ -123,6 +123,24 @@ export interface CommunityEvent {
   registrationSettings?: any;
   configurationStatus?: string;
   paymentTransferAccounts?: PaymentAccount[];
+  externalRegistrationSettings?: ExternalRegistrationSettings;
+}
+
+export interface ExternalRegistrationTypeConfig {
+  id: string; // Unique identifier, e.g. "ext_type_1725281234567"
+  name: string; // Dynamic name entered by Event Director (e.g. "Team Greens", "Apollo Hospital Staff")
+  entryType: 'family' | 'single';
+  pricingPolicyRef?: string; // Reference of GMK pricing policy applied for Family
+  fixedCostPerParticipant?: number; // Direct fixed amount in OMR for Single (e.g. 5.000)
+  isActive?: boolean;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ExternalRegistrationSettings {
+  enabled: boolean;
+  types: ExternalRegistrationTypeConfig[];
 }
 
 export interface PaymentAccount {
@@ -155,17 +173,47 @@ export interface EventTimelineEntry {
   timestamp: string;
 }
 
+export interface EventRegistrationParticipantDetail {
+  name: string;
+  role: 'primary' | 'spouse' | 'child' | 'parent' | 'other' | 'single';
+  yearOfBirth?: string; // Stored for children to compute age brackets (Kids 0-3, 4-9, 10+, Adult)
+  age?: number;
+  unitNumber?: string;
+}
+
+
+export interface EventRegistrationRefund {
+  id: string;
+  amount: number;
+  date: string;
+  refundedBy: string;
+  settlementMethod?: string;
+  settlementReference?: string;
+  remarks?: string;
+  status: 'settled' | 'pending';
+  registrationId?: string;
+  publicReference?: string;
+  gmkId?: string;
+  registrantName?: string;
+  eventId?: string;
+  eventName?: string;
+  amountPaid?: number;
+  refundReason?: string;
+  paymentReference?: string;
+}
+
 export interface EventRegistration {
-  id: string; // reg_${gmkId}_${eventId}
+  id: string; // reg_${gmkId}_${eventId} or reg_ext_${eventId}_${uniqueKey}
+  publicReference?: string; // e.g. GMKG-XXXXXX for external guests
   eventId: string;
-  familyId: string;
-  primaryMemberGmkId: string;
+  familyId?: string;
+  primaryMemberGmkId?: string;
   primaryMemberEmail: string;
   participants: string[]; // List of participating names, e.g. ["Mr. Primary Name", "Mrs. Spouse Name"]
   totalParticipants: number;
   createdAt: string;
   updatedAt: string;
-  registrationType?: 'individual' | 'couple' | 'family';
+  registrationType?: 'individual' | 'couple' | 'family' | 'single';
   paymentAmount?: number;
   paymentStatus?: 'pending' | 'paid' | 'partially_paid' | 'overpaid' | 'refund_due' | 'waived' | 'approved' | 'cancelled' | 'refunded';
   amountReceived?: number;
@@ -173,6 +221,8 @@ export interface EventRegistration {
   balanceDue?: number;
   refundDue?: number;
   refundedAmount?: number;
+  refundHistory?: EventRegistrationRefund[];
+  paymentHistory?: Array<{ amount?: number; status?: string; [key: string]: any }>;
   financeRemarks?: string;
   paymentProcessedAt?: string;
   paymentProcessedBy?: string;
@@ -187,17 +237,68 @@ export interface EventRegistration {
     totalAmount: number;
     details: string;
     parentsCount?: number;
+    othersCount?: number;
     externalParticipantsCount?: number;
     externalParticipantRate?: number;
     externalSubtotal?: number;
     includedMembers?: string[];
     parentMembers?: string[];
+    pricingPolicyRef?: string;
     timestamp?: string;
   };
   attendanceSummary?: {
     attendedCount: number;
     participantsStatus: Record<string, 'pending' | 'attended' | 'absent'>;
   };
+  // RTCO-088 Generic External Event Registrations
+  registrationSource?: 'resident' | 'external';
+  isExternal?: boolean;
+  externalRegistrationTypeId?: string;
+  externalRegistrationTypeName?: string; // Dynamic ED-configured name e.g. "Team Greens", "Apollo Hospital Staff"
+  category?: string;
+  registrationTypeName?: string;
+  entryType?: 'family' | 'single';
+  primaryRegistrantName?: string;
+  primaryRegistrantEmail?: string;
+  primaryRegistrantPhone?: string;
+  primaryRegistrantWhatsapp?: string;
+  phoneCountryCode?: string;
+  whatsappCountryCode?: string;
+  unitNumber?: string; // Reusable unit number for Single entry type
+  participantDetails?: EventRegistrationParticipantDetail[];
+  workflowStatus?: 'submitted' | 'admin_review' | 'admin_approved' | 'awaiting_payment' | 'finance_review' | 'payment_confirmed' | 'qr_generated' | 'attended';
+  adminReviewStatus?: 'pending' | 'approved' | 'rejected';
+  adminReviewedAt?: string;
+  adminReviewedBy?: string;
+  adminReviewNotes?: string;
+
+  // RTCO-090 Universal WhatsApp Entry Pass Delivery Architecture & Duplicate Protection
+  entryPassNotificationStatus?: 'none' | 'pending' | 'sent' | 'failed';
+  entryPassNotificationSentAt?: string;
+  entryPassNotificationRecipient?: string;
+  entryPassNotificationMessageId?: string;
+  entryPassNotificationError?: string;
+
+  // RTCO-091 External Registration Update Delivery Architecture & Duplicate Protection
+  registrationUpdateNotificationStatus?: 'none' | 'pending' | 'sent' | 'failed';
+  registrationUpdateNotificationSentAt?: string;
+  registrationUpdateNotificationRecipient?: string;
+  registrationUpdateNotificationMessageId?: string;
+  registrationUpdateNotificationError?: string;
+
+  // RTCO-095 Email Delivery Architecture Fields
+  approvalEmailSentAt?: string | null;
+  approvalEmailRecipient?: string | null;
+  entryPassEmailSentAt?: string | null;
+  entryPassEmailRecipient?: string | null;
+
+  // RTCO-098 Operational Cleanup / Archival for External Registrations
+  operationalStatus?: 'active' | 'cleaned_up' | 'archived';
+  isOperationalCleanedUp?: boolean;
+  cleanedUpAt?: string | null;
+  cleanedUpBy?: string | null;
+  restoredAt?: string | null;
+  restoredBy?: string | null;
 }
 
 export interface CommunityAnnouncement {
@@ -516,3 +617,79 @@ export interface SponsorMaster {
   createdAt: string;
   updatedAt?: string;
 }
+
+/**
+ * RTCO-095 Authoritative Financial History Check
+ * 
+ * Determines whether an event registration has genuine financial history
+ * that MUST be preserved for audit purposes.
+ * 
+ * Returns TRUE if and only if:
+ * 1. Positive payment has actually been received (amountReceived > 0)
+ * 2. Positive refund has actually been issued (refundedAmount > 0)
+ * 3. Pending refund exists (refundDue > 0)
+ * 4. Refund history contains meaningful transactions (> 0 amount or settled/pending/processing status)
+ * 5. Payment transaction or receipt has been recorded (receiptNumber or paymentProcessedAt)
+ * 6. Payment history contains completed or paid records
+ * 
+ * Crucially: Quoted ticket price without payment (e.g. paymentAmount: 25 with amountReceived: 0),
+ * cancelled status without cash transactions, empty arrays, null, or zero values
+ * DO NOT constitute financial history and must not block deletion of rejected registrations.
+ */
+export function hasGenuineFinancialHistory(reg: EventRegistration): boolean {
+  if (!reg) return false;
+
+  // 1. Positive payment received
+  if (typeof reg.amountReceived === 'number' && reg.amountReceived > 0) {
+    return true;
+  }
+
+  // 2. Positive refund issued
+  if (typeof reg.refundedAmount === 'number' && reg.refundedAmount > 0) {
+    return true;
+  }
+
+  // 3. Pending refund due
+  if (typeof reg.refundDue === 'number' && reg.refundDue > 0) {
+    return true;
+  }
+
+  // 4. Refund history contains meaningful transactions
+  if (Array.isArray(reg.refundHistory) && reg.refundHistory.length > 0) {
+    const hasMeaningfulRefund = reg.refundHistory.some(r => 
+      (typeof r.amount === 'number' && r.amount > 0) || 
+      r.status === 'settled' || 
+      r.status === 'pending' || 
+      r.status === 'processing'
+    );
+    if (hasMeaningfulRefund) return true;
+  }
+
+  // 5. Payment transaction or receipt recorded
+  if (typeof reg.receiptNumber === 'string' && reg.receiptNumber.trim() !== '') {
+    return true;
+  }
+  if (typeof reg.paymentProcessedAt === 'string' && reg.paymentProcessedAt.trim() !== '') {
+    return true;
+  }
+
+  // 6. Payment history contains non-zero transactions
+  if (Array.isArray(reg.paymentHistory) && reg.paymentHistory.length > 0) {
+    const hasMeaningfulPayment = reg.paymentHistory.some(p => 
+      (typeof p.amount === 'number' && p.amount > 0) || 
+      p.status === 'completed' || 
+      p.status === 'paid'
+    );
+    if (hasMeaningfulPayment) return true;
+  }
+
+  // 7. Payment status indicates settled funds with associated financial figures
+  if (reg.paymentStatus === 'paid' || reg.paymentStatus === 'partially_paid' || reg.paymentStatus === 'overpaid' || reg.paymentStatus === 'refunded' || reg.paymentStatus === 'refund_due') {
+    if ((typeof reg.amountReceived === 'number' && reg.amountReceived > 0) || (typeof reg.refundedAmount === 'number' && reg.refundedAmount > 0)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+

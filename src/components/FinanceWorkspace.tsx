@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { CommunityEvent, EventRegistration, EventCommittee, Family, FamilyMember, EventCommitteeExpense, ResidentProfile } from '../types';
+import { CommunityEvent, EventRegistration, EventRegistrationRefund, EventCommittee, Family, FamilyMember, EventCommitteeExpense, ResidentProfile } from '../types';
 import RegistrationReportingWorkspace from './RegistrationReportingWorkspace';
 import { 
   TrendingUp, 
@@ -20,6 +20,7 @@ import {
   Trash2, 
   Edit3, 
   Download,
+  FileDown,
   Info,
   ShieldCheck,
   User,
@@ -44,6 +45,8 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { createAuditLog } from '../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
+import { NotificationService } from '../services/NotificationService';
+import { resolveEventDetails, formatExternalGmkId, isExternalGmkId } from '../utils/gmkIdHelper';
 
 export function formatCategoryLabel(rawIdOrName?: string | null): string {
   if (!rawIdOrName) return 'Event';
@@ -217,7 +220,7 @@ export function getRegistrationCollectedAmount(r: EventRegistration): number {
 export default function FinanceWorkspace({
   activeEvent,
   events,
-  registrations,
+  registrations: allRegistrations,
   eventFinance,
   handleUpdateFinance,
   profile,
@@ -231,6 +234,10 @@ export default function FinanceWorkspace({
   onDeleteRegistration,
   isSubmitting = false
 }: FinanceWorkspaceProps) {
+  const registrations = useMemo(() => allRegistrations.filter(r => 
+    r.operationalStatus !== 'cleaned_up' && r.isOperationalCleanedUp !== true
+  ), [allRegistrations]);
+
   const [financeTab, setFinanceTab] = useState<'summary' | 'events' | 'income' | 'budgets' | 'expenses' | 'refunds' | 'reports'>('summary');
   const [finSearchQuery, setFinSearchQuery] = useState('');
   const [isFinanceSubmitting, setIsFinanceSubmitting] = useState(false);
@@ -293,6 +300,12 @@ export default function FinanceWorkspace({
   const [settleMethodInput, setSettleMethodInput] = useState<string>('Bank Transfer');
   const [settleRefInput, setSettleRefInput] = useState<string>('');
   const [settleRemarksInput, setSettleRemarksInput] = useState<string>('');
+
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundingReg, setRefundingReg] = useState<EventRegistration | null>(null);
+  const [refundMethodInput, setRefundMethodInput] = useState<string>('Bank Transfer');
+  const [refundRefInput, setRefundRefInput] = useState<string>('');
+  const [refundRemarksInput, setRefundRemarksInput] = useState<string>('');
 
   const [isSponsorshipModalOpen, setIsSponsorshipModalOpen] = useState(false);
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
@@ -1259,50 +1272,319 @@ export default function FinanceWorkspace({
     }
   };
 
-  const handleProcessRefund = async (reg: EventRegistration) => {
+  const handleProcessRefund = async () => {
+    if (!refundingReg) return;
+    const reg = refundingReg;
     try {
       setIsFinanceSubmitting(true);
       const amtRec = Number(reg.amountReceived ?? (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? 0) : 0));
       const amtDue = Number(reg.amountDue ?? (reg.paymentStatus === 'cancelled' ? 0 : (reg.paymentAmount ?? 0)));
-      const refundAmt = Number(reg.refundDue || Math.max(0, amtRec - amtDue));
+      const totalAlreadyRefunded = Number(reg.refundedAmount || 0);
+      const netPaid = amtRec - totalAlreadyRefunded;
+      const refundAmt = Math.max(0, netPaid - amtDue);
 
       if (refundAmt <= 0) {
         setErrorMsg("No refund is due for this registration.");
         return;
       }
 
+      const newRefundRecord: EventRegistrationRefund = {
+        id: `ref_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        registrationId: reg.id,
+        publicReference: reg.publicReference || '',
+        gmkId: reg.primaryMemberGmkId || '',
+        registrantName: reg.primaryRegistrantName || (reg.participants && reg.participants[0]) || reg.primaryMemberEmail || 'Guest',
+        eventId: reg.eventId,
+        eventName: events.find((e: CommunityEvent) => e.id === reg.eventId)?.title || activeEvent?.title || 'Community Event',
+        amountPaid: amtRec,
+        amount: refundAmt,
+        date: new Date().toISOString(),
+        refundedBy: profile?.email || 'finance_lead',
+        settlementMethod: refundMethodInput,
+        settlementReference: refundRefInput,
+        remarks: refundRemarksInput || `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance (${profile?.email || 'Finance Lead'}).`,
+        status: 'settled',
+        refundReason: reg.paymentStatus === 'cancelled' ? 'Registration Cancellation' : 'Registration Refund'
+      };
+
+      const currentHistory = Array.isArray(reg.refundHistory) 
+        ? reg.refundHistory.filter(h => h.status !== 'pending')
+        : [];
+      const updatedRefundHistory = [...currentHistory, newRefundRecord];
+      const newRefundedAmount = totalAlreadyRefunded + refundAmt;
+      const newStatus = reg.paymentStatus === 'cancelled' ? 'refunded' : (amtDue > 0 ? 'paid' : 'refunded');
+
       // Try callable cloud function if deployed
       try {
-        const processPaymentFn = httpsCallable(functions, 'processEventPayment');
-        await processPaymentFn({
+        const processRefundFn = httpsCallable(functions, 'processEventRefund');
+        await processRefundFn({
           registrationId: reg.id,
-          amountReceived: amtDue,
-          financeRemarks: `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance.`
+          settlementMethod: refundMethodInput,
+          settlementReference: refundRefInput,
+          financeRemarks: refundRemarksInput || `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance.`
         });
+        // Ensure structured refundHistory is synced to registration doc
+        await updateDoc(doc(db, "event_registrations", reg.id), sanitizeFirestorePayload({
+          refundHistory: updatedRefundHistory
+        }));
       } catch (fnErr) {
         console.warn("Callable function fallback to direct Firestore update:", fnErr);
+        
+        // Direct Firestore update fallback
+        await updateDoc(doc(db, "event_registrations", reg.id), sanitizeFirestorePayload({
+          paymentStatus: newStatus,
+          refundDue: 0,
+          refundedAmount: newRefundedAmount,
+          refundHistory: updatedRefundHistory,
+          refundedAt: new Date().toISOString(),
+          refundedBy: profile?.email || 'finance_lead',
+          settlementMethod: refundMethodInput,
+          settlementReference: refundRefInput,
+          financeRemarks: refundRemarksInput || `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance (${profile?.email || 'Finance Lead'}).`,
+          updatedAt: new Date().toISOString()
+        }));
       }
 
-      // Direct Firestore update to guarantee immediate real-time reflection
-      const newStatus = reg.paymentStatus === 'cancelled' ? 'refunded' : (amtDue > 0 ? 'paid' : 'refunded');
-      await updateDoc(doc(db, "event_registrations", reg.id), sanitizeFirestorePayload({
-        paymentStatus: newStatus,
-        refundDue: 0,
-        amountReceived: amtDue,
-        balanceDue: 0,
-        refundedAmount: refundAmt,
-        refundedAt: new Date().toISOString(),
-        refundedBy: profile?.email || 'finance_lead',
-        financeRemarks: `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance (${profile?.email || 'Finance Lead'}).`,
-        updatedAt: new Date().toISOString()
-      }));
-
-      setSuccessMsg(`✓ Refund of OMR ${refundAmt.toFixed(3)} processed successfully for ${reg.primaryMemberGmkId || reg.primaryMemberEmail}.`);
+      setSuccessMsg(`✓ Refund of OMR ${refundAmt.toFixed(3)} processed successfully for ${reg.publicReference || reg.primaryMemberGmkId || reg.primaryMemberEmail}.`);
+      
+      // RTCO-098: Do not auto-download PDF on settlement. Instead, dispatch email notification if external registration.
+      const isExternal = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
+      const recipientEmail = (reg.primaryRegistrantEmail || reg.primaryMemberEmail || '').trim().toLowerCase();
+      if (isExternal && recipientEmail) {
+        try {
+          const matchedEvent = events.find(e => e.id === reg.eventId) || activeEvent;
+          const eventDetails = resolveEventDetails(matchedEvent);
+          await NotificationService.sendExternalRegistrationRefundConfirmation(recipientEmail, {
+            recipientName: reg.primaryRegistrantName || reg.participants?.[0] || 'Guest',
+            eventName: eventDetails.eventName,
+            eventDate: eventDetails.eventDate,
+            eventTime: eventDetails.eventTime,
+            eventVenue: eventDetails.eventVenue,
+            venue: eventDetails.eventVenue,
+            gmkId: formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id,
+            publicReference: formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id,
+            refundAmount: refundAmt,
+            settlementMethod: refundMethodInput || 'Bank Transfer',
+            settlementReference: refundRefInput || 'N/A',
+            financeRemarks: refundRemarksInput || `Refund of OMR ${refundAmt.toFixed(3)} processed by Finance.`
+          });
+        } catch (notifErr) {
+          console.warn("Could not dispatch refund confirmation email:", notifErr);
+        }
+      }
+      
+      setShowRefundModal(false);
+      setRefundingReg(null);
     } catch (err: any) {
       console.error(err);
       setErrorMsg("Failed to process refund: " + err.message);
     } finally {
       setIsFinanceSubmitting(false);
+    }
+  };
+
+  const generateRefundSettlementPDF = (
+    reg: EventRegistration, 
+    refundOrAmount: EventRegistrationRefund | number, 
+    methodParam?: string, 
+    refParam?: string, 
+    remarksParam?: string
+  ) => {
+    try {
+      const doc = new jsPDF();
+      
+      // Determine refund properties safely
+      let refundAmount = 0;
+      let settlementMethod = 'Bank Transfer';
+      let settlementRef = 'N/A';
+      let remarks = '';
+      let settlementDate = new Date();
+      let refundStatus = 'SETTLED / COMPLETED';
+      let refundReason = 'Registration Cancellation';
+
+      if (typeof refundOrAmount === 'object' && refundOrAmount !== null) {
+        refundAmount = Number(refundOrAmount.amount) || 0;
+        settlementMethod = refundOrAmount.settlementMethod || methodParam || 'Bank Transfer';
+        settlementRef = refundOrAmount.settlementReference || refParam || 'N/A';
+        remarks = refundOrAmount.remarks || remarksParam || '';
+        if (refundOrAmount.date) settlementDate = new Date(refundOrAmount.date);
+        if (refundOrAmount.refundReason) refundReason = refundOrAmount.refundReason;
+      } else {
+        refundAmount = Number(refundOrAmount) || 0;
+        settlementMethod = methodParam || 'Bank Transfer';
+        settlementRef = refParam || 'N/A';
+        remarks = remarksParam || '';
+      }
+
+      const dateStr = settlementDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      const timeStr = settlementDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+      const evt = events.find((e: CommunityEvent) => e.id === reg.eventId) || activeEvent;
+      const evtTitle = evt?.title || 'GMK Community Event';
+
+      const referenceId = reg.isExternal 
+        ? (reg.publicReference || reg.id) 
+        : (reg.primaryMemberGmkId || reg.id);
+
+      const registrantName = reg.isExternal
+        ? (reg.primaryRegistrantName || (reg.participants && reg.participants[0]) || reg.primaryMemberEmail || 'Guest')
+        : (reg.primaryRegistrantName || (reg.participants && reg.participants[0]) || (reg as any).primaryMemberName || reg.primaryMemberEmail || 'Member');
+
+      const attendeeCount = reg.totalParticipants || (reg.participants ? reg.participants.length : 1);
+      const email = reg.primaryRegistrantEmail || reg.primaryMemberEmail || 'N/A';
+      const actualReceived = Number(
+        reg.amountReceived !== undefined && reg.amountReceived !== null
+          ? reg.amountReceived
+          : (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? refundAmount) : refundAmount)
+      );
+
+      // Branding Header
+      doc.setFillColor(15, 76, 42); // #0f4c2a (GMK Green)
+      doc.rect(0, 0, 210, 28, 'F');
+      
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text("GREENS MALAYALEE KOOTAYAMA", 14, 13);
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(212, 175, 55); // Gold
+      doc.text("COMMUNITY MANAGEMENT PLATFORM · FINANCE DEPARTMENT", 14, 21);
+
+      // Voucher Title Bar
+      doc.setFillColor(245, 247, 245);
+      doc.rect(14, 34, 182, 18, 'F');
+      doc.setDrawColor(220, 225, 220);
+      doc.rect(14, 34, 182, 18, 'S');
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 76, 42);
+      doc.text("OFFICIAL REFUND VOUCHER & SETTLEMENT PROOF", 20, 44);
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 80, 80);
+      doc.text(`Status: ${refundStatus}`, 145, 44);
+
+      // Metadata Grid
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(50, 50, 50);
+      doc.text("VOUCHER DETAILS", 14, 60);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(90, 90, 90);
+      doc.text(`Voucher Ref: REF-${referenceId}`, 14, 67);
+      doc.text(`Event Name: ${evtTitle}`, 14, 73);
+      doc.text(`Settlement Date: ${dateStr} ${timeStr}`, 14, 79);
+
+      doc.text(`Registration Type: ${reg.isExternal ? 'External Guest' : 'Household Resident'}`, 120, 67);
+      doc.text(`Original Reference: ${referenceId}`, 120, 73);
+      doc.text(`Audit Classification: Settled Disbursal`, 120, 79);
+
+      doc.setDrawColor(230, 230, 230);
+      doc.line(14, 84, 196, 84);
+
+      // Beneficiary Information
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(50, 50, 50);
+      doc.text("BENEFICIARY DETAILS", 14, 93);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(90, 90, 90);
+      doc.text(`Registrant Name: ${registrantName}`, 14, 100);
+      doc.text(`Registered Email: ${email}`, 14, 106);
+      doc.text(`Number of Attendees: ${attendeeCount}`, 120, 100);
+      if (reg.primaryMemberGmkId) {
+        doc.text(`GMK Member ID: ${reg.primaryMemberGmkId}`, 120, 106);
+      }
+
+      // Settlement Breakdown Table
+      autoTable(doc, {
+        startY: 114,
+        theme: 'grid',
+        headStyles: { 
+          fillColor: [15, 76, 42], 
+          textColor: [255, 255, 255], 
+          fontStyle: 'bold',
+          fontSize: 9
+        },
+        styles: { 
+          fontSize: 9, 
+          cellPadding: 4, 
+          textColor: [40, 40, 40] 
+        },
+        columnStyles: {
+          0: { cellWidth: 45 },
+          1: { cellWidth: 32 },
+          2: { cellWidth: 32 },
+          3: { cellWidth: 38 },
+          4: { cellWidth: 35 }
+        },
+        head: [['Transaction Category', 'Actual Paid', 'Settled Refund', 'Settlement Method', 'Bank Reference']],
+        body: [
+          [
+            refundReason,
+            `OMR ${actualReceived.toFixed(3)}`,
+            `OMR ${refundAmount.toFixed(3)}`,
+            settlementMethod,
+            settlementRef
+          ]
+        ]
+      });
+
+      // Total Refund Box
+      const tableFinalY = (doc as any).lastAutoTable?.finalY || 135;
+      
+      doc.setFillColor(240, 249, 244);
+      doc.rect(120, tableFinalY + 6, 76, 20, 'F');
+      doc.setDrawColor(15, 76, 42);
+      doc.setLineWidth(0.3);
+      doc.rect(120, tableFinalY + 6, 76, 20, 'S');
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 76, 42);
+      doc.text("NET REFUND SETTLED", 125, tableFinalY + 13);
+      
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 76, 42);
+      doc.text(`OMR ${refundAmount.toFixed(3)}`, 125, tableFinalY + 22);
+
+      // Remarks Section
+      if (remarks) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(50, 50, 50);
+        doc.text("FINANCE REMARKS & AUDIT NOTES", 14, tableFinalY + 12);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(80, 80, 80);
+        const splitRemarks = doc.splitTextToSize(remarks, 100);
+        doc.text(splitRemarks, 14, tableFinalY + 18);
+      }
+
+      // Legal & Audit Footer
+      doc.setDrawColor(220, 220, 220);
+      doc.line(14, 268, 196, 268);
+      
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(130, 130, 130);
+      doc.text("This is an official computer-generated refund settlement proof issued by Greens Malayalee Kootayama (GMK) Finance.", 105, 274, { align: 'center' });
+      doc.text("All disbursements are reconciled against registered bank statements and preserved for internal financial audit.", 105, 279, { align: 'center' });
+
+      // Clean filename
+      const cleanRef = referenceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanDate = dateStr.replace(/[^a-zA-Z0-9_-]/g, '_');
+      doc.save(`Refund_Settlement_${cleanRef}_${cleanDate}.pdf`);
+    } catch (err) {
+      console.error("Refund PDF Generation failed:", err);
     }
   };
 
@@ -1459,21 +1741,67 @@ export default function FinanceWorkspace({
     return registrations.filter(isRefundProcessedOrResolved);
   }, [registrations]);
 
+  const allSettledRefunds = useMemo(() => {
+    const list: { reg: EventRegistration; refund: EventRegistrationRefund }[] = [];
+    registrations.forEach(reg => {
+      if (Array.isArray(reg.refundHistory) && reg.refundHistory.length > 0) {
+        reg.refundHistory.forEach((ref: EventRegistrationRefund) => {
+          if (ref.status === 'settled') {
+            list.push({ reg, refund: ref });
+          }
+        });
+      } else if (isRefundProcessedOrResolved(reg)) {
+        // Fallback for legacy refunds without refundHistory
+        const anyReg = reg as any;
+        const refAmt = Number(reg.refundedAmount || (reg.amountReceived ?? (reg.amountDue ?? 0)));
+        if (refAmt > 0) {
+          list.push({
+            reg,
+            refund: {
+              id: reg.id + '_legacy',
+              amount: refAmt,
+              date: anyReg.refundedAt || reg.updatedAt || new Date().toISOString(),
+              refundedBy: anyReg.refundedBy || 'Finance',
+              settlementMethod: anyReg.settlementMethod || 'Bank Transfer',
+              settlementReference: anyReg.settlementReference || 'N/A',
+              remarks: reg.financeRemarks || 'Settled Refund',
+              status: 'settled',
+              registrationId: reg.id,
+              publicReference: reg.publicReference || '',
+              gmkId: reg.primaryMemberGmkId || '',
+              registrantName: reg.primaryRegistrantName || (reg as any).primaryMemberName || '',
+              eventId: reg.eventId,
+              eventName: events.find((e: CommunityEvent) => e.id === reg.eventId)?.title || 'Community Event',
+              amountPaid: reg.amountReceived || refAmt,
+              refundReason: 'Registration Cancellation'
+            }
+          });
+        }
+      }
+    });
+    return list.sort((a, b) => new Date(b.refund.date).getTime() - new Date(a.refund.date).getTime());
+  }, [registrations, events]);
+
   const totalPendingRefundsAmount = useMemo(() => {
     return pendingRefunds.reduce((acc, reg) => {
       const amtRec = Number(reg.amountReceived ?? (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? 0) : 0));
       const amtDue = Number(reg.amountDue ?? (reg.paymentStatus === 'cancelled' ? 0 : (reg.paymentAmount ?? 0)));
-      const refundAmt = reg.refundDue || Math.max(0, amtRec - amtDue);
+      const totalAlreadyRefunded = Number(reg.refundedAmount || 0);
+      const netPaid = amtRec - totalAlreadyRefunded;
+      const refundAmt = reg.refundDue || Math.max(0, netPaid - amtDue);
       return acc + refundAmt;
     }, 0);
   }, [pendingRefunds]);
 
   const totalProcessedRefundsAmount = useMemo(() => {
+    if (allSettledRefunds.length > 0) {
+      return allSettledRefunds.reduce((acc, item) => acc + (Number(item.refund.amount) || 0), 0);
+    }
     return processedRefunds.reduce((acc, reg) => {
       const amtRec = Number(reg.amountReceived ?? (reg.amountDue ?? 0));
       return acc + (reg.refundedAmount || amtRec);
     }, 0);
-  }, [processedRefunds]);
+  }, [allSettledRefunds, processedRefunds]);
 
   const filteredPendingPayables = useMemo(() => {
     if (!appliedRefundSearch.trim()) return pendingPayables;
@@ -1505,20 +1833,46 @@ export default function FinanceWorkspace({
     if (!appliedRefundSearch.trim()) return pendingRefunds;
     const q = appliedRefundSearch.toLowerCase();
     return pendingRefunds.filter(reg => 
+      (reg.publicReference && reg.publicReference.toLowerCase().includes(q)) ||
       (reg.primaryMemberGmkId && reg.primaryMemberGmkId.toLowerCase().includes(q)) ||
+      (reg.primaryRegistrantName && reg.primaryRegistrantName.toLowerCase().includes(q)) ||
+      ((reg as any).primaryMemberName && (reg as any).primaryMemberName.toLowerCase().includes(q)) ||
       (reg.primaryMemberEmail && reg.primaryMemberEmail.toLowerCase().includes(q)) ||
-      (reg.primaryMemberName && reg.primaryMemberName.toLowerCase().includes(q)) ||
+      (reg.primaryRegistrantEmail && reg.primaryRegistrantEmail.toLowerCase().includes(q)) ||
+      (reg.participants && reg.participants.some((p: string) => p.toLowerCase().includes(q))) ||
       (reg.id && reg.id.toLowerCase().includes(q))
     );
   }, [pendingRefunds, appliedRefundSearch]);
+
+  const filteredSettledRefunds = useMemo(() => {
+    if (!appliedRefundSearch.trim()) return allSettledRefunds;
+    const q = appliedRefundSearch.toLowerCase();
+    return allSettledRefunds.filter(({ reg, refund }) => {
+      return (
+        (reg.publicReference && reg.publicReference.toLowerCase().includes(q)) ||
+        (reg.primaryMemberGmkId && reg.primaryMemberGmkId.toLowerCase().includes(q)) ||
+        (reg.primaryRegistrantName && reg.primaryRegistrantName.toLowerCase().includes(q)) ||
+        ((reg as any).primaryMemberName && (reg as any).primaryMemberName.toLowerCase().includes(q)) ||
+        (reg.primaryMemberEmail && reg.primaryMemberEmail.toLowerCase().includes(q)) ||
+        (reg.primaryRegistrantEmail && reg.primaryRegistrantEmail.toLowerCase().includes(q)) ||
+        (reg.participants && reg.participants.some((p: string) => p.toLowerCase().includes(q))) ||
+        (reg.id && reg.id.toLowerCase().includes(q)) ||
+        (refund.settlementReference && refund.settlementReference.toLowerCase().includes(q)) ||
+        (refund.settlementMethod && refund.settlementMethod.toLowerCase().includes(q)) ||
+        (refund.remarks && refund.remarks.toLowerCase().includes(q))
+      );
+    });
+  }, [allSettledRefunds, appliedRefundSearch]);
 
   const filteredProcessedRefunds = useMemo(() => {
     if (!appliedRefundSearch.trim()) return processedRefunds;
     const q = appliedRefundSearch.toLowerCase();
     return processedRefunds.filter(reg => 
+      (reg.publicReference && reg.publicReference.toLowerCase().includes(q)) ||
       (reg.primaryMemberGmkId && reg.primaryMemberGmkId.toLowerCase().includes(q)) ||
+      (reg.primaryRegistrantName && reg.primaryRegistrantName.toLowerCase().includes(q)) ||
+      ((reg as any).primaryMemberName && (reg as any).primaryMemberName.toLowerCase().includes(q)) ||
       (reg.primaryMemberEmail && reg.primaryMemberEmail.toLowerCase().includes(q)) ||
-      (reg.primaryMemberName && reg.primaryMemberName.toLowerCase().includes(q)) ||
       (reg.id && reg.id.toLowerCase().includes(q))
     );
   }, [processedRefunds, appliedRefundSearch]);
@@ -1770,7 +2124,9 @@ export default function FinanceWorkspace({
         filteredPendingRefunds.forEach(reg => {
           const amtRec = Number(reg.amountReceived ?? (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? 0) : 0));
           const amtDue = Number(reg.amountDue ?? (reg.paymentStatus === 'cancelled' ? 0 : (reg.paymentAmount ?? 0)));
-          const refundAmt = reg.refundDue || Math.max(0, amtRec - amtDue);
+          const totalAlreadyRefunded = Number(reg.refundedAmount || 0);
+          const netPaid = amtRec - totalAlreadyRefunded;
+          const refundAmt = reg.refundDue || Math.max(0, netPaid - amtDue);
 
           rows.push([
             'Pending Reg Refund',
@@ -1861,7 +2217,9 @@ export default function FinanceWorkspace({
       const refundsData = [...pendingRefunds, ...processedRefunds].map(reg => {
         const amtRec = Number(reg.amountReceived ?? (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? 0) : 0));
         const amtDue = Number(reg.amountDue ?? (reg.paymentStatus === 'cancelled' ? 0 : (reg.paymentAmount ?? 0)));
-        const refundAmt = reg.refundDue || Math.max(0, amtRec - amtDue);
+        const totalAlreadyRefunded = Number(reg.refundedAmount || 0);
+        const netPaid = amtRec - totalAlreadyRefunded;
+        const refundAmt = reg.refundDue || Math.max(0, netPaid - amtDue);
 
         return {
           'Registration ID': reg.id,
@@ -2916,14 +3274,21 @@ export default function FinanceWorkspace({
                         {filteredPendingRefunds.map(reg => {
                           const amtRec = Number(reg.amountReceived ?? (reg.paymentStatus === 'paid' ? (reg.amountDue ?? reg.paymentAmount ?? 0) : 0));
                           const amtDue = Number(reg.amountDue ?? (reg.paymentStatus === 'cancelled' ? 0 : (reg.paymentAmount ?? 0)));
-                          const refundAmt = reg.refundDue || Math.max(0, amtRec - amtDue);
+                          const totalAlreadyRefunded = Number(reg.refundedAmount || 0);
+                          const netPaid = amtRec - totalAlreadyRefunded;
+                          const refundAmt = reg.refundDue || Math.max(0, netPaid - amtDue);
+                          const fam = families.find(f => f.id === reg.familyId);
+                          const primaryName = reg.isExternal
+                            ? (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown')))
+                            : (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown'))));
+                          const referenceId = reg.isExternal ? (reg.publicReference || reg.id) : (reg.primaryMemberGmkId || 'N/A');
                           
                           return (
                             <div key={reg.id} className="p-4 bg-white border border-amber-200 rounded-2xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
                               <div>
                                 <div className="flex items-center space-x-2 mb-1">
-                                  <span className="font-mono text-[10px] font-black bg-stone-100 px-2 py-0.5 rounded-md">{reg.primaryMemberGmkId}</span>
-                                  <span className="font-black text-stone-800 text-sm">{reg.primaryMemberEmail}</span>
+                                  <span className="font-mono text-[10px] font-black bg-stone-100 px-2 py-0.5 rounded-md">{referenceId}</span>
+                                  <span className="font-black text-stone-800 text-sm">{primaryName}</span>
                                 </div>
                                 <div className="text-[10px] text-stone-500 font-bold flex space-x-4 mt-2">
                                   <span>Paid: OMR {amtRec.toFixed(3)}</span>
@@ -2932,7 +3297,13 @@ export default function FinanceWorkspace({
                                 </div>
                               </div>
                               <button
-                                onClick={() => handleProcessRefund(reg)}
+                                onClick={() => {
+                                  setRefundingReg(reg);
+                                  setRefundMethodInput('Bank Transfer');
+                                  setRefundRefInput('');
+                                  setRefundRemarksInput('');
+                                  setShowRefundModal(true);
+                                }}
                                 disabled={isFinanceSubmitting}
                                 className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all w-full md:w-auto text-center disabled:opacity-50 cursor-pointer"
                               >
@@ -2950,25 +3321,65 @@ export default function FinanceWorkspace({
                 {(appliedRefundFilterType === 'all' || appliedRefundFilterType === 'processed_refunds') && (
                   <div className="space-y-3 mt-4">
                     <h5 className="font-black text-emerald-800 uppercase tracking-wider text-[10px] px-1">
-                      Processed / Resolved Refunds ({filteredProcessedRefunds.length})
+                      Processed / Resolved Refunds ({filteredSettledRefunds.length})
                     </h5>
-                    {filteredProcessedRefunds.length === 0 ? (
+                    {filteredSettledRefunds.length === 0 ? (
                       <div className="text-center py-6 bg-stone-50 rounded-xl border border-dashed border-stone-200 text-stone-400 font-bold text-xs">
                         {appliedRefundSearch ? 'No processed refunds history matches your search.' : 'No processed refunds history.'}
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {filteredProcessedRefunds.map(reg => (
-                          <div key={reg.id} className="p-3 bg-white border border-stone-200 rounded-xl shadow-xs flex items-center justify-between opacity-80">
-                            <div className="flex items-center space-x-3">
-                              <span className="font-mono text-[10px] font-black bg-stone-100 px-2 py-0.5 rounded-md">{reg.primaryMemberGmkId}</span>
-                              <span className="font-bold text-stone-800 text-xs">{reg.primaryMemberEmail}</span>
+                        {filteredSettledRefunds.map(({ reg, refund }) => {
+                          const fam = families.find(f => f.id === reg.familyId);
+                          const primaryName = reg.isExternal
+                            ? (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Guest')))
+                            : (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Member'))));
+                          const referenceId = reg.isExternal ? (reg.publicReference || reg.id) : (reg.primaryMemberGmkId || 'N/A');
+                          const attendees = reg.totalParticipants || (reg.participants ? reg.participants.length : 1);
+                          const dateFormatted = refund.date ? new Date(refund.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Recent';
+
+                          return (
+                            <div key={refund.id || reg.id} className="p-3.5 bg-white border border-stone-200 hover:border-stone-300 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all">
+                              <div className="flex items-start sm:items-center space-x-3">
+                                <span className="font-mono text-[10px] font-black bg-stone-100 text-stone-800 px-2 py-0.5 rounded-md shrink-0">{referenceId}</span>
+                                <div>
+                                  <div className="flex items-center space-x-2">
+                                    <span className="font-bold text-stone-900 text-xs">{primaryName}</span>
+                                    <span className="text-[10px] text-stone-500 font-semibold">({attendees} {attendees === 1 ? 'attendee' : 'attendees'})</span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-[10px] text-stone-500 mt-0.5">
+                                    <span>{refund.settlementMethod || 'Bank Transfer'}</span>
+                                    {refund.settlementReference && refund.settlementReference !== 'N/A' && (
+                                      <>
+                                        <span>•</span>
+                                        <span>Ref: {refund.settlementReference}</span>
+                                      </>
+                                    )}
+                                    <span>•</span>
+                                    <span>{dateFormatted}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2 sm:space-x-3 self-end sm:self-center shrink-0">
+                                <div className="text-right">
+                                  <span className="block text-xs font-black text-emerald-700">OMR {Number(refund.amount || 0).toFixed(3)}</span>
+                                  <span className="text-[9px] text-stone-400 font-medium">Refunded</span>
+                                </div>
+                                <span className="text-[9px] uppercase font-black px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
+                                  Settled
+                                </span>
+                                <button
+                                  onClick={() => generateRefundSettlementPDF(reg, refund)}
+                                  className="px-2.5 py-1.5 bg-[#0f4c2a] hover:bg-[#125831] text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 shadow-xs transition-colors cursor-pointer"
+                                  title="Download Official Individual Settled Refund Advice / Voucher (PDF)"
+                                >
+                                  <FileDown className="w-3.5 h-3.5" />
+                                  <span>Refund PDF</span>
+                                </button>
+                              </div>
                             </div>
-                            <span className="text-[10px] uppercase font-black px-2 py-0.5 bg-stone-100 text-stone-600 rounded">
-                              {reg.paymentStatus}
-                            </span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3654,10 +4065,16 @@ export default function FinanceWorkspace({
                       {filteredIncomeRegs.map((reg) => {
                         const collected = getRegistrationCollectedAmount(reg);
                         const due = reg.amountDue ?? reg.paymentAmount ?? reg.paymentSummary?.totalAmount ?? 0;
+                        const fam = families.find(f => f.id === reg.familyId);
+                        const primaryName = reg.isExternal
+                          ? (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown')))
+                          : (reg.primaryRegistrantName || (reg.participants && reg.participants.length > 0 ? reg.participants[0] : (fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown'))));
+                        const referenceId = reg.isExternal ? (reg.publicReference || reg.id) : (reg.primaryMemberGmkId || 'N/A');
+
                         return (
                           <tr key={reg.id} className="border-b border-stone-100 hover:bg-stone-50/50">
-                            <td className="p-3 font-semibold text-stone-900">{(reg.participants && reg.participants.length > 0) ? reg.participants[0] : reg.primaryMemberEmail}</td>
-                            <td className="p-3 font-mono text-[10px]">{reg.primaryMemberGmkId}</td>
+                            <td className="p-3 font-semibold text-stone-900">{primaryName}</td>
+                            <td className="p-3 font-mono text-[10px]">{referenceId}</td>
                             <td className="p-3">
                               <span className="px-2 py-0.5 bg-stone-100 text-stone-700 text-[9px] font-black uppercase rounded-md">
                                 {reg.registrationType || 'Family'}
@@ -3929,6 +4346,113 @@ export default function FinanceWorkspace({
               >
                 <Check className="w-4 h-4 text-[#d4af37]" />
                 <span>{isFinanceSubmitting ? 'Recording...' : 'Record Settlement'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Settlement Modal */}
+      {showRefundModal && refundingReg && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-150 pb-3">
+              <div className="flex items-center space-x-2">
+                <FileCheck className="w-5 h-5 text-amber-600" />
+                <h4 className="font-black text-stone-900 uppercase tracking-wider text-sm">Settle Registration Refund</h4>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowRefundModal(false);
+                  setRefundingReg(null);
+                }} 
+                className="text-stone-400 hover:text-stone-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 text-xs space-y-1.5">
+              <div className="flex justify-between font-bold">
+                <span className="text-amber-900">Beneficiary:</span>
+                <span className="text-stone-900 font-extrabold">{refundingReg.primaryRegistrantName || refundingReg.primaryMemberEmail}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span className="text-amber-900">Event / Scope:</span>
+                <span className="text-stone-800">{events.find((e: CommunityEvent) => e.id === refundingReg.eventId)?.title || 'GMK Event'}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span className="text-amber-900">Refund Amount Due:</span>
+                <span className="text-amber-700 font-mono font-black text-sm">
+                  OMR {Math.max(0, Number(refundingReg.amountReceived ?? (refundingReg.paymentStatus === 'paid' ? refundingReg.paymentAmount : 0)) - Number(refundingReg.refundedAmount || 0) - Number(refundingReg.amountDue ?? (refundingReg.paymentStatus === 'cancelled' ? 0 : refundingReg.paymentAmount))).toFixed(3)}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-stone-700 block mb-1">
+                  Settlement Payment Method
+                </label>
+                <select
+                  value={refundMethodInput}
+                  onChange={(e) => setRefundMethodInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="Bank Transfer">Bank Transfer (Direct Account Deposit)</option>
+                  <option value="Cash">Cash Handover</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="UPI / Online Transfer">UPI / Online Transfer</option>
+                  <option value="Adjustment / Offset">Adjustment / Offset</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-stone-700 block mb-1">
+                  Transaction / Transfer Reference Number
+                </label>
+                <input
+                  type="text"
+                  value={refundRefInput}
+                  onChange={(e) => setRefundRefInput(e.target.value)}
+                  placeholder="e.g. TXN-8934298 or Bank Ref #"
+                  className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-stone-700 block mb-1">
+                  Settlement Remarks (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={refundRemarksInput}
+                  onChange={(e) => setRefundRemarksInput(e.target.value)}
+                  placeholder="Additional settlement notes..."
+                  className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 flex items-center justify-end space-x-2 border-t border-stone-150">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRefundModal(false);
+                  setRefundingReg(null);
+                }}
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isFinanceSubmitting}
+                onClick={handleProcessRefund}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs disabled:opacity-50 cursor-pointer flex items-center space-x-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>{isFinanceSubmitting ? 'Recording...' : 'Record Refund'}</span>
               </button>
             </div>
           </div>
