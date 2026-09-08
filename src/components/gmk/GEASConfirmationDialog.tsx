@@ -106,6 +106,8 @@ export function GEASConfirmationDialogUI({ options, onConfirm, onCancel }: GEASC
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
+  if (!options) return null;
+
   const severity = options.severity || 'danger';
   const requiresInput = Boolean(options.requiredInputText);
   const isInputValid = !requiresInput || inputValue.trim() === options.requiredInputText?.trim();

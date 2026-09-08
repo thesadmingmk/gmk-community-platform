@@ -67,8 +67,7 @@ export default function RegistrationReportingWorkspace({
     let rawStatus = r.paymentStatus || 'pending';
     let status = rawStatus;
     
-    // UI Presentation Rule: Ignore PARTIALLY_PAID, use strict math
-    if (rawStatus === 'partially_paid' || rawStatus === 'pending') {
+    if (rawStatus !== 'cancelled' && rawStatus !== 'refunded' && rawStatus !== 'waived') {
       if (due === 0) status = 'waived';
       else if (rec >= due && due > 0) status = 'paid';
       else status = 'pending';

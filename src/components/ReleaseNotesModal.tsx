@@ -19,6 +19,28 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.6.3",
+    title: "Unified Registration Management, Gate Attendance Search, Entry Pass Dispatch & Reporting Hub",
+    releaseDate: "2026-09-08",
+    author: "Core Platform Team",
+    notes: [
+      "Event Date & Time Precision: Event date and time display and editing corrected strictly for Oman / Asia-Muscat timezone (UTC+4) across forms, email templates, and event headers.",
+      "External Registration Address & Phone Improvements: Refined external registration workflows with standardized address labeling and robust international country code phone handling.",
+      "Reusable Phone Numbers with Email Protection: External registration phone numbers remain reusable across registrations and are not treated as duplicate blockers, while maintaining strict per-event email duplicate protection.",
+      "Unified Admin Registration Management: Consolidated Resident and External registrations into a unified Admin Registration Management workflow with comprehensive detail auditing.",
+      "Dynamic Participant Recalculation: Enabled admin participant add/remove capabilities with automatic event tier pricing recalculation and ledger synchronization.",
+      "Cross-Module Balance Propagation: Corrected partial-payment and balance propagation between Admin, Resident Events, and Finance modules for consistent balance tracking.",
+      "Registration Lifecycle & Refund Handling: Improved registration cancellation, refund tracking, and archive handling workflows across settled and operationally cleaned-up records.",
+      "Gate Attendance Participant Search: Introduced rapid participant name search at the gate to quickly locate and verify attendees and family members.",
+      "GMK-Wise Attendance Report: Added comprehensive GMK-level attendance report featuring full breakdown of resident and external attendance metrics.",
+      "Individual Attendance Audit Report: Implemented Individual Attendance Report tracking actual individual check-in date and time timestamps for all attendees.",
+      "Attendance Entry Pass Email (Individual): Added individual Send and Resend Entry Pass email actions directly from attendee detail cards.",
+      "Attendance Entry Pass Email (Bulk): Introduced bulk entry pass email sending with Resident/External filtering, attendee selection, recipient preview breakdown, and delivery queueing.",
+      "Family Check-In Completion Email: Enhanced family check-in completion emails and attendance arrival timestamps for improved attendee communication.",
+      "Attendance Report & PDF Improvements: Upgraded printable attendance sheets and PDF exports with cleaner layouts, accurate counts, and high-contrast styling."
+    ]
+  },
+  {
     version: "v1.6.2",
     title: "Event Timezone Precision, Registration Categories, International Numbers & UI Refinements",
     releaseDate: "2026-09-06",
@@ -362,12 +384,12 @@ export default function ReleaseNotesModal({ isOpen, onClose }: ReleaseNotesModal
             });
           });
           
-          // Merge with DEFAULT_NOTES to make sure all versions (including updated v1.6.2 and v1.6.1) are always current
+          // Merge with DEFAULT_NOTES to make sure all versions (including updated v1.6.3, v1.6.2, and v1.6.1) are always current
           DEFAULT_NOTES.forEach(dn => {
             const idx = list.findIndex(item => item.version === dn.version);
             if (idx === -1) {
               list.push(dn);
-            } else if (dn.version === "v1.6.2" || dn.version === "v1.6.1") {
+            } else if (dn.version === "v1.6.3" || dn.version === "v1.6.2" || dn.version === "v1.6.1") {
               list[idx] = dn;
             }
             const docId = dn.version.replace(/\./g, '_');

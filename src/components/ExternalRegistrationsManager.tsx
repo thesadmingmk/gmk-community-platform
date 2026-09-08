@@ -13,14 +13,6 @@ import GMKOfficialEntryPassCard from './shared/GMKOfficialEntryPassCard';
 import { generateRefundSettlementPDF } from '../utils/refundSettlementPDF';
 import { formatExternalGmkId, formatEventDate, formatEventTime, getEventTitle, getEventVenue, resolveEventDetails } from '../utils/gmkIdHelper';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
-import { 
-  sendEntryPassWhatsAppNotification, 
-  isRegistrationEligibleForWhatsAppEntryPass,
-  hasEntryPassNotificationBeenSent,
-  sendExternalRegistrationUpdateWhatsAppNotification,
-  hasRegistrationUpdateNotificationBeenSent,
-  WHATSAPP_TEMPLATE_EXTERNAL_REGISTRATION_UPDATE
-} from '../services/WhatsAppEntryPassService';
 
 export default function ExternalRegistrationsManager({ eventId }: { eventId: string }) {
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
@@ -107,7 +99,6 @@ export default function ExternalRegistrationsManager({ eventId }: { eventId: str
       const externalGmkId = formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id;
 
       const recipientEmail = (reg.primaryRegistrantEmail || reg.primaryMemberEmail || '').trim().toLowerCase();
-      const whatsappNumber = reg.primaryRegistrantWhatsapp || reg.primaryRegistrantPhone;
 
       // 1. Prepare payment instructions from event bank accounts or general instructions
       let paymentInstructions = "Please contact the Event Director or Committee at the registration counter for payment settlement.";
@@ -167,38 +158,9 @@ export default function ExternalRegistrationsManager({ eventId }: { eventId: str
         updatedAt: nowIso
       });
 
-      // 4. Attempt WhatsApp Notification (Template: gmk_external_registration_update)
-      let waStatus = 'skipped';
-      if (whatsappNumber) {
-        if (hasRegistrationUpdateNotificationBeenSent(reg)) {
-          console.log(`Duplicate registration update notification blocked for ${reg.id}`);
-        } else {
-          try {
-            const waResult = await sendExternalRegistrationUpdateWhatsAppNotification(reg, event, {
-              dryRun: false // RTCO-099 Live mode
-            });
-            if (waResult.success) {
-              waStatus = 'sent';
-            } else {
-              console.warn("WhatsApp notification failed:", waResult.error);
-              if (!waResult.duplicateBlocked) {
-                waStatus = 'failed';
-              }
-            }
-          } catch (waErr: any) {
-            console.warn("WhatsApp notification error:", waErr);
-            waStatus = 'failed';
-          }
-        }
-      }
-
       await fetchData();
-      if (emailStatus === 'sent' && whatsappNumber) {
-        setSuccessMsg(`Registration approved! Payment instructions email sent to ${recipientEmail} and WhatsApp confirmation prepared.`);
-      } else if (emailStatus === 'sent') {
+      if (emailStatus === 'sent') {
         setSuccessMsg(`Registration approved! Payment instructions email sent to ${recipientEmail}.`);
-      } else if (whatsappNumber) {
-        setSuccessMsg("Registration approved. WhatsApp confirmation prepared.");
       } else {
         setSuccessMsg("Registration approved successfully.");
       }
@@ -582,111 +544,6 @@ export default function ExternalRegistrationsManager({ eventId }: { eventId: str
     }
   };
 
-  const handleSendWhatsAppEntryPass = async (reg: EventRegistration) => {
-    const event = events[reg.eventId];
-    if (!event) {
-      setErrorMsg("Event metadata not found for this registration.");
-      return;
-    }
-
-    // 1. Check duplicate protection
-    if (hasEntryPassNotificationBeenSent(reg)) {
-      setErrorMsg(`Duplicate Protection: WhatsApp Entry Pass has already been delivered for this registration at ${reg.entryPassNotificationSentAt || 'earlier date'}.`);
-      return;
-    }
-
-    // 2. Check eligibility
-    const eligibility = isRegistrationEligibleForWhatsAppEntryPass(reg);
-    if (!eligibility.eligible) {
-      setErrorMsg(`Entry Pass Notification Ineligible: ${eligibility.reason}`);
-      return;
-    }
-
-    setProcessingId(reg.id);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const externalGmkId = formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id;
-      const qrPayload = reg.entryPassNumber || externalGmkId;
-      const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(qrPayload)}&size=500&margin=1&dark=0f4c2a`;
-
-      const result = await sendEntryPassWhatsAppNotification(reg, event, {
-        dryRun: false,
-        headerImageUrl: qrUrl
-      });
-
-      if (result.success) {
-        setSuccessMsg(
-          `Official Entry Pass WhatsApp successfully dispatched to ${result.recipientPhone}.`
-        );
-      } else {
-        setErrorMsg(`WhatsApp notification failed: ${result.error}`);
-      }
-    } catch (err: any) {
-      setErrorMsg(`Failed to prepare WhatsApp Entry Pass notification: ${err.message}`);
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleResendRegistrationUpdateWhatsApp = async (reg: EventRegistration) => {
-    const event = events[reg.eventId];
-    if (!event) return;
-    setProcessingId(reg.id);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    try {
-      const waResult = await sendExternalRegistrationUpdateWhatsAppNotification(reg, event, {
-        dryRun: false,
-        forceResend: true
-      });
-      if (waResult.success) {
-        setSuccessMsg(`Registration Update WhatsApp successfully resent.`);
-      } else {
-        setErrorMsg(`WhatsApp notification failed: ${waResult.error}`);
-      }
-    } catch (err: any) {
-      setErrorMsg(`Error resending WhatsApp: ${err.message}`);
-    } finally {
-      setProcessingId(null);
-      fetchData();
-    }
-  };
-
-  const handleResendEntryPassWhatsApp = async (reg: EventRegistration) => {
-    const event = events[reg.eventId];
-    if (!event) return;
-    if (!reg.entryPassNumber) {
-      setErrorMsg("Cannot send WhatsApp Entry Pass: Entry Pass has not been issued yet.");
-      return;
-    }
-    setProcessingId(reg.id);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    try {
-      const externalGmkId = formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id;
-      const qrPayload = reg.entryPassNumber || externalGmkId;
-      const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(qrPayload)}&size=500&margin=1&dark=0f4c2a`;
-
-      const result = await sendEntryPassWhatsAppNotification(reg, event, {
-        dryRun: false,
-        headerImageUrl: qrUrl,
-        forceResend: true
-      });
-      if (result.success) {
-        setSuccessMsg(`Official Entry Pass WhatsApp successfully resent to ${result.recipientPhone}.`);
-      } else {
-        setErrorMsg(`WhatsApp notification failed: ${result.error}`);
-      }
-    } catch (err: any) {
-      setErrorMsg(`Error resending WhatsApp Entry Pass: ${err.message}`);
-    } finally {
-      setProcessingId(null);
-      fetchData();
-    }
-  };
-
   const filteredRegs = registrations.filter(r => {
     const isCleanedUp = (r as any).operationalStatus === 'cleaned_up' || (r as any).isOperationalCleanedUp === true;
     if (isCleanedUp && !showCleanedUp) {
@@ -927,44 +784,6 @@ export default function ExternalRegistrationsManager({ eventId }: { eventId: str
                           >
                             <QrCode className="w-3.5 h-3.5" />
                             <span>Entry Pass</span>
-                          </button>
-                          
-                          {/* Send / Resend WhatsApp Entry Pass */}
-                          <button
-                            onClick={() => reg.entryPassNotificationStatus === 'sent' ? handleResendEntryPassWhatsApp(reg) : handleSendWhatsAppEntryPass(reg)}
-                            disabled={processingId === reg.id}
-                            className={`flex items-center justify-center space-x-1 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all shadow-xs cursor-pointer border ${
-                              reg.entryPassNotificationStatus === 'sent'
-                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
-                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                            }`}
-                            title={
-                              reg.entryPassNotificationStatus === 'sent'
-                                ? `Delivered via WhatsApp on ${new Date(reg.entryPassNotificationSentAt || '').toLocaleString()}. Click to RESEND.`
-                                : 'Send WhatsApp Entry Pass'
-                            }
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>{reg.entryPassNotificationStatus === 'sent' ? 'Resend WA Pass' : 'Send WA Pass'}</span>
-                          </button>
-
-                          {/* Send / Resend WhatsApp Registration Update */}
-                          <button
-                            onClick={() => handleResendRegistrationUpdateWhatsApp(reg)}
-                            disabled={processingId === reg.id}
-                            className={`flex items-center justify-center space-x-1 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all shadow-xs cursor-pointer border ${
-                              reg.registrationUpdateNotificationStatus === 'sent'
-                                ? 'bg-teal-600 hover:bg-teal-700 text-white border-teal-700'
-                                : 'bg-teal-50 hover:bg-teal-100 text-teal-900 border-teal-300'
-                            }`}
-                            title={
-                              reg.registrationUpdateNotificationStatus === 'sent'
-                                ? `Registration Update sent via WhatsApp on ${new Date(reg.registrationUpdateNotificationSentAt || '').toLocaleString()}. Click to RESEND.`
-                                : 'Send Registration Update via WhatsApp'
-                            }
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>{reg.registrationUpdateNotificationStatus === 'sent' ? 'Resend WA Update' : 'Send WA Update'}</span>
                           </button>
 
                           <button

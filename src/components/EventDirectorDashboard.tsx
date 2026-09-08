@@ -3,6 +3,7 @@ import RegistrationReportingWorkspace from "./RegistrationReportingWorkspace";
 import AttendanceWorkspace from "./AttendanceWorkspace";
 import { formatExternalGmkId, resolveEventDetails } from '../utils/gmkIdHelper';
 import { NotificationService } from '../services/NotificationService';
+import { processFamilyCheckInCompletion } from '../services/familyCheckInService';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { jsPDF } from 'jspdf';
@@ -385,6 +386,11 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [activeCommittees, setActiveCommittees] = useState<EventCommittee[]>([]);
   const [activePrograms, setActivePrograms] = useState<EventProgram[]>([]);
   const [registrations, setRegistrations] = useState<EventRegistration[]>([]);
+
+  const validReportingRegistrations = useMemo(() => {
+    return registrations.filter(r => r.paymentStatus !== 'cancelled' && r.paymentStatus !== 'refunded');
+  }, [registrations]);
+
   const [activeAttendances, setActiveAttendances] = useState<EventAttendance[]>([]);
 
   // Finance Committee Workspace & Payment Processing States
@@ -2824,14 +2830,14 @@ const handleDownloadPDF = () => {
     doc.text(`Event: ${eventTitle}`, 14, 28);
     doc.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 14, 34);
 
-    const totalRegistrants = registrations.length;
-    const totalAttendeesCount = registrations.reduce((sum, r) => sum + (r.totalParticipants || 1), 0);
-    const paidCount = registrations.filter(r => r.paymentStatus === 'paid' || r.paymentStatus === 'approved').length;
-    const pendingCount = registrations.filter(r => r.paymentStatus === 'pending').length;
+    const totalRegistrants = validReportingRegistrations.length;
+    const totalAttendeesCount = validReportingRegistrations.reduce((sum, r) => sum + (r.totalParticipants || 1), 0);
+    const paidCount = validReportingRegistrations.filter(r => r.paymentStatus === 'paid' || r.paymentStatus === 'approved').length;
+    const pendingCount = validReportingRegistrations.filter(r => r.paymentStatus === 'pending').length;
 
     doc.text(`Total Registrations: ${totalRegistrants} | Total Attendees: ${totalAttendeesCount} | Paid: ${paidCount} | Pending: ${pendingCount}`, 14, 42);
 
-    const rows = registrations.map((reg, idx) => {
+    const rows = validReportingRegistrations.map((reg, idx) => {
       const fam = families.find(f => f.id === reg.familyId);
       const name = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Resident');
       const unit = fam?.displayUnitNumber || 'N/A';
@@ -5888,7 +5894,7 @@ const handleDownloadPDF = () => {
     let totalAdults = 0;
     let totalChildren = 0;
 
-    registrations.forEach(reg => {
+    validReportingRegistrations.forEach(reg => {
       const fam = families.find(f => f.id === reg.familyId);
       const primaryName = fam ? fam.fullName : '';
       const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
@@ -5909,7 +5915,7 @@ const handleDownloadPDF = () => {
     });
 
     return {
-      familiesCount: registrations.length,
+      familiesCount: validReportingRegistrations.length,
       residentsCount: totalAdults + totalChildren,
       adultsCount: totalAdults,
       childrenCount: totalChildren
@@ -5935,7 +5941,7 @@ const handleDownloadPDF = () => {
       "Registered Participants List"
     ];
 
-    const rows = registrations.map(reg => {
+    const rows = validReportingRegistrations.map(reg => {
       const fam = families.find(f => f.id === reg.familyId);
       const primaryName = fam ? fam.fullName : (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
       const unit = fam ? fam.displayUnitNumber : 'Unknown';
@@ -6114,6 +6120,15 @@ const handleDownloadPDF = () => {
       const nowStr = new Date().toISOString();
       const adminEmail = auth.currentUser?.email || 'Gate Attendance Officer';
 
+      const participantsList = reg.participants && reg.participants.length > 0
+        ? reg.participants
+        : [reg.primaryRegistrantName || reg.primaryMemberEmail || 'GMK Member'];
+      const arrivedDetails = participantsList.map(name => ({
+        name,
+        arrivedAt: nowStr,
+        scannedBy: adminEmail
+      }));
+
       await setDoc(attRef, {
         id: `att_${gmkId}_${selectedEventId}`,
         eventId: selectedEventId,
@@ -6123,8 +6138,26 @@ const handleDownloadPDF = () => {
         attendedAt: nowStr,
         scannedBy: adminEmail,
         totalParticipants: reg.totalParticipants || 1,
-        entryPassNumber: reg.entryPassNumber || `PASS-${selectedEventId.slice(-6).toUpperCase()}-${gmkId}`
+        totalAttended: arrivedDetails.length,
+        entryPassNumber: reg.entryPassNumber || `PASS-${selectedEventId.slice(-6).toUpperCase()}-${gmkId}`,
+        arrivedDetails
       }, { merge: true });
+
+      // RTCO-FamilyCheckIn: Process family-level check-in completion notification
+      if (activeEvent) {
+        try {
+          await processFamilyCheckInCompletion({
+            reg,
+            activeEvent,
+            combinedArrivedDetails: arrivedDetails,
+            existingAttendance: existing,
+            families,
+            familyMembers
+          });
+        } catch (compErr) {
+          console.error("Non-blocking error checking family completion in EventDirectorDashboard:", compErr);
+        }
+      }
 
       setSuccessMsg(`Gate check-in CONFIRMED for ${gmkId} (${reg.primaryMemberEmail}). Gate entry granted.`);
       setAttendanceScannedReg(null);
@@ -11262,7 +11295,7 @@ const handleDownloadPDF = () => {
                   )}
                   <RegistrationReportingWorkspace
                     events={events}
-                    registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
+                    registrations={validReportingRegistrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
                     families={families}
                     familyMembers={familyMembers}
                     activeEvent={activeEvent}
@@ -11317,7 +11350,7 @@ const handleDownloadPDF = () => {
 
                       <div className="p-3 bg-stone-50 rounded-2xl border border-stone-150 flex items-center justify-between text-xs font-bold text-stone-700">
                         <span>Total Registrations:</span>
-                        <span className="font-mono font-black text-stone-900">{registrations.length} families</span>
+                        <span className="font-mono font-black text-stone-900">{validReportingRegistrations.length} families</span>
                       </div>
                     </div>
 
@@ -11471,7 +11504,7 @@ const handleDownloadPDF = () => {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
                 <span className="text-[9px] uppercase font-black text-stone-400 block">Registrations</span>
-                <span className="text-lg font-black text-stone-900 font-mono">{registrations.length}</span>
+                <span className="text-lg font-black text-stone-900 font-mono">{validReportingRegistrations.length}</span>
               </div>
               <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
                 <span className="text-[9px] uppercase font-black text-stone-400 block">Attendees</span>
@@ -11614,7 +11647,7 @@ const handleDownloadPDF = () => {
                     Registration & Participant Directory
                   </h3>
                   <p className="text-xs text-emerald-200/90 font-medium">
-                    {activeEvent.eventName || activeEvent.title} * {registrations.length} Registered Households
+                    {activeEvent.eventName || activeEvent.title} * {validReportingRegistrations.length} Registered Households
                   </p>
                 </div>
               </div>
@@ -11632,7 +11665,7 @@ const handleDownloadPDF = () => {
             <div className="p-4 md:p-6 overflow-y-auto flex-1 bg-stone-50/50">
               <RegistrationReportingWorkspace
                 events={events}
-                registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
+                registrations={validReportingRegistrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved' || hasGenuineFinancialHistory(r))}
                 families={families}
                 familyMembers={familyMembers}
                 activeEvent={activeEvent}

@@ -367,13 +367,12 @@ export default function FinanceWorkspace({
   // Centralized Expenses - aggregate from all active committees + Event Level Expenses
   const eventLevelExpensesList: Array<EventCommitteeExpense & { committeeId: string; committeeName: string; isFinanceOwned: boolean }> = 
     ((eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[]).map(exp => {
-      const matchedComm = activeCommittees.find(c => c.id === exp.categoryId || c.name.toLowerCase() === (exp.categoryName || '').toLowerCase());
-      const isFin = isFinanceOwnedExpense({ ...exp, committeeId: exp.categoryId || 'EVENT_EXPENSE', createdScope: exp.createdScope || 'finance' });
+      const isFin = isFinanceOwnedExpense({ ...exp, committeeId: 'EVENT_EXPENSE', createdScope: exp.createdScope || 'finance' });
       return {
         ...exp,
         createdScope: exp.createdScope || 'finance',
-        committeeId: matchedComm ? matchedComm.id : (exp.categoryId || 'EVENT_EXPENSE'),
-        committeeName: matchedComm ? matchedComm.name : formatCategoryLabel(exp.categoryName || 'Event'),
+        committeeId: 'EVENT_EXPENSE',
+        committeeName: 'EVENT EXPENSE',
         isFinanceOwned: isFin
       };
     });
@@ -1621,11 +1620,11 @@ export default function FinanceWorkspace({
     });
 
     // Committee & Event Expense Breakdown
-    const eventExpensesSum = ((eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[]).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const eventExpensesSum = acceptedExpenses.filter(e => e.committeeId === 'EVENT_EXPENSE' || e.committeeName === 'EVENT EXPENSE').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const eventBudget = allocations['EVENT EXPENSE'] || 0;
 
     const commRows = activeCommittees.map(c => {
-      const cExpenses = (c.expenses || []).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const cExpenses = acceptedExpenses.filter(e => e.committeeId === c.id).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
       const cBudget = allocations[c.name] || 0;
       const cRemaining = Math.max(0, cBudget - cExpenses);
       const cUtil = cBudget > 0 ? ((cExpenses / cBudget) * 100).toFixed(1) + '%' : 'N/A';
@@ -1665,11 +1664,11 @@ export default function FinanceWorkspace({
     doc.text(`Event: ${title}`, 14, 28);
     doc.text(`Total Allocated: OMR ${totalBudget.toFixed(3)} | Total Spent: OMR ${totalExpenses.toFixed(3)}`, 14, 34);
 
-    const eventExpensesSum = ((eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[]).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const eventExpensesSum = acceptedExpenses.filter(e => e.committeeId === 'EVENT_EXPENSE' || e.committeeName === 'EVENT EXPENSE').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
     const rows = activeCommittees.map(c => {
       const budget = allocations[c.name] || 0;
-      const spent = (c.expenses || []).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const spent = acceptedExpenses.filter(e => e.committeeId === c.id).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
       const rem = budget - spent;
       const util = budget > 0 ? ((spent / budget) * 100).toFixed(1) + '%' : '0.0%';
       let status = 'On Track';
@@ -2684,8 +2683,8 @@ export default function FinanceWorkspace({
                     const isEventExp = commName === 'EVENT EXPENSE';
                     const matchedComm = activeCommittees.find(c => c.name.toLowerCase() === commName.toLowerCase());
                     const commExpenses = isEventExp
-                      ? ((eventFinance?.eventExpenses || eventFinance?.expenses || []) as EventCommitteeExpense[]).reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
-                      : (matchedComm?.expenses || []).reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                      ? acceptedExpenses.filter(e => e.committeeId === 'EVENT_EXPENSE' || e.committeeName === 'EVENT EXPENSE').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+                      : acceptedExpenses.filter(e => e.committeeId === matchedComm?.id).reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
                     const remaining = budgetAmount - commExpenses;
                     const utilPercent = budgetAmount > 0 ? (commExpenses / budgetAmount) * 100 : 0;
 
