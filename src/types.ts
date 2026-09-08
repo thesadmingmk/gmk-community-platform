@@ -272,25 +272,23 @@ export interface EventRegistration {
   adminReviewedBy?: string;
   adminReviewNotes?: string;
 
-  // RTCO-090 Universal WhatsApp Entry Pass Delivery Architecture & Duplicate Protection
-  entryPassNotificationStatus?: 'none' | 'pending' | 'sent' | 'failed';
-  entryPassNotificationSentAt?: string;
-  entryPassNotificationRecipient?: string;
-  entryPassNotificationMessageId?: string;
-  entryPassNotificationError?: string;
-
-  // RTCO-091 External Registration Update Delivery Architecture & Duplicate Protection
-  registrationUpdateNotificationStatus?: 'none' | 'pending' | 'sent' | 'failed';
-  registrationUpdateNotificationSentAt?: string;
-  registrationUpdateNotificationRecipient?: string;
-  registrationUpdateNotificationMessageId?: string;
-  registrationUpdateNotificationError?: string;
-
   // RTCO-095 Email Delivery Architecture Fields
   approvalEmailSentAt?: string | null;
   approvalEmailRecipient?: string | null;
   entryPassEmailSentAt?: string | null;
   entryPassEmailRecipient?: string | null;
+  entryPassEmailSendCount?: number;
+  entryPassEmailSource?: string;
+  entryPassEmailLastStatus?: string;
+
+  // Family Check-In Completion Email Fields
+  completionEmailQueuedAt?: string | null;
+  completionEmailSentAt?: string | null;
+  completionEmailRecipient?: string | null;
+  completionEmailQueueId?: string | null;
+  familyCompletionEmailSent?: boolean;
+  familyCheckInCompleted?: boolean;
+  familyCompletedAt?: string | null;
 
   // RTCO-098 Operational Cleanup / Archival for External Registrations
   operationalStatus?: 'active' | 'cleaned_up' | 'archived';
@@ -532,6 +530,24 @@ export interface EventAttendance {
   adultsAttended?: number;
   childrenAttended?: number;
   totalAttended?: number;
+  totalParticipants?: number;
+  entryPassNumber?: string;
+  primaryMemberGmkId?: string;
+  attendedAt?: string;
+  arrivedDetails?: Array<{
+    name: string;
+    category?: string;
+    arrivedAt?: string;
+    scannedBy?: string;
+  }>;
+  // Family Check-In Completion Email Fields
+  completionEmailQueuedAt?: string | null;
+  completionEmailSentAt?: string | null;
+  completionEmailRecipient?: string | null;
+  completionEmailQueueId?: string | null;
+  familyCompletionEmailSent?: boolean;
+  familyCheckInCompleted?: boolean;
+  familyCompletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

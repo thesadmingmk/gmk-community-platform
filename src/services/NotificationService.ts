@@ -1,4 +1,4 @@
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../context/AuthContext';
 import QRCode from 'qrcode';
 import { 
@@ -11,6 +11,7 @@ export interface QueueNotificationOptions {
   notificationType?: string;
   priority?: 'normal' | 'high';
   source?: string;
+  customQueueId?: string;
 }
 
 export class NotificationService {
@@ -51,9 +52,21 @@ export class NotificationService {
     };
 
     try {
-      const docRef = await addDoc(collection(db, "emailQueue"), payload);
-      console.log(`[NotificationService] Enqueued notification successfully: ${docRef.id} for ${to}`);
-      return docRef.id;
+      if (options.customQueueId) {
+        const customDocRef = doc(db, "emailQueue", options.customQueueId);
+        const existingSnap = await getDoc(customDocRef);
+        if (existingSnap.exists()) {
+          console.log(`[NotificationService] Notification already queued with ID: ${options.customQueueId}`);
+          return options.customQueueId;
+        }
+        await setDoc(customDocRef, payload);
+        console.log(`[NotificationService] Enqueued notification with custom ID: ${options.customQueueId} for ${to}`);
+        return options.customQueueId;
+      } else {
+        const docRef = await addDoc(collection(db, "emailQueue"), payload);
+        console.log(`[NotificationService] Enqueued notification successfully: ${docRef.id} for ${to}`);
+        return docRef.id;
+      }
     } catch (err: any) {
       console.error("[NotificationService] Failed to enqueue notification:", err);
       throw err;
@@ -317,7 +330,10 @@ export class NotificationService {
       registrationTypeName?: string;
       externalRegistrationTypeName?: string;
       qrCodeDataUrl?: string;
-    }
+      registeredParticipants?: string;
+      participants?: string[];
+    },
+    options?: QueueNotificationOptions
   ): Promise<string> {
     const isExt = data.isExternal || false;
     const canonicalGmkId = isExt
@@ -326,7 +342,9 @@ export class NotificationService {
 
     const resolvedName = data.recipientName || data.residentName || 'Valued Guest';
     const resolvedVenue = data.eventVenue || data.venue || 'Al Hail Greens Clubhouse / Main Lawn';
-    const resolvedCategory = data.category || data.registrationTypeName || data.externalRegistrationTypeName || (isExt ? 'External Guest' : 'Resident');
+    const resolvedCategory = isExt
+      ? (data.externalRegistrationTypeName || data.category || data.registrationTypeName || 'External Guest')
+      : (data.category || data.registrationTypeName || 'GMK Resident');
     const qrPayload = data.entryPassNumber || canonicalGmkId;
 
     // Use quickchart.io for reliable hosted QR code generation to avoid broken Base64 CID attachments in email clients
@@ -338,6 +356,8 @@ export class NotificationService {
     const formattedAmount = typeof data.amountReceived === 'number'
       ? data.amountReceived.toFixed(3)
       : String(data.amountReceived);
+
+    const resolvedParticipantsList = data.registeredParticipants || (Array.isArray(data.participants) && data.participants.length > 0 ? data.participants.join(", ") : resolvedName);
 
     const enrichedData = {
       ...data,
@@ -352,7 +372,8 @@ export class NotificationService {
       venue: resolvedVenue,
       category: resolvedCategory,
       registrationTypeName: resolvedCategory,
-      totalParticipants: data.totalParticipants || 1,
+      totalParticipants: data.totalParticipants || (Array.isArray(data.participants) ? data.participants.length : 1),
+      registeredParticipants: resolvedParticipantsList,
       receiptNumber: data.receiptNumber || 'N/A',
       entryPassNumber: data.entryPassNumber || canonicalGmkId,
       amountReceived: formattedAmount,
@@ -361,9 +382,10 @@ export class NotificationService {
     };
 
     return this.queueNotification(to, "payment_receipt_entry_pass", enrichedData, {
-      notificationType: "ENTRY_PASS",
-      priority: "high",
-      source: "payment_confirmation_flow"
+      notificationType: options?.notificationType || "ENTRY_PASS",
+      priority: options?.priority || "high",
+      source: options?.source || "payment_confirmation_flow",
+      customQueueId: options?.customQueueId
     });
   }
 
@@ -422,6 +444,56 @@ export class NotificationService {
       notificationType: "EXTERNAL_REGISTRATION_REFUND_CONFIRMED",
       priority: "high",
       source: "external_registration_refund_flow"
+    });
+  }
+
+  /**
+   * Family Check-In Completion notification.
+   * Dispatched when all eligible participants (GMK Member, Spouse, Children)
+   * belonging to a GMK event registration have completed gate check-in.
+   */
+  static async sendFamilyCheckInCompletion(
+    to: string,
+    data: {
+      gmkId: string;
+      eventName: string;
+      recipientName: string;
+      primaryMemberEmail: string;
+      eventDate?: string;
+      eventVenue?: string;
+      totalEligibleCheckedIn: number;
+      checkInDetailsHtml: string;
+      checkInDetailsText: string;
+      participants: Array<{
+        name: string;
+        relationship: string;
+        checkInDate: string;
+        checkInTime: string;
+      }>;
+      eventId: string;
+      registrationId: string;
+    },
+    customQueueId?: string
+  ): Promise<string> {
+    const enrichedData = {
+      ...data,
+      recipientName: data.recipientName || "GMK Member",
+      residentName: data.recipientName || "GMK Member",
+      gmkId: data.gmkId,
+      eventName: data.eventName || 'GMK Community Event',
+      eventDate: formatEventDate(data.eventDate),
+      eventVenue: data.eventVenue || 'Al Hail Greens Clubhouse / Main Lawn',
+      venue: data.eventVenue || 'Al Hail Greens Clubhouse / Main Lawn',
+      totalParticipants: data.totalEligibleCheckedIn,
+      totalEligibleCheckedIn: data.totalEligibleCheckedIn,
+      category: 'Resident Member'
+    };
+
+    return this.queueNotification(to, "family_checkin_completion", enrichedData, {
+      notificationType: "FAMILY_CHECKIN_COMPLETION",
+      priority: "high",
+      source: "gate_attendance_workspace",
+      customQueueId
     });
   }
 }

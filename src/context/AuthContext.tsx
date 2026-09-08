@@ -67,7 +67,7 @@ async function seedDefaultTemplates() {
     await setDoc(entryPassTemplateRef, {
       subject: "GMK Official Entry Pass & Payment Confirmed - {{eventName}} ({{gmkId}})",
       enabled: true,
-      text: `Dear {{recipientName}},\n\nYour payment for {{eventName}} has been confirmed and your Official Entry Pass is issued.\n\nRegistration & Event Details:\n- GMK ID: {{gmkId}}\n- Official Entry Pass Number: {{entryPassNumber}}\n- Event Name: {{eventName}}\n- Event Date: {{eventDate}}\n- Event Time: {{eventTime}}\n- Event Venue: {{eventVenue}}\n- Registrant Name: {{recipientName}}\n- Category: {{category}}\n- Total Participants: {{totalParticipants}}\n- Receipt Number: {{receiptNumber}}\n- Amount Paid: {{amountReceived}} OMR\n- Payment Status: {{paymentStatus}}\n\nPlease present your Official Entry Pass Number or digital QR pass at the entrance check-in counter on the day of the event.\n\nThank you,\nGreens Malayalee Koottayma (GMK)\nAl Hail Greens\ntheadmingmk@gmail.com`,
+      text: `Dear {{recipientName}},\n\nYour payment for {{eventName}} has been confirmed and your Official Entry Pass is issued.\n\nRegistration & Event Details:\n- GMK ID: {{gmkId}}\n- Official Entry Pass Number: {{entryPassNumber}}\n- Event Name: {{eventName}}\n- Event Date: {{eventDate}}\n- Event Time: {{eventTime}}\n- Event Venue: {{eventVenue}}\n- Registrant Name: {{recipientName}}\n- Category: {{category}}\n- Total Participants: {{totalParticipants}}\n- Registered Participants: {{registeredParticipants}}\n- Receipt Number: {{receiptNumber}}\n- Amount Paid: {{amountReceived}} OMR\n- Payment Status: {{paymentStatus}}\n\nPlease present your Official Entry Pass Number or digital QR pass at the entrance check-in counter on the day of the event.\n\nThank you,\nGreens Malayalee Koottayma (GMK)\nAl Hail Greens\ntheadmingmk@gmail.com`,
       html: `<div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff; overflow: hidden;">
   <div style="background-color: #0F4C2A; padding: 24px 20px; text-align: center; border-bottom: 3px solid #D4AF37;">
     <h1 style="color: #ffffff; font-size: 22px; margin: 0; font-family: Georgia, serif; font-weight: bold; letter-spacing: 0.5px;">Al Hail Greens</h1>
@@ -101,6 +101,7 @@ async function seedDefaultTemplates() {
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">GMK ID:</td><td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #0F4C2A; font-size: 14px;">{{gmkId}}</td></tr>
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Category:</td><td style="padding: 5px 0;">{{category}}</td></tr>
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Total Participants:</td><td style="padding: 5px 0; font-weight: bold; color: #0F4C2A;">{{totalParticipants}} person(s)</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Registered Participants:</td><td style="padding: 5px 0;">{{registeredParticipants}}</td></tr>
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Receipt Number:</td><td style="padding: 5px 0; font-family: monospace;">{{receiptNumber}}</td></tr>
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Amount Paid:</td><td style="padding: 5px 0; font-weight: bold; color: #0F4C2A;">{{amountReceived}} OMR</td></tr>
         <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Payment Status:</td><td style="padding: 5px 0; text-transform: uppercase; font-weight: bold; color: #15803d;">{{paymentStatus}}</td></tr>
@@ -287,6 +288,52 @@ async function seedDefaultTemplates() {
 </div>`
     }, { merge: true });
     console.log("🌱 All 5 GMK External Registration email templates seeded/updated successfully.");
+
+    const familyCheckInTemplateRef = doc(db, "emailTemplates", "family_checkin_completion");
+    await setDoc(familyCheckInTemplateRef, {
+      subject: "GMK Event Family Check-In Completed - {{eventName}} ({{gmkId}})",
+      enabled: true,
+      text: `Dear {{recipientName}},\n\nYour family check-in for {{eventName}} has been completed. All eligible registered members have successfully entered the venue.\n\nEvent & Registration Details:\n- GMK ID: {{gmkId}}\n- Event Name: {{eventName}}\n- Primary Member: {{recipientName}}\n- Family Check-In Status: Completed\n\nIndividual Check-In Details:\n{{checkInDetailsText}}\n\nWe hope you and your family enjoy the event!\n\nGreens Malayalee Koottayma (GMK) • Al Hail Greens\ntheadmingmk@gmail.com`,
+      html: `<div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff; overflow: hidden;">
+  <div style="background-color: #0F4C2A; padding: 24px 20px; text-align: center; border-bottom: 3px solid #D4AF37;">
+    <h1 style="color: #ffffff; font-size: 22px; margin: 0; font-family: Georgia, serif; font-weight: bold; letter-spacing: 0.5px;">Al Hail Greens</h1>
+    <p style="color: #F3E5AB; font-size: 11px; font-weight: bold; text-transform: uppercase; margin: 6px 0 0 0; letter-spacing: 1.5px;">Greens Malayalee Koottayma • GMK Community Events</p>
+  </div>
+  <div style="padding: 28px 24px; color: #374151; font-size: 14px; line-height: 1.6;">
+    <div style="background-color: #f0fdf4; border: 2px solid #0F4C2A; border-radius: 10px; padding: 18px 20px; margin-bottom: 24px; text-align: center;">
+      <h2 style="color: #0F4C2A; font-size: 19px; margin: 0 0 6px 0; font-family: Georgia, serif; font-weight: bold;">Family Check-In Completed</h2>
+      <p style="margin: 0; font-size: 13px; color: #166534; font-weight: 600;">All eligible registered members of your family have entered the venue.</p>
+    </div>
+
+    <p style="margin: 0 0 16px 0;">Dear <strong>{{recipientName}}</strong>,</p>
+    <p style="margin: 0 0 20px 0;">This email confirms that all eligible registered family members for <strong>{{eventName}}</strong> have successfully checked in at the gate.</p>
+
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <h3 style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #0F4C2A; font-weight: bold;">Event & Registration Information</h3>
+      <table style="width: 100%; font-size: 13px; color: #374151; border-collapse: collapse;">
+        <tr><td style="padding: 5px 0; width: 40%; font-weight: bold; color: #4b5563;">GMK ID:</td><td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #0F4C2A; font-size: 14px;">{{gmkId}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Event Name:</td><td style="padding: 5px 0; font-weight: bold;">{{eventName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Primary Member:</td><td style="padding: 5px 0;">{{recipientName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Status:</td><td style="padding: 5px 0; font-weight: bold; color: #15803d; text-transform: uppercase;">Completed</td></tr>
+      </table>
+    </div>
+
+    <div style="margin: 24px 0;">
+      <h3 style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #0F4C2A; font-weight: bold;">Individual Check-In Details</h3>
+      {{checkInDetailsHtml}}
+    </div>
+
+    <div style="background-color: #fefcf3; border-left: 4px solid #D4AF37; padding: 14px 16px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 12.5px; color: #78350f;">
+      <p style="margin: 0;">We hope you and your family have a wonderful time at <strong>{{eventName}}</strong>!</p>
+    </div>
+  </div>
+  <div style="text-align: center; padding: 20px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; line-height: 1.5;">
+    <p style="margin: 0; font-weight: bold; color: #374151;">Greens Malayalee Koottayma (GMK) • Al Hail Greens</p>
+    <p style="margin: 4px 0 0 0;">For inquiries or assistance, please contact <a href="mailto:theadmingmk@gmail.com" style="color: #0F4C2A; text-decoration: underline;">theadmingmk@gmail.com</a></p>
+  </div>
+</div>`
+    }, { merge: true });
+    console.log("🌱 Default family check-in completion email template seeded/updated successfully.");
   } catch (err: any) {
     console.warn("⚠️ Non-blocking warning: failed to seed default email template", err.message);
   }

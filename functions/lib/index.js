@@ -9,12 +9,31 @@ const firestore_2 = require("firebase-admin/firestore");
 const auth_1 = require("firebase-admin/auth");
 const firebase_functions_1 = require("firebase-functions");
 const nodemailer = require("nodemailer");
+const QRCode = require("qrcode");
 const template_1 = require("./utils/template");
 // Define the custom Firestore Database ID for this environment
 const FIRESTORE_DATABASE_ID = "ai-studio-7d23ee96-a783-4875-9630-4390202b70b9";
-// Initialize Firebase Admin SDK pointing to the custom Firestore database
-(0, app_1.initializeApp)();
-const db = (0, firestore_2.getFirestore)(FIRESTORE_DATABASE_ID);
+// Lazy-initialized Firestore instance to avoid blocking global scope during deployment discovery
+let _db = null;
+function getDbInstance() {
+    if (!_db) {
+        if ((0, app_1.getApps)().length === 0) {
+            (0, app_1.initializeApp)();
+        }
+        _db = (0, firestore_2.getFirestore)(FIRESTORE_DATABASE_ID);
+    }
+    return _db;
+}
+const db = new Proxy({}, {
+    get(_target, prop, receiver) {
+        const realDb = getDbInstance();
+        const value = Reflect.get(realDb, prop, receiver);
+        if (typeof value === "function") {
+            return value.bind(realDb);
+        }
+        return value;
+    }
+});
 // Define Gmail SMTP Secrets (stored securely in Google Cloud Secret Manager)
 const gmkSmtpUser = (0, params_1.defineSecret)("GMK_SMTP_USER");
 const gmkSmtpPassword = (0, params_1.defineSecret)("GMK_SMTP_PASSWORD");
@@ -569,14 +588,11 @@ exports.processEventRefund = (0, https_1.onCall)(async (request) => {
 });
 // Define WhatsApp Secrets
 const whatsappAccessToken = (0, params_1.defineSecret)("WHATSAPP_ACCESS_TOKEN");
-const whatsappPhoneNumberId = (0, params_1.defineSecret)("WHATSAPP_PHONE_NUMBER_ID");
 /**
  * Callable function to send a WhatsApp notification.
  */
 exports.sendWhatsAppNotification = (0, https_1.onCall)({
-    secrets: [whatsappAccessToken, whatsappPhoneNumberId],
-    cors: true,
-    invoker: "public"
+    secrets: [whatsappAccessToken]
 }, async (request) => {
     // Check auth
     if (!request.auth) {
@@ -588,16 +604,7 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
     }
     try {
         const token = whatsappAccessToken.value();
-        let phoneId;
-        try {
-            phoneId = whatsappPhoneNumberId.value();
-        }
-        catch (err) {
-            phoneId = "1302067342984705";
-        }
-        if (!phoneId) {
-            phoneId = "1302067342984705";
-        }
+        const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || "1302067342984705";
         if (!token) {
             throw new https_1.HttpsError("failed-precondition", "WhatsApp integration is missing required configuration.");
         }
@@ -628,12 +635,47 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
         }
         else if (templateName === "gmk_entry_pass_ready") {
             // Template #2: Universal Official Entry Pass Ready Notification
-            // Header: Optional Image
-            if (templateData.headerMediaId) {
+            let finalHeaderMediaId = templateData.headerMediaId;
+            if (!finalHeaderMediaId && templateData.qrPayload) {
+                try {
+                    const qrBuffer = await QRCode.toBuffer(templateData.qrPayload, {
+                        type: "png",
+                        margin: 1,
+                        scale: 10,
+                        color: { dark: "#0f4c2a", light: "#ffffff" }
+                    });
+                    const blob = new Blob([new Uint8Array(qrBuffer)], { type: "image/png" });
+                    const formData = new FormData();
+                    formData.append("messaging_product", "whatsapp");
+                    formData.append("file", blob, "qr.png");
+                    const uploadUrl = `https://graph.facebook.com/v21.0/${phoneId}/media`;
+                    const uploadRes = await fetch(uploadUrl, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${token}`
+                        },
+                        body: formData
+                    });
+                    const uploadData = await uploadRes.json();
+                    if (!uploadRes.ok || !uploadData.id) {
+                        firebase_functions_1.logger.error("Meta Media Upload Error:", uploadData);
+                        throw new https_1.HttpsError("internal", `MEDIA_UPLOAD failed: ${uploadData.error?.message || "Unknown error"} - ${uploadData.error?.error_data?.details || ""}`);
+                    }
+                    finalHeaderMediaId = uploadData.id;
+                    firebase_functions_1.logger.info("Successfully uploaded QR code to Meta", { mediaId: finalHeaderMediaId });
+                }
+                catch (err) {
+                    if (err instanceof https_1.HttpsError)
+                        throw err;
+                    firebase_functions_1.logger.error("Error generating or uploading QR code:", err);
+                    throw new https_1.HttpsError("internal", `MEDIA_UPLOAD failed: ${err.message}`);
+                }
+            }
+            if (finalHeaderMediaId) {
                 templateComponents.push({
                     type: "header",
                     parameters: [
-                        { type: "image", image: { id: templateData.headerMediaId } }
+                        { type: "image", image: { id: finalHeaderMediaId } }
                     ]
                 });
             }
@@ -645,13 +687,12 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
                     ]
                 });
             }
-            // Body: {{1}} Recipient Name, {{2}} Event Name, {{3}} Entry Pass Number
+            // Body: {{1}} Recipient Name, {{2}} Event Name
             templateComponents.push({
                 type: "body",
                 parameters: [
                     { type: "text", text: templateData.recipientName || templateData.primaryRegistrantName || "Community Member" },
-                    { type: "text", text: templateData.eventName || "Community Gathering" },
-                    { type: "text", text: templateData.entryPassNumber || "PASS-PENDING" }
+                    { type: "text", text: templateData.eventName || "Community Gathering" }
                 ]
             });
         }
@@ -722,7 +763,7 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
                 simulatedPayload: payload
             };
         }
-        const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
+        const url = `https://graph.facebook.com/v21.0/${phoneId}/messages`;
         const response = await fetch(url, {
             method: "POST",
             headers: {
@@ -734,7 +775,14 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
         const data = await response.json();
         if (!response.ok) {
             firebase_functions_1.logger.error("WhatsApp API Error:", data);
-            throw new https_1.HttpsError("internal", `WhatsApp API rejected the request: ${data.error?.message || "Unknown error"}`);
+            let errorMsg = data.error?.message || "Unknown error";
+            if (data.error?.error_data?.details)
+                errorMsg += ` - Details: ${data.error.error_data.details}`;
+            if (data.error?.error_subcode)
+                errorMsg += ` - Subcode: ${data.error.error_subcode}`;
+            if (data.error?.fbtrace_id)
+                errorMsg += ` - Trace ID: ${data.error.fbtrace_id}`;
+            throw new https_1.HttpsError("internal", `WhatsApp API rejected the request: ${errorMsg}`);
         }
         return { success: true, messageId: data.messages?.[0]?.id };
     }

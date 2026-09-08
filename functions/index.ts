@@ -1,7 +1,7 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { initializeApp } from "firebase-admin/app";
+import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { logger } from "firebase-functions";
@@ -11,9 +11,28 @@ import { replacePlaceholders } from "./utils/template";
 // Define the custom Firestore Database ID for this environment
 const FIRESTORE_DATABASE_ID = "ai-studio-7d23ee96-a783-4875-9630-4390202b70b9";
 
-// Initialize Firebase Admin SDK pointing to the custom Firestore database
-initializeApp();
-const db = getFirestore(FIRESTORE_DATABASE_ID);
+// Lazy-initialized Firestore instance to avoid blocking global scope during deployment discovery
+let _db: FirebaseFirestore.Firestore | null = null;
+function getDbInstance(): FirebaseFirestore.Firestore {
+  if (!_db) {
+    if (getApps().length === 0) {
+      initializeApp();
+    }
+    _db = getFirestore(FIRESTORE_DATABASE_ID);
+  }
+  return _db;
+}
+
+const db = new Proxy({} as FirebaseFirestore.Firestore, {
+  get(_target, prop, receiver) {
+    const realDb = getDbInstance();
+    const value = Reflect.get(realDb, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(realDb);
+    }
+    return value;
+  }
+});
 
 // Define Gmail SMTP Secrets (stored securely in Google Cloud Secret Manager)
 const gmkSmtpUser = defineSecret("GMK_SMTP_USER");
@@ -111,12 +130,113 @@ export const processEmailQueue = onDocumentCreated({
     }
 
     // Fetch email templates
-    const templateDoc = await db.doc(`emailTemplates/${templateName}`).get();
-    if (!templateDoc.exists) {
+    let templateDoc = await db.doc(`emailTemplates/${templateName}`).get();
+    let templateData = templateDoc.exists ? templateDoc.data() : null;
+
+    if (!templateData && templateName === "family_checkin_completion") {
+      templateData = {
+        enabled: true,
+        subject: "GMK Event Family Check-In Completed - {{eventName}} ({{gmkId}})",
+        text: `Dear {{recipientName}},\n\nYour family check-in for {{eventName}} has been completed. All eligible registered members have successfully entered the venue.\n\nEvent & Registration Details:\n- GMK ID: {{gmkId}}\n- Event Name: {{eventName}}\n- Primary Member: {{recipientName}}\n- Family Check-In Status: Completed\n\nIndividual Check-In Details:\n{{checkInDetailsText}}\n\nWe hope you and your family enjoy the event!\n\nGreens Malayalee Koottayma (GMK) • Al Hail Greens\ntheadmingmk@gmail.com`,
+        html: `<div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff; overflow: hidden;">
+  <div style="background-color: #0F4C2A; padding: 24px 20px; text-align: center; border-bottom: 3px solid #D4AF37;">
+    <h1 style="color: #ffffff; font-size: 22px; margin: 0; font-family: Georgia, serif; font-weight: bold; letter-spacing: 0.5px;">Al Hail Greens</h1>
+    <p style="color: #F3E5AB; font-size: 11px; font-weight: bold; text-transform: uppercase; margin: 6px 0 0 0; letter-spacing: 1.5px;">Greens Malayalee Koottayma • GMK Community Events</p>
+  </div>
+  <div style="padding: 28px 24px; color: #374151; font-size: 14px; line-height: 1.6;">
+    <div style="background-color: #f0fdf4; border: 2px solid #0F4C2A; border-radius: 10px; padding: 18px 20px; margin-bottom: 24px; text-align: center;">
+      <h2 style="color: #0F4C2A; font-size: 19px; margin: 0 0 6px 0; font-family: Georgia, serif; font-weight: bold;">Family Check-In Completed</h2>
+      <p style="margin: 0; font-size: 13px; color: #166534; font-weight: 600;">All eligible registered members of your family have entered the venue.</p>
+    </div>
+    <p style="margin: 0 0 16px 0;">Dear <strong>{{recipientName}}</strong>,</p>
+    <p style="margin: 0 0 20px 0;">This email confirms that all eligible registered family members for <strong>{{eventName}}</strong> have successfully checked in at the gate.</p>
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <h3 style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #0F4C2A; font-weight: bold;">Event & Registration Information</h3>
+      <table style="width: 100%; font-size: 13px; color: #374151; border-collapse: collapse;">
+        <tr><td style="padding: 5px 0; width: 40%; font-weight: bold; color: #4b5563;">GMK ID:</td><td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #0F4C2A; font-size: 14px;">{{gmkId}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Event Name:</td><td style="padding: 5px 0; font-weight: bold;">{{eventName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Primary Member:</td><td style="padding: 5px 0;">{{recipientName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Status:</td><td style="padding: 5px 0; font-weight: bold; color: #15803d; text-transform: uppercase;">Completed</td></tr>
+      </table>
+    </div>
+    <div style="margin: 24px 0;">
+      <h3 style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #0F4C2A; font-weight: bold;">Individual Check-In Details</h3>
+      {{checkInDetailsHtml}}
+    </div>
+    <div style="background-color: #fefcf3; border-left: 4px solid #D4AF37; padding: 14px 16px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 12.5px; color: #78350f;">
+      <p style="margin: 0;">We hope you and your family have a wonderful time at <strong>{{eventName}}</strong>!</p>
+    </div>
+  </div>
+  <div style="text-align: center; padding: 20px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; line-height: 1.5;">
+    <p style="margin: 0; font-weight: bold; color: #374151;">Greens Malayalee Koottayma (GMK) • Al Hail Greens</p>
+    <p style="margin: 4px 0 0 0;">For inquiries or assistance, please contact <a href="mailto:theadmingmk@gmail.com" style="color: #0F4C2A; text-decoration: underline;">theadmingmk@gmail.com</a></p>
+  </div>
+</div>`
+      };
+    }
+
+    if (!templateData && templateName === "payment_receipt_entry_pass") {
+      templateData = {
+        enabled: true,
+        subject: "GMK Official Entry Pass & Payment Confirmed - {{eventName}} ({{gmkId}})",
+        text: `Dear {{recipientName}},\n\nYour payment for {{eventName}} has been confirmed and your Official Entry Pass is issued.\n\nRegistration & Event Details:\n- GMK ID: {{gmkId}}\n- Official Entry Pass Number: {{entryPassNumber}}\n- Event Name: {{eventName}}\n- Event Date: {{eventDate}}\n- Event Time: {{eventTime}}\n- Event Venue: {{eventVenue}}\n- Registrant Name: {{recipientName}}\n- Category: {{category}}\n- Total Participants: {{totalParticipants}}\n- Registered Participants: {{registeredParticipants}}\n- Receipt Number: {{receiptNumber}}\n- Amount Paid: {{amountReceived}} OMR\n- Payment Status: {{paymentStatus}}\n\nPlease present your Official Entry Pass Number or digital QR pass at the entrance check-in counter on the day of the event.\n\nThank you,\nGreens Malayalee Koottayma (GMK)\nAl Hail Greens\ntheadmingmk@gmail.com`,
+        html: `<div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 0; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff; overflow: hidden;">
+  <div style="background-color: #0F4C2A; padding: 24px 20px; text-align: center; border-bottom: 3px solid #D4AF37;">
+    <h1 style="color: #ffffff; font-size: 22px; margin: 0; font-family: Georgia, serif; font-weight: bold; letter-spacing: 0.5px;">Al Hail Greens</h1>
+    <p style="color: #F3E5AB; font-size: 11px; font-weight: bold; text-transform: uppercase; margin: 6px 0 0 0; letter-spacing: 1.5px;">Greens Malayalee Koottayma • GMK Community Events</p>
+  </div>
+  <div style="padding: 28px 24px; color: #374151; font-size: 14px; line-height: 1.6;">
+    <h2 style="color: #0F4C2A; font-size: 19px; margin-top: 0; margin-bottom: 16px; font-family: Georgia, serif; font-weight: bold;">Payment Confirmed & Official Entry Pass</h2>
+    <p style="margin: 0 0 16px 0;">Dear <strong>{{recipientName}}</strong>,</p>
+    <p style="margin: 0 0 20px 0;">Your payment for <strong>{{eventName}}</strong> has been confirmed. Your official Entry Pass and gate admission QR code have been issued below.</p>
+    
+    <div style="background-color: #f9fafb; border: 2px solid #0F4C2A; border-radius: 10px; padding: 20px; margin: 24px 0; text-align: center;">
+      <div style="margin-bottom: 16px;">
+        <img src="{{qrCodeDataUrl}}" width="160" height="160" alt="Official Entry Pass QR" style="display: block; margin: 0 auto; border-radius: 8px; border: 1px solid #d1d5db; background: #ffffff; padding: 6px;" />
+        <p style="margin: 6px 0 0 0; font-size: 11px; color: #6b7280; font-weight: bold;">Scan at gate for instant check-in</p>
+      </div>
+      <p style="margin: 0 0 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #15803d; font-weight: bold;">Official Entry Pass Number</p>
+      <p style="margin: 0; font-size: 22px; font-family: monospace; font-weight: bold; color: #0f4c2a; letter-spacing: 2px;">{{entryPassNumber}}</p>
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #d1d5db; font-size: 13px; color: #374151;">
+        <p style="margin: 0; font-size: 13px;"><strong>GMK ID:</strong> <span style="font-family: monospace; font-weight: bold; color: #0F4C2A; font-size: 14px;">{{gmkId}}</span></p>
+      </div>
+    </div>
+
+    <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <h3 style="margin: 0 0 12px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #0F4C2A; font-weight: bold;">Registration & Event Details</h3>
+      <table style="width: 100%; font-size: 13px; color: #374151; border-collapse: collapse;">
+        <tr><td style="padding: 5px 0; width: 40%; font-weight: bold; color: #4b5563;">Event Name:</td><td style="padding: 5px 0; font-weight: bold;">{{eventName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Event Date:</td><td style="padding: 5px 0;">{{eventDate}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Event Time:</td><td style="padding: 5px 0;">{{eventTime}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Event Venue:</td><td style="padding: 5px 0;">{{eventVenue}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Registrant Name:</td><td style="padding: 5px 0;">{{recipientName}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">GMK ID:</td><td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #0F4C2A; font-size: 14px;">{{gmkId}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Category:</td><td style="padding: 5px 0;">{{category}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Total Participants:</td><td style="padding: 5px 0; font-weight: bold; color: #0F4C2A;">{{totalParticipants}} person(s)</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Registered Participants:</td><td style="padding: 5px 0;">{{registeredParticipants}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Receipt Number:</td><td style="padding: 5px 0; font-family: monospace;">{{receiptNumber}}</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Amount Paid:</td><td style="padding: 5px 0; font-weight: bold; color: #0F4C2A;">{{amountReceived}} OMR</td></tr>
+        <tr><td style="padding: 5px 0; font-weight: bold; color: #4b5563;">Payment Status:</td><td style="padding: 5px 0; text-transform: uppercase; font-weight: bold; color: #15803d;">{{paymentStatus}}</td></tr>
+      </table>
+    </div>
+
+    <div style="background-color: #fefcf3; border-left: 4px solid #D4AF37; padding: 14px 16px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 12.5px; color: #78350f;">
+      <p style="margin: 0 0 4px 0; font-weight: bold; color: #92400e;">Gate Admission Notice:</p>
+      <p style="margin: 0;">Please present your digital QR code or state your Entry Pass Number at the entrance verification desk. We look forward to seeing you!</p>
+    </div>
+  </div>
+  <div style="text-align: center; padding: 20px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; line-height: 1.5;">
+    <p style="margin: 0; font-weight: bold; color: #374151;">Greens Malayalee Koottayma (GMK) • Al Hail Greens</p>
+    <p style="margin: 4px 0 0 0;">For inquiries or assistance, please contact <a href="mailto:theadmingmk@gmail.com" style="color: #0F4C2A; text-decoration: underline;">theadmingmk@gmail.com</a></p>
+  </div>
+</div>`
+      };
+    }
+
+    if (!templateData) {
       throw new Error(`Email template 'emailTemplates/${templateName}' does not exist in Firestore.`);
     }
 
-    const templateData = templateDoc.data();
     if (templateData?.enabled === false) {
       throw new Error(`Email template 'emailTemplates/${templateName}' is currently marked disabled.`);
     }
@@ -207,15 +327,44 @@ export const processEmailQueue = onDocumentCreated({
     logger.info(`[Queue: ${queueId}] Dispatch success! Message ID: ${sendInfo.messageId}. Duration: ${duration}ms`);
 
     // Update the document to reflect successful completion
+    const sentIso = new Date().toISOString();
     await docRef.update({
       status: "sent",
       deliveryStatus: "accepted",
-      processedAt: new Date().toISOString(),
-      sentAt: new Date().toISOString(),
+      processedAt: sentIso,
+      sentAt: sentIso,
       messageId: sendInfo.messageId,
       attempts: currentAttempts + 1,
       error: null
     });
+
+    // If family_checkin_completion, update attendance and registration completionEmailSentAt
+    if (templateName === "family_checkin_completion") {
+      const payloadData = data.data || {};
+      const targetGmkId = payloadData.gmkId;
+      const targetEventId = payloadData.eventId;
+      const targetRegistrationId = payloadData.registrationId;
+      if (targetGmkId && targetEventId) {
+        try {
+          await db.collection("eventAttendance").doc(`att_${targetGmkId}_${targetEventId}`).set({
+            completionEmailSentAt: sentIso,
+            familyCompletionEmailSent: true
+          }, { merge: true });
+        } catch (auditErr) {
+          logger.warn(`[Queue: ${queueId}] Non-blocking warning: failed to update eventAttendance sentAt:`, auditErr);
+        }
+      }
+      if (targetRegistrationId) {
+        try {
+          await db.collection("event_registrations").doc(targetRegistrationId).set({
+            completionEmailSentAt: sentIso,
+            familyCompletionEmailSent: true
+          }, { merge: true });
+        } catch (auditErr) {
+          logger.warn(`[Queue: ${queueId}] Non-blocking warning: failed to update event_registrations sentAt:`, auditErr);
+        }
+      }
+    }
 
   } catch (error: any) {
     const duration = Date.now() - startTime;
@@ -646,192 +795,3 @@ export const processEventRefund = onCall(async (request: any) => {
   return resultPayload;
 });
 
-// Define WhatsApp Secrets
-const whatsappAccessToken = defineSecret("WHATSAPP_ACCESS_TOKEN");
-const whatsappPhoneNumberId = defineSecret("WHATSAPP_PHONE_NUMBER_ID");
-
-/**
- * Callable function to send a WhatsApp notification.
- */
-export const sendWhatsAppNotification = onCall({
-  secrets: [whatsappAccessToken, whatsappPhoneNumberId],
-  cors: true,
-  invoker: "public"
-}, async (request: any) => {
-  // Check auth
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "User must be authenticated to send WhatsApp messages.");
-  }
-
-  const { to, templateName, templateData = {}, components, dryRun = false } = request.data;
-  
-  if (!to || !templateName) {
-    throw new HttpsError("invalid-argument", "Missing required fields 'to' or 'templateName'.");
-  }
-
-  try {
-    const token = whatsappAccessToken.value();
-    let phoneId;
-    try {
-      phoneId = whatsappPhoneNumberId.value();
-    } catch(err) {
-      phoneId = "1302067342984705";
-    }
-    
-    if (!phoneId) {
-      phoneId = "1302067342984705";
-    }
-
-    if (!token) {
-      throw new HttpsError("failed-precondition", "WhatsApp integration is missing required configuration.");
-    }
-
-    // Format recipient phone number for Meta WhatsApp API:
-    // Strictly pure digits without '+' or '00', preserving international country codes.
-    // Example: +91 8589055855 -> 918589055855
-    let formattedPhone = to.replace(/[^0-9]/g, '');
-    if (formattedPhone.startsWith('00')) {
-      formattedPhone = formattedPhone.substring(2);
-    }
-    // Oman legacy number check: if it's exactly 8 digits, prepend 968
-    if (formattedPhone.length === 8) {
-      formattedPhone = '968' + formattedPhone;
-    }
-    // India legacy mobile check: if it's exactly 10 digits starting with 6, 7, 8, or 9, prepend 91
-    else if (formattedPhone.length === 10 && ['6', '7', '8', '9'].includes(formattedPhone[0])) {
-      formattedPhone = '91' + formattedPhone;
-    }
-    // UAE legacy check: if it's exactly 9 digits starting with 5, prepend 971
-    else if (formattedPhone.length === 9 && formattedPhone.startsWith('5')) {
-      formattedPhone = '971' + formattedPhone;
-    }
-
-    // Build template components
-    let templateComponents: any[] = [];
-
-    if (Array.isArray(components) && components.length > 0) {
-      // Direct custom components
-      templateComponents = components;
-    } else if (templateName === "gmk_entry_pass_ready") {
-      // Template #2: Universal Official Entry Pass Ready Notification
-      // Header: Optional Image
-      if (templateData.headerMediaId) {
-        templateComponents.push({
-          type: "header",
-          parameters: [
-            { type: "image", image: { id: templateData.headerMediaId } }
-          ]
-        });
-      } else if (templateData.headerImageUrl) {
-        templateComponents.push({
-          type: "header",
-          parameters: [
-            { type: "image", image: { link: templateData.headerImageUrl } }
-          ]
-        });
-      }
-
-      // Body: {{1}} Recipient Name, {{2}} Event Name, {{3}} Entry Pass Number
-      templateComponents.push({
-        type: "body",
-        parameters: [
-          { type: "text", text: templateData.recipientName || templateData.primaryRegistrantName || "Community Member" },
-          { type: "text", text: templateData.eventName || "Community Gathering" },
-          { type: "text", text: templateData.entryPassNumber || "PASS-PENDING" }
-        ]
-      });
-    } else if (templateName === "gmk_external_registration_update") {
-      // Template #1: External Registrant Registration Update
-      // Category: Marketing
-      // Variables:
-      // {{1}} = Registrant name
-      // {{2}} = Event name
-      // {{3}} = Registration Reference ID
-      templateComponents = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: templateData.recipientName || templateData.primaryRegistrantName || "Community Member" },
-            { type: "text", text: templateData.eventName || "Community Event" },
-            { type: "text", text: templateData.referenceId || templateData.publicReference || templateData.registrationId || "N/A" }
-          ]
-        }
-      ];
-    } else if (templateName === "gmk_registration_confirmed") {
-      // Backward compatibility during Meta review transition
-      templateComponents = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: templateData.recipientName || templateData.primaryRegistrantName || "Community Member" },
-            { type: "text", text: templateData.eventName || "Community Event" },
-            { type: "text", text: templateData.referenceId || templateData.publicReference || templateData.registrationId || "N/A" }
-          ]
-        }
-      ];
-    } else {
-      // Generic template fallback
-      templateComponents = [
-        {
-          type: "body",
-          parameters: Object.keys(templateData).map((key) => ({
-            type: "text",
-            text: String(templateData[key])
-          }))
-        }
-      ];
-    }
-
-    const payload = {
-      messaging_product: "whatsapp",
-      to: formattedPhone,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: "en" },
-        components: templateComponents
-      }
-    };
-
-    // RTCO-090 Safeguard: If dryRun is requested, simulate without calling external Meta API
-    if (dryRun) {
-      logger.info("[WHATSAPP-DRY-RUN] Simulated message delivery:", {
-        to: formattedPhone,
-        templateName,
-        payload
-      });
-      return {
-        success: true,
-        dryRun: true,
-        messageId: `dry_run_msg_${Date.now()}`,
-        simulatedPayload: payload
-      };
-    }
-
-    const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      logger.error("WhatsApp API Error:", data);
-      throw new HttpsError("internal", `WhatsApp API rejected the request: ${data.error?.message || "Unknown error"}`);
-    }
-
-    return { success: true, messageId: data.messages?.[0]?.id };
-  } catch (error: any) {
-    logger.error("sendWhatsAppNotification error:", error);
-    if (error instanceof HttpsError) {
-      throw error;
-    }
-    throw new HttpsError("internal", error.message || "Failed to send WhatsApp message.");
-  }
-});
