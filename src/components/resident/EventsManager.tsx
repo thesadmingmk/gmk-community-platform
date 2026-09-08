@@ -100,7 +100,12 @@ export default function EventsManager({ residentProfile, onViewEventDetails }: E
       const passNo = viewingRegDetails.entryPassNumber || `PASS-${viewingRegDetails.eventId.slice(-6).toUpperCase()}-${viewingRegDetails.primaryMemberGmkId || viewingRegDetails.id.slice(-6).toUpperCase()}`;
       // RTCO-053: Do NOT encode unnecessary personal information inside the QR payload.
       const payload = passNo;
-      QRCode.toDataURL(payload, { margin: 1, width: 220, color: { dark: '#0f4c2a', light: '#ffffff' } })
+      QRCode.toDataURL(payload, { 
+        margin: 4, 
+        width: 220, 
+        errorCorrectionLevel: 'H',
+        color: { dark: '#000000', light: '#ffffff' } 
+      })
         .then(url => setQrDataUrl(url))
         .catch(err => console.error("QR Code Error:", err));
     } else {

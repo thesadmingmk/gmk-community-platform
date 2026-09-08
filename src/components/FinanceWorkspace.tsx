@@ -47,6 +47,7 @@ import { createAuditLog } from '../utils/audit';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
 import { NotificationService } from '../services/NotificationService';
 import { resolveEventDetails, formatExternalGmkId, isExternalGmkId } from '../utils/gmkIdHelper';
+import ReportExportButton from './shared/ReportExportButton';
 
 export function formatCategoryLabel(rawIdOrName?: string | null): string {
   if (!rawIdOrName) return 'Event';
@@ -3420,13 +3421,18 @@ export default function FinanceWorkspace({
                   <p className="text-xs text-stone-500 font-bold">Comprehensive accounting of opening balance, registration income, sponsorships, and total centralized expenditures.</p>
                 </div>
                 <div className="pt-3 border-t border-stone-100">
-                  <button 
-                    onClick={generateFinancialSummaryPDF}
+                  <ReportExportButton 
+                    exportType="pdf"
+                    onExport={generateFinancialSummaryPDF}
+                    label="Download Statement PDF"
+                    generatingLabel="Generating Statement..."
+                    downloadedLabel="Statement Downloaded"
+                    failedLabel="Download Failed"
+                    reportName="Financial Statement"
+                    successMessage="✓ Statement PDF downloaded successfully"
                     className="px-4 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer shadow-xs"
-                  >
-                    <Download className="w-4 h-4 text-[#d4af37]" />
-                    <span>Download Statement PDF</span>
-                  </button>
+                    icon={<Download className="w-4 h-4 text-[#d4af37]" />}
+                  />
                 </div>
               </div>
 
@@ -3445,13 +3451,18 @@ export default function FinanceWorkspace({
                   <p className="text-xs text-stone-500 font-bold">Detailed breakdown of allocations, actual expense utilization, and remaining margins across all operational committees.</p>
                 </div>
                 <div className="pt-3 border-t border-stone-100">
-                  <button 
-                    onClick={generateCommitteeBudgetPDF}
+                  <ReportExportButton 
+                    exportType="pdf"
+                    onExport={generateCommitteeBudgetPDF}
+                    label="Download Budgets PDF"
+                    generatingLabel="Generating Budgets..."
+                    downloadedLabel="Budgets Downloaded"
+                    failedLabel="Download Failed"
+                    reportName="Committee Budgets"
+                    successMessage="✓ Committee Budgets PDF downloaded successfully"
                     className="px-4 py-2.5 bg-blue-700 text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-blue-800 transition-colors w-full flex items-center justify-center space-x-2 cursor-pointer shadow-xs"
-                  >
-                    <Download className="w-4 h-4 text-[#d4af37]" />
-                    <span>Download Budgets PDF</span>
-                  </button>
+                    icon={<Download className="w-4 h-4 text-[#d4af37]" />}
+                  />
                 </div>
               </div>
 
@@ -3472,24 +3483,34 @@ export default function FinanceWorkspace({
                   <p className="text-xs text-stone-500 font-bold">Complete governance ledger of all committee and event expenses, payer sources (Treasury, Resident, Sponsor), review statuses, and settlement tracking.</p>
                 </div>
                 <div className="pt-3 border-t border-stone-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button 
-                    onClick={handleExportExpensesExcel}
+                  <ReportExportButton 
+                    exportType="excel"
+                    onExport={handleExportExpensesExcel}
                     disabled={centralizedExpenses.length === 0}
+                    label="Export Excel"
+                    generatingLabel="Generating Excel..."
+                    downloadedLabel="Excel Downloaded"
+                    failedLabel="Excel Failed"
+                    reportName="Expenses Ledger"
+                    successMessage="✓ Expenses Excel downloaded successfully"
                     className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-black uppercase text-xs tracking-wider rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
                     title="Export Centralized Expenses to Excel"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                    <span>Export Excel</span>
-                  </button>
-                  <button 
-                    onClick={handleExportExpensesPDF}
+                    icon={<FileSpreadsheet className="w-4 h-4 text-emerald-700" />}
+                  />
+                  <ReportExportButton 
+                    exportType="pdf"
+                    onExport={handleExportExpensesPDF}
                     disabled={centralizedExpenses.length === 0}
+                    label="Export PDF"
+                    generatingLabel="Generating PDF..."
+                    downloadedLabel="PDF Downloaded"
+                    failedLabel="PDF Failed"
+                    reportName="Expenses Ledger"
+                    successMessage="✓ Expenses PDF downloaded successfully"
                     className="px-3.5 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                     title="Export Centralized Expenses to PDF"
-                  >
-                    <FileText className="w-4 h-4 text-[#d4af37]" />
-                    <span>Export PDF</span>
-                  </button>
+                    icon={<FileText className="w-4 h-4 text-[#d4af37]" />}
+                  />
                 </div>
               </div>
 
@@ -3510,22 +3531,32 @@ export default function FinanceWorkspace({
                   <p className="text-xs text-stone-500 font-bold">Detailed audit report of committee out-of-pocket reimbursement payables and registration overpayment/cancellation refund disbursements.</p>
                 </div>
                 <div className="pt-3 border-t border-stone-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button 
-                    onClick={handleExportRefundsExcel}
+                  <ReportExportButton 
+                    exportType="excel"
+                    onExport={handleExportRefundsExcel}
+                    label="Export Excel"
+                    generatingLabel="Generating Excel..."
+                    downloadedLabel="Excel Downloaded"
+                    failedLabel="Excel Failed"
+                    reportName="Refunds & Payables"
+                    successMessage="✓ Refunds & Payables Excel downloaded successfully"
                     className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-900 font-black uppercase text-xs tracking-wider rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-2xs"
                     title="Export Refunds & Payables to Excel"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                    <span>Export Excel</span>
-                  </button>
-                  <button 
-                    onClick={handleExportRefundsPDF}
+                    icon={<FileSpreadsheet className="w-4 h-4 text-emerald-700" />}
+                  />
+                  <ReportExportButton 
+                    exportType="pdf"
+                    onExport={handleExportRefundsPDF}
+                    label="Export PDF"
+                    generatingLabel="Generating PDF..."
+                    downloadedLabel="PDF Downloaded"
+                    failedLabel="PDF Failed"
+                    reportName="Refunds & Payables"
+                    successMessage="✓ Refunds & Payables PDF downloaded successfully"
                     className="px-3.5 py-2.5 bg-[#0f4c2a] text-white font-black uppercase text-xs tracking-wider rounded-xl hover:bg-[#0c3e22] transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
                     title="Export Refunds & Payables to PDF"
-                  >
-                    <FileText className="w-4 h-4 text-[#d4af37]" />
-                    <span>Export PDF</span>
-                  </button>
+                    icon={<FileText className="w-4 h-4 text-[#d4af37]" />}
+                  />
                 </div>
               </div>
             </div>

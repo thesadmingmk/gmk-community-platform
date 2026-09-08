@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPhoneWithCountryCode } from '../../utils/phoneValidation';
 import { formatExternalGmkId } from '../../utils/gmkIdHelper';
+import ReportExportButton from './ReportExportButton';
 
 type FilterState = 'ALL' | 'REGISTERED_PAID' | 'REGISTERED_NOT_PAID' | 'NOT_REGISTERED';
 
@@ -488,24 +489,36 @@ export default function AttendanceReport({ initialEventId, hideSelector }: { ini
               />
             </div>
             <div className="flex gap-1 shrink-0">
-              <button
-                onClick={exportPDF}
+              <ReportExportButton
+                exportType="pdf"
+                onExport={exportPDF}
                 disabled={loading || filteredRows.length === 0}
+                label="PDF"
+                generatingLabel="Generating..."
+                downloadedLabel="Downloaded"
+                failedLabel="Failed"
+                reportName="Attendance Status"
+                successMessage="✓ PDF downloaded successfully"
                 className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl border border-red-200 text-xs font-extrabold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 title="Export PDF"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">PDF</span>
-              </button>
-              <button
-                onClick={exportExcel}
+                hideTextOnMobile={true}
+                icon={<Download className="w-3.5 h-3.5 text-red-700" />}
+              />
+              <ReportExportButton
+                exportType="excel"
+                onExport={exportExcel}
                 disabled={loading || filteredRows.length === 0}
+                label="Excel"
+                generatingLabel="Generating..."
+                downloadedLabel="Downloaded"
+                failedLabel="Failed"
+                reportName="Attendance Status"
+                successMessage="✓ Excel report downloaded successfully"
                 className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] rounded-xl border border-emerald-200 text-xs font-extrabold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 title="Export Excel"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Excel</span>
-              </button>
+                hideTextOnMobile={true}
+                icon={<FileSpreadsheet className="w-3.5 h-3.5 text-[#0f4c2a]" />}
+              />
             </div>
           </div>
         </div>

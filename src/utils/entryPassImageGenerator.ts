@@ -241,10 +241,11 @@ export async function generateEntryPassCanvas(
   currentY += 28;
   const qrSize = 250;
   const qrDataUrl = await QRCode.toDataURL(options.entryPassNumber, {
-    margin: 1,
+    margin: 4,
     width: qrSize,
+    errorCorrectionLevel: 'H',
     color: {
-      dark: '#0f4c2a',
+      dark: '#000000',
       light: '#ffffff'
     }
   });

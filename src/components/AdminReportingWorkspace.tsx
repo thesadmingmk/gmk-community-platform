@@ -5,6 +5,7 @@ import { Filter, Trash2, Plus, Users, FileSpreadsheet, FileText } from 'lucide-r
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import ReportExportButton from './shared/ReportExportButton';
 
 interface AgeFilter {
   id: string;
@@ -93,7 +94,16 @@ export default function AdminReportingWorkspace() {
       const famSnap = await getDocs(collection(db, "families"));
       const families = famSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       const regSnap = await getDocs(collection(db, "event_registrations"));
-      const registrations = regSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const allRegistrations = regSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const registrations = allRegistrations.filter((r: any) => {
+        const pStatus = (r.paymentStatus || '').toLowerCase().trim();
+        const wStatus = (r.workflowStatus || '').toLowerCase().trim();
+        const status = (r.status || '').toLowerCase().trim();
+        if (pStatus === 'cancelled' || pStatus === 'refunded') return false;
+        if (wStatus === 'cancelled' || wStatus === 'refunded') return false;
+        if (status === 'cancelled' || status === 'refunded') return false;
+        return true;
+      });
 
       const famMap = new Map<string, any>();
       for (const fam of families) famMap.set(fam.id, fam);
@@ -241,7 +251,16 @@ export default function AdminReportingWorkspace() {
       const famSnap = await getDocs(collection(db, "families"));
       const families = famSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
       const regSnap = await getDocs(collection(db, "event_registrations"));
-      const registrations = regSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const allRegistrations = regSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const registrations = allRegistrations.filter((r: any) => {
+        const pStatus = (r.paymentStatus || '').toLowerCase().trim();
+        const wStatus = (r.workflowStatus || '').toLowerCase().trim();
+        const status = (r.status || '').toLowerCase().trim();
+        if (pStatus === 'cancelled' || pStatus === 'refunded') return false;
+        if (wStatus === 'cancelled' || wStatus === 'refunded') return false;
+        if (status === 'cancelled' || status === 'refunded') return false;
+        return true;
+      });
 
       const famMap = new Map<string, any>();
       for (const fam of families) famMap.set(fam.id, fam);
@@ -472,12 +491,32 @@ export default function AdminReportingWorkspace() {
                   Kids Report Results <span className="text-stone-500 font-medium">({kidsResults.length} matches)</span>
                 </h3>
                 <div className="flex gap-2">
-                  <button onClick={exportKidsExcel} disabled={kidsResults.length === 0} className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Export Excel
-                  </button>
-                  <button onClick={exportKidsPDF} disabled={kidsResults.length === 0} className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> Export PDF
-                  </button>
+                  <ReportExportButton
+                    exportType="excel"
+                    onExport={exportKidsExcel}
+                    disabled={kidsResults.length === 0}
+                    label="Export Excel"
+                    generatingLabel="Generating Excel..."
+                    downloadedLabel="Excel Downloaded"
+                    failedLabel="Excel Failed"
+                    reportName="Kids Demographic"
+                    successMessage="✓ Excel report downloaded successfully"
+                    className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                    icon={<FileSpreadsheet className="w-3.5 h-3.5 text-green-600" />}
+                  />
+                  <ReportExportButton
+                    exportType="pdf"
+                    onExport={exportKidsPDF}
+                    disabled={kidsResults.length === 0}
+                    label="Export PDF"
+                    generatingLabel="Generating PDF..."
+                    downloadedLabel="PDF Downloaded"
+                    failedLabel="PDF Failed"
+                    reportName="Kids Demographic"
+                    successMessage="✓ PDF downloaded successfully"
+                    className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                    icon={<FileText className="w-3.5 h-3.5 text-red-500" />}
+                  />
                 </div>
               </div>
               {kidsResults.length > 0 ? (
@@ -567,12 +606,32 @@ export default function AdminReportingWorkspace() {
                   Adults (Gents / Ladies) Results <span className="text-stone-500 font-medium">({adultResults.length} matches)</span>
                 </h3>
                 <div className="flex gap-2">
-                  <button onClick={exportAdultsExcel} disabled={adultResults.length === 0} className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50">
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Export Excel
-                  </button>
-                  <button onClick={exportAdultsPDF} disabled={adultResults.length === 0} className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50">
-                    <FileText className="w-3.5 h-3.5 text-red-500" /> Export PDF
-                  </button>
+                  <ReportExportButton
+                    exportType="excel"
+                    onExport={exportAdultsExcel}
+                    disabled={adultResults.length === 0}
+                    label="Export Excel"
+                    generatingLabel="Generating Excel..."
+                    downloadedLabel="Excel Downloaded"
+                    failedLabel="Excel Failed"
+                    reportName="Adults Demographic"
+                    successMessage="✓ Excel report downloaded successfully"
+                    className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                    icon={<FileSpreadsheet className="w-3.5 h-3.5 text-green-600" />}
+                  />
+                  <ReportExportButton
+                    exportType="pdf"
+                    onExport={exportAdultsPDF}
+                    disabled={adultResults.length === 0}
+                    label="Export PDF"
+                    generatingLabel="Generating PDF..."
+                    downloadedLabel="PDF Downloaded"
+                    failedLabel="PDF Failed"
+                    reportName="Adults Demographic"
+                    successMessage="✓ PDF downloaded successfully"
+                    className="cursor-pointer px-3 py-1.5 text-xs font-bold bg-white border border-stone-200 text-stone-700 hover:bg-stone-50 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                    icon={<FileText className="w-3.5 h-3.5 text-red-500" />}
+                  />
                 </div>
               </div>
               {adultResults.length > 0 ? (

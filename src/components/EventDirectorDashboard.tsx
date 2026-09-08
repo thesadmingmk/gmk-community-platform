@@ -1,6 +1,8 @@
 import FinanceWorkspace from "./FinanceWorkspace";
 import RegistrationReportingWorkspace from "./RegistrationReportingWorkspace";
 import AttendanceWorkspace from "./AttendanceWorkspace";
+import ReportExportButton from "./shared/ReportExportButton";
+import AgeBracketFamilyReport from "./shared/AgeBracketFamilyReport";
 import { formatExternalGmkId, resolveEventDetails } from '../utils/gmkIdHelper';
 import { NotificationService } from '../services/NotificationService';
 import { processFamilyCheckInCompletion } from '../services/familyCheckInService';
@@ -92,7 +94,8 @@ import {
   Coins,
   Circle,
   Eye,
-  ClipboardCheck
+  ClipboardCheck,
+  Trophy
 } from 'lucide-react';
 import { GMKCard, GMKBadge } from './gmk/DesignSystem';
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
@@ -467,7 +470,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [newEventYear, setNewEventYear] = useState<number>(new Date().getFullYear());
   const [newEventDescription, setNewEventDescription] = useState('');
   const [newCommitteeNeeded, setNewCommitteeNeeded] = useState(true);
-  const [newSelectedCommittees, setNewSelectedCommittees] = useState<string[]>(['Finance', 'Food', 'Attendance', 'Program', 'General']);
+  const [newSelectedCommittees, setNewSelectedCommittees] = useState<string[]>(['Finance', 'Food', 'Attendance', 'Program', 'Games', 'General']);
   const [newActivateRegistrations, setNewActivateRegistrations] = useState(false);
 
 
@@ -578,6 +581,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [committeeSearchQueries, setCommitteeSearchQueries] = useState<Record<string, string>>({});
   const [foodTab, setFoodTab] = useState<'events' | 'expenses'>('events');
   const [attendanceTab, setAttendanceTab] = useState<'events' | 'attendance' | 'expenses' | 'reports'>('events');
+  const [gamesTab, setGamesTab] = useState<'reports' | 'expenses'>('reports');
 
   // Workspace and unique Program configuration states
   const [progTitle, setProgTitle] = useState('');
@@ -6646,7 +6650,7 @@ const handleDownloadPDF = () => {
                       <div className="border-t border-stone-200 pt-4">
                         <label className="block text-[10px] uppercase font-black text-stone-500 mb-2">Select Committees</label>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {['Finance', 'Food', 'Attendance', 'Program', 'General'].map(comm => (
+                          {['Finance', 'Food', 'Attendance', 'Program', 'Games', 'General'].map(comm => (
                             <label key={comm} className="flex items-center space-x-2 cursor-pointer bg-stone-50 border border-stone-200 rounded-lg p-2">
                               <input
                                 type="checkbox"
@@ -8004,15 +8008,18 @@ const handleDownloadPDF = () => {
                             </div>
                           </div>
                           <div className="flex items-center space-x-2 shrink-0">
-                            <button
-                              type="button"
-                              onClick={handleDownloadPDF}
+                            <ReportExportButton
+                              exportType="pdf"
+                              onExport={handleDownloadPDF}
+                              label="PDF"
+                              generatingLabel="Generating..."
+                              downloadedLabel="Downloaded"
+                              failedLabel="Failed"
+                              reportName="Pricing Policy"
+                              successMessage="✓ Pricing policy PDF downloaded successfully"
                               className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-[#0f4c2a] border border-emerald-100 rounded-xl transition-all cursor-pointer flex items-center space-x-1 text-[10px] font-extrabold uppercase tracking-wider"
                               title="Download PDF"
-                            >
-                              <span></span>
-                              <span>PDF</span>
-                            </button>
+                            />
                             <button
                               type="button"
                               onClick={() => setShowPricingPolicyModal(false)}
@@ -8726,6 +8733,7 @@ const handleDownloadPDF = () => {
                     const isFoodComm = activeCommitteeToConfigure.toLowerCase().includes('food');
                     const isAttendanceComm = activeCommitteeToConfigure.toLowerCase().includes('attendance');
                     const isSponsorshipComm = activeCommitteeToConfigure.toLowerCase().includes('sponsorship');
+                    const isGamesComm = activeCommitteeToConfigure.toLowerCase().includes('game');
 
                     return (
                       <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-6 animate-fadeIn">
@@ -8740,6 +8748,7 @@ const handleDownloadPDF = () => {
                                  isAttendanceComm ? <QrCode className="w-4 h-4 text-[#0f4c2a]" /> :
                                  isProgramComm ? <Calendar className="w-4 h-4 text-purple-700" /> :
                                  isSponsorshipComm ? <Award className="w-4 h-4 text-blue-700" /> :
+                                 isGamesComm ? <Trophy className="w-4 h-4 text-orange-600" /> :
                                  <Users className="w-4 h-4 text-[#0f4c2a]" />}
                               </div>
                               <div>
@@ -8755,6 +8764,8 @@ const handleDownloadPDF = () => {
                                     ? 'Gate QR entry pass verification & real-time event attendance tracking' 
                                     : isProgramComm
                                     ? 'Operational management of stage programs: create listings, assign coordinators, and manage individual program workspaces.'
+                                    : isGamesComm
+                                    ? 'Participant age-bracket reporting for sports & games coordination'
                                     : 'Committee leadership assignment & operational expense logging'}
                                 </p>
                               </div>
@@ -9499,7 +9510,40 @@ const handleDownloadPDF = () => {
                           );
                         })()}
 
-                        {!isFinanceComm && (!isFoodComm || foodTab === 'expenses') && (!isAttendanceComm || attendanceTab === 'expenses') && (
+                        {isGamesComm && (
+                          <div className="pt-4 space-y-4">
+                            <div className="overflow-x-auto hide-scrollbar border-b border-stone-200">
+                              <div className="flex items-center space-x-1 min-w-max pb-px">
+                                <button
+                                  type="button"
+                                  onClick={() => setGamesTab('reports')}
+                                  className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all cursor-pointer ${gamesTab === 'reports' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                                >
+                                  Age-Bracket Reports
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setGamesTab('expenses')}
+                                  className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all cursor-pointer ${gamesTab === 'expenses' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                                >
+                                  Expenses
+                                </button>
+                              </div>
+                            </div>
+
+                            {gamesTab === 'reports' && (
+                              <AgeBracketFamilyReport
+                                activeEvent={activeEvent}
+                                registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved')}
+                                families={families}
+                                familyMembers={familyMembers}
+                                sourceContext="games"
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        {!isFinanceComm && (!isFoodComm || foodTab === 'expenses') && (!isAttendanceComm || attendanceTab === 'expenses') && (!isGamesComm || gamesTab === 'expenses') && (
                           <div className="pt-4 border-t border-stone-100 space-y-4 text-left">
                             <div className="flex items-center justify-between">
                               <div>
@@ -11363,15 +11407,19 @@ const handleDownloadPDF = () => {
                         <Eye className="w-3.5 h-3.5" />
                         <span>View Registrations</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={generateRegistrationReportPDF}
+                      <ReportExportButton
+                        exportType="pdf"
+                        onExport={generateRegistrationReportPDF}
                         title="Download Registration Report PDF"
+                        label="PDF"
+                        generatingLabel="Generating..."
+                        downloadedLabel="Downloaded"
+                        failedLabel="Failed"
+                        reportName="Registration Report"
+                        successMessage="✓ Registration Report PDF downloaded successfully"
                         className="py-2.5 px-3.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1"
-                      >
-                        <Download className="w-3.5 h-3.5 text-rose-600" />
-                        <span>PDF</span>
-                      </button>
+                        icon={<Download className="w-3.5 h-3.5 text-rose-600" />}
+                      />
                     </div>
                   </div>
 
@@ -11413,15 +11461,19 @@ const handleDownloadPDF = () => {
                         <Eye className="w-3.5 h-3.5" />
                         <span>View Statement</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={generateFinancialStatementPDF}
+                      <ReportExportButton
+                        exportType="pdf"
+                        onExport={generateFinancialStatementPDF}
                         title="Download Statement of Accounts PDF"
+                        label="PDF"
+                        generatingLabel="Generating..."
+                        downloadedLabel="Downloaded"
+                        failedLabel="Failed"
+                        reportName="Financial Statement"
+                        successMessage="✓ Statement of Accounts PDF downloaded successfully"
                         className="py-2.5 px-3.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1"
-                      >
-                        <Download className="w-3.5 h-3.5 text-rose-600" />
-                        <span>PDF</span>
-                      </button>
+                        icon={<Download className="w-3.5 h-3.5 text-rose-600" />}
+                      />
                     </div>
                   </div>
 
@@ -11680,14 +11732,18 @@ const handleDownloadPDF = () => {
                 Showing live registration audit logs & attendee breakdowns.
               </div>
               <div className="flex items-center space-x-3 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={generateRegistrationReportPDF}
+                <ReportExportButton
+                  exportType="pdf"
+                  onExport={generateRegistrationReportPDF}
+                  label="Download Registration PDF"
+                  generatingLabel="Generating PDF..."
+                  downloadedLabel="PDF Downloaded"
+                  failedLabel="PDF Failed"
+                  reportName="Registration Report"
+                  successMessage="✓ Registration Report PDF downloaded successfully"
                   className="flex-1 sm:flex-none py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-2 border border-stone-300"
-                >
-                  <Download className="w-4 h-4 text-rose-600" />
-                  <span>Download Registration PDF</span>
-                </button>
+                  icon={<Download className="w-4 h-4 text-rose-600" />}
+                />
                 <button
                   type="button"
                   onClick={() => setShowRegReportModal(false)}
@@ -11881,14 +11937,18 @@ const handleDownloadPDF = () => {
                 Statement of Accounts derived from verified ledger entries and registration records.
               </div>
               <div className="flex items-center space-x-3 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={generateFinancialStatementPDF}
+                <ReportExportButton
+                  exportType="pdf"
+                  onExport={generateFinancialStatementPDF}
+                  label="Download Statement PDF"
+                  generatingLabel="Generating PDF..."
+                  downloadedLabel="PDF Downloaded"
+                  failedLabel="PDF Failed"
+                  reportName="Financial Statement"
+                  successMessage="✓ Statement of Accounts PDF downloaded successfully"
                   className="flex-1 sm:flex-none py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center space-x-2 border border-stone-300"
-                >
-                  <Download className="w-4 h-4 text-rose-600" />
-                  <span>Download Statement PDF</span>
-                </button>
+                  icon={<Download className="w-4 h-4 text-rose-600" />}
+                />
                 <button
                   type="button"
                   onClick={() => setShowFinanceReportModal(false)}

@@ -7,6 +7,7 @@ import autoTable from 'jspdf-autotable';
 import { GMKCard } from './gmk/DesignSystem';
 import { getRegistrationDisplayId, formatExternalGmkId } from '../utils/gmkIdHelper';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
+import ReportExportButton from './shared/ReportExportButton';
 
 interface RegistrationReportingWorkspaceProps {
   events: CommunityEvent[];
@@ -99,7 +100,18 @@ export default function RegistrationReportingWorkspace({
   };
 
   const filteredRegistrations = useMemo(() => {
-    let regs = [...allRegistrations];
+    // CRITICAL: Exclude Cancelled / Refunded registrations from Operational Reports
+    let regs = allRegistrations.filter(r => {
+      const pStatus = (r.paymentStatus || '').toLowerCase().trim();
+      const wStatus = (r.workflowStatus || '').toLowerCase().trim();
+      const status = ((r as any).status || '').toLowerCase().trim();
+      
+      if (pStatus === 'cancelled' || pStatus === 'refunded') return false;
+      if (wStatus === 'cancelled' || wStatus === 'refunded') return false;
+      if (status === 'cancelled' || status === 'refunded') return false;
+      
+      return true;
+    });
 
     if (appliedFilters.filterEventId !== 'all') {
       regs = regs.filter(r => r.eventId === appliedFilters.filterEventId);
@@ -309,7 +321,6 @@ export default function RegistrationReportingWorkspace({
       { A: 'Total Attendees:', B: summary.totalAttendees },
       { A: 'Paid Registrations:', B: summary.paidCount },
       { A: 'Pending Registrations:', B: summary.pendingCount },
-      { A: 'Cancelled/Refunded:', B: summary.cancelledCount },
       { A: '' },
       { A: 'Total Amount Due:', B: `OMR ${summary.totalDue.toFixed(3)}` },
       { A: 'Total Amount Received:', B: `OMR ${summary.totalReceived.toFixed(3)}` },
@@ -342,7 +353,7 @@ export default function RegistrationReportingWorkspace({
     // Summary
     doc.text('SUMMARY:', 14, 48);
     doc.text(`Total Registrations: ${filteredRegistrations.length} | Total Attendees: ${summary.totalAttendees}`, 14, 54);
-    doc.text(`Paid: ${summary.paidCount} | Pending: ${summary.pendingCount} | Cancelled: ${summary.cancelledCount}`, 14, 60);
+    doc.text(`Paid: ${summary.paidCount} | Pending: ${summary.pendingCount}`, 14, 60);
     doc.text(`Amount Due: OMR ${summary.totalDue.toFixed(3)} | Amount Received: OMR ${summary.totalReceived.toFixed(3)}`, 14, 66);
     doc.text(`Outstanding: OMR ${summary.outstanding.toFixed(3)} | Refund Due: OMR ${summary.refundDue.toFixed(3)}`, 14, 72);
 
@@ -392,20 +403,32 @@ export default function RegistrationReportingWorkspace({
           </span>
         </div>
         <div className="flex items-center space-x-2">
-          <button
-            onClick={exportPDF}
+          <ReportExportButton
+            exportType="pdf"
+            onExport={exportPDF}
+            disabled={filteredRegistrations.length === 0}
+            label="Export PDF"
+            generatingLabel="Generating PDF..."
+            downloadedLabel="PDF Downloaded"
+            failedLabel="PDF Failed"
+            reportName="Event Registration"
+            successMessage="✓ PDF downloaded successfully"
             className="px-4 py-2 rounded-xl bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Export PDF</span>
-          </button>
-          <button
-            onClick={exportExcel}
+            icon={<FileText className="w-4 h-4 text-red-700" />}
+          />
+          <ReportExportButton
+            exportType="excel"
+            onExport={exportExcel}
+            disabled={filteredRegistrations.length === 0}
+            label="Export Excel"
+            generatingLabel="Generating Excel..."
+            downloadedLabel="Excel Downloaded"
+            failedLabel="Excel Failed"
+            reportName="Event Registration"
+            successMessage="✓ Excel report downloaded successfully"
             className="px-4 py-2 rounded-xl bg-[#0f4c2a] text-white hover:bg-[#0c3e22] text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export Excel</span>
-          </button>
+            icon={<Download className="w-4 h-4 text-white" />}
+          />
         </div>
       </div>
 
@@ -450,8 +473,6 @@ export default function RegistrationReportingWorkspace({
                 <option value="all">All</option>
                 <option value="registered">Registered</option>
                 <option value="pending">Pending</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="refunded">Refunded</option>
               </select>
             </div>
             <div className="space-y-1.5">
@@ -465,8 +486,6 @@ export default function RegistrationReportingWorkspace({
                 <option value="paid">Paid</option>
                 <option value="pending">Pending</option>
                 <option value="waived">Waived</option>
-                <option value="refunded">Refunded</option>
-                <option value="cancelled">Cancelled</option>
               </select>
             </div>
             <div className="space-y-1.5">

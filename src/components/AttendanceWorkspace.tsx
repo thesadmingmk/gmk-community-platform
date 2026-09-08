@@ -8,6 +8,8 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import AttendanceReport from './shared/AttendanceReport';
+import ReportExportButton from './shared/ReportExportButton';
+import AgeBracketFamilyReport from './shared/AgeBracketFamilyReport';
 import { getRegistrationDisplayId, formatExternalGmkId, isExternalGmkId, resolveEventDetails } from '../utils/gmkIdHelper';
 import { NotificationService } from '../services/NotificationService';
 import { SingleEntryPassEmailModal, BulkEntryPassEmailModal } from './attendance/EntryPassEmailModals';
@@ -62,6 +64,7 @@ export default function AttendanceWorkspace({
   const [emailFilter, setEmailFilter] = useState<'all' | 'sent' | 'not_sent'>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'resident' | 'external'>('all');
   const [attendanceSearchTerm, setAttendanceSearchTerm] = useState('');
+  const [attendanceReportsSubTab, setAttendanceReportsSubTab] = useState<'attendance_exports' | 'age_bracket'>('attendance_exports');
 
   const toggleSelectReg = (id: string, checked: boolean) => {
     setSelectedRegIds(prev => {
@@ -1071,11 +1074,26 @@ export default function AttendanceWorkspace({
           {/* VERIFICATION RESULT */}
           <div className="space-y-4">
             {errorMsg && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start space-x-3 text-red-800 animate-fadeIn">
-                <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <h6 className="font-extrabold text-sm uppercase tracking-wider">Invalid / Error</h6>
-                  <p className="text-xs font-bold mt-1">{errorMsg}</p>
+              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex flex-col space-y-3 animate-fadeIn">
+                <div className="flex items-start space-x-3 text-red-800">
+                  <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h6 className="font-extrabold text-sm uppercase tracking-wider">Invalid / Error</h6>
+                    <p className="text-xs font-bold mt-1">{errorMsg}</p>
+                  </div>
+                </div>
+                <div className="flex justify-end border-t border-red-200/50 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg('');
+                      setScanInput('');
+                      setScannedReg(null);
+                    }}
+                    className="px-4 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
             )}
@@ -1880,94 +1898,171 @@ export default function AttendanceWorkspace({
 
       {activeTab === 'reports' && (
         <div className="space-y-6">
-          <div className="p-6 bg-stone-50 border border-stone-200 rounded-2xl space-y-6">
-            <div>
-              <h5 className="font-extrabold text-stone-900 text-sm uppercase tracking-wider flex items-center space-x-2">
-                <FileText className="w-5 h-5 text-[#0f4c2a]" />
-                <span>Download Attendance Reports</span>
-              </h5>
-              <p className="text-xs text-stone-500 font-bold mt-1">
-                Export real-time gate attendance data for event records and audit purposes.
-              </p>
-            </div>
+          {/* Sub-tab Navigation for Attendance Reports */}
+          <div className="flex items-center space-x-2 border-b border-stone-200 pb-2">
+            <button
+              type="button"
+              onClick={() => setAttendanceReportsSubTab('attendance_exports')}
+              className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer ${
+                attendanceReportsSubTab === 'attendance_exports'
+                  ? 'bg-[#0f4c2a] text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              Standard Attendance Reports
+            </button>
+            <button
+              type="button"
+              onClick={() => setAttendanceReportsSubTab('age_bracket')}
+              className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 ${
+                attendanceReportsSubTab === 'age_bracket'
+                  ? 'bg-[#0f4c2a] text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              <span>Age-Bracket Family Report</span>
+            </button>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-              {/* REPORT 1: GMK-WISE ATTENDANCE REPORT */}
-              <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-4 shadow-xs flex flex-col justify-between">
+          {attendanceReportsSubTab === 'age_bracket' ? (
+            <AgeBracketFamilyReport
+              activeEvent={activeEvent}
+              registrations={validRegs}
+              families={families}
+              familyMembers={familyMembers}
+              sourceContext="attendance"
+            />
+          ) : (
+            <>
+              <div className="p-6 bg-stone-50 border border-stone-200 rounded-2xl space-y-6">
                 <div>
-                  <div className="flex items-center space-x-2 text-[#0f4c2a] mb-1">
-                    <Users className="w-4 h-4 shrink-0" />
-                    <h6 className="font-extrabold text-xs uppercase tracking-wider text-stone-900">
-                      GMK-Wise Attendance Report
-                    </h6>
-                  </div>
-                  <p className="text-xs text-stone-500 font-bold">
-                    Family / registration-level attendance
+                  <h5 className="font-extrabold text-stone-900 text-sm uppercase tracking-wider flex items-center space-x-2">
+                    <FileText className="w-5 h-5 text-[#0f4c2a]" />
+                    <span>Download Attendance Reports</span>
+                  </h5>
+                  <p className="text-xs text-stone-500 font-bold mt-1">
+                    Export real-time gate attendance data for event records and audit purposes.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 pt-2">
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  {/* REPORT 1: GMK-WISE ATTENDANCE REPORT */}
+                  <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-4 shadow-xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center space-x-2 text-[#0f4c2a] mb-1">
+                        <Users className="w-4 h-4 shrink-0" />
+                        <h6 className="font-extrabold text-xs uppercase tracking-wider text-stone-900">
+                          GMK-Wise Attendance Report
+                        </h6>
+                      </div>
+                      <p className="text-xs text-stone-500 font-bold">
+                        Family / registration-level attendance
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                      <ReportExportButton
+                        exportType="pdf"
+                        onExport={generateGmkWisePDFReport}
+                        label="PDF"
+                        generatingLabel="Generating PDF..."
+                        downloadedLabel="PDF Downloaded"
+                        failedLabel="PDF Failed"
+                        reportName="GMK-Wise Attendance"
+                        successMessage="✓ PDF downloaded successfully"
+                        className="flex-1 py-2.5 px-4 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                        icon={<Download className="w-4 h-4 text-[#d4af37]" />}
+                      />
+                      <ReportExportButton
+                        exportType="excel"
+                        onExport={generateGmkWiseExcelReport}
+                        label="Excel"
+                        generatingLabel="Generating Excel..."
+                        downloadedLabel="Excel Downloaded"
+                        failedLabel="Excel Failed"
+                        reportName="GMK-Wise Attendance"
+                        successMessage="✓ Excel report downloaded successfully"
+                        className="flex-1 py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                        icon={<FileSpreadsheet className="w-4 h-4 text-emerald-400" />}
+                      />
+                    </div>
+                  </div>
+
+                  {/* REPORT 2: INDIVIDUAL ATTENDANCE REPORT */}
+                  <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-4 shadow-xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center space-x-2 text-[#0f4c2a] mb-1">
+                        <FileText className="w-4 h-4 shrink-0" />
+                        <h6 className="font-extrabold text-xs uppercase tracking-wider text-stone-900">
+                          Individual Attendance Report
+                        </h6>
+                      </div>
+                      <p className="text-xs text-stone-500 font-bold">
+                        Participant-level attendance with individual check-in times
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                      <ReportExportButton
+                        exportType="pdf"
+                        onExport={generateIndividualPDFReport}
+                        label="PDF"
+                        generatingLabel="Generating PDF..."
+                        downloadedLabel="PDF Downloaded"
+                        failedLabel="PDF Failed"
+                        reportName="Individual Attendance"
+                        successMessage="✓ PDF downloaded successfully"
+                        className="flex-1 py-2.5 px-4 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                        icon={<Download className="w-4 h-4 text-[#d4af37]" />}
+                      />
+                      <ReportExportButton
+                        exportType="excel"
+                        onExport={generateIndividualExcelReport}
+                        label="Excel"
+                        generatingLabel="Generating Excel..."
+                        downloadedLabel="Excel Downloaded"
+                        failedLabel="Excel Failed"
+                        reportName="Individual Attendance"
+                        successMessage="✓ Excel report downloaded successfully"
+                        className="flex-1 py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                        icon={<FileSpreadsheet className="w-4 h-4 text-emerald-400" />}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* AGE-BRACKET REPORT DISCOVERY CARD */}
+                <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h6 className="font-extrabold text-xs uppercase tracking-wider text-[#0f4c2a] flex items-center space-x-2">
+                      <span>Age-Bracket Family Report Available</span>
+                    </h6>
+                    <p className="text-xs text-stone-600 font-bold mt-0.5">
+                      Configure custom age groups (e.g. 0–5, 6–10, 11–15) and view/export family participant tables.
+                    </p>
+                  </div>
                   <button
-                    onClick={generateGmkWisePDFReport}
-                    className="flex-1 py-2.5 px-4 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                    type="button"
+                    onClick={() => setAttendanceReportsSubTab('age_bracket')}
+                    className="px-4 py-2 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shrink-0"
                   >
-                    <Download className="w-4 h-4" />
-                    <span>PDF</span>
-                  </button>
-                  <button
-                    onClick={generateGmkWiseExcelReport}
-                    className="flex-1 py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    <span>Excel</span>
+                    Open Age-Bracket Report
                   </button>
                 </div>
               </div>
-
-              {/* REPORT 2: INDIVIDUAL ATTENDANCE REPORT */}
-              <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-4 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center space-x-2 text-[#0f4c2a] mb-1">
-                    <FileText className="w-4 h-4 shrink-0" />
-                    <h6 className="font-extrabold text-xs uppercase tracking-wider text-stone-900">
-                      Individual Attendance Report
-                    </h6>
-                  </div>
-                  <p className="text-xs text-stone-500 font-bold">
-                    Participant-level attendance with individual check-in times
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 pt-2">
-                  <button
-                    onClick={generateIndividualPDFReport}
-                    className="flex-1 py-2.5 px-4 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>PDF</span>
-                  </button>
-                  <button
-                    onClick={generateIndividualExcelReport}
-                    className="flex-1 py-2.5 px-4 bg-stone-800 hover:bg-stone-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    <span>Excel</span>
-                  </button>
-                </div>
+              
+              <div className="p-4 border border-stone-200 rounded-xl bg-white space-y-2">
+                <h6 className="text-[10px] font-black text-stone-500 uppercase tracking-wider flex items-center space-x-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Report Details</span>
+                </h6>
+                <ul className="text-xs text-stone-600 space-y-1 list-disc list-inside ml-1">
+                  <li>Reports only include eligible paid or waived registrations.</li>
+                  <li>GMK-Wise report provides registration-level totals and family arrival completion status.</li>
+                  <li>Individual report provides participant-level records with individual check-in timestamps in Asia/Muscat time.</li>
+                  <li>Resident individual report explicitly includes Member, Spouse, and Children (Parents/Others excluded).</li>
+                </ul>
               </div>
-            </div>
-          </div>
-          
-          <div className="p-4 border border-stone-200 rounded-xl bg-white space-y-2">
-            <h6 className="text-[10px] font-black text-stone-500 uppercase tracking-wider flex items-center space-x-1.5">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-              <span>Report Details</span>
-            </h6>
-            <ul className="text-xs text-stone-600 space-y-1 list-disc list-inside ml-1">
-              <li>Reports only include eligible paid or waived registrations.</li>
-              <li>GMK-Wise report provides registration-level totals and family arrival completion status.</li>
-              <li>Individual report provides participant-level records with individual check-in timestamps in Asia/Muscat time.</li>
-              <li>Resident individual report explicitly includes Member, Spouse, and Children (Parents/Others excluded).</li>
-            </ul>
-          </div>
+            </>
+          )}
         </div>
       )}
 

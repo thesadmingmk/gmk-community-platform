@@ -57,11 +57,12 @@ export const GMKOfficialEntryPassCard: React.FC<GMKOfficialEntryPassCardProps> =
     let isMounted = true;
     if (entryPassNumber) {
       QRCode.toDataURL(entryPassNumber, {
-        margin: 1,
+        margin: 4,
         width: 280,
+        errorCorrectionLevel: 'H',
         color: {
-          dark: '#0f4c2a', // Forest green
-          light: '#ffffff'  // Pure white
+          dark: '#000000', // Pure black for maximum iOS camera contrast
+          light: '#ffffff'
         }
       })
         .then((url) => {
