@@ -6,6 +6,7 @@ import IdentityGateway from './components/IdentityGateway';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import ResidentDashboard from './components/ResidentDashboard';
+import EventScannerApp from './components/attendance/EventScannerApp';
 import { GEASConfirmationProvider } from './components/gmk/GEASConfirmationDialog';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { RefreshCw, AlertTriangle, UserCheck, Clock, Mail } from 'lucide-react';
@@ -103,6 +104,11 @@ export default function App() {
         <PWAInstallPrompt />
       </>
     );
+  }
+
+  // Dedicated Scanner Interface bypass
+  if (typeof window !== 'undefined' && window.location.pathname === '/scan') {
+    return <EventScannerApp />;
   }
 
   // System admin override check

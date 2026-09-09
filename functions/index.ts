@@ -38,6 +38,10 @@ const db = new Proxy({} as FirebaseFirestore.Firestore, {
 const gmkSmtpUser = defineSecret("GMK_SMTP_USER");
 const gmkSmtpPassword = defineSecret("GMK_SMTP_PASSWORD");
 
+// Define Meta WhatsApp Secrets
+const metaWhatsAppToken = defineSecret("META_WHATSAPP_TOKEN");
+const metaPhoneNumberId = defineSecret("META_PHONE_NUMBER_ID");
+
 /**
  * Firestore trigger that watches new document additions in the emailQueue collection.
  * Processes pending notification documents automatically and manages retries securely.
@@ -189,7 +193,7 @@ export const processEmailQueue = onDocumentCreated({
     <h2 style="color: #0F4C2A; font-size: 19px; margin-top: 0; margin-bottom: 16px; font-family: Georgia, serif; font-weight: bold;">Payment Confirmed & Official Entry Pass</h2>
     <p style="margin: 0 0 16px 0;">Dear <strong>{{recipientName}}</strong>,</p>
     <p style="margin: 0 0 20px 0;">Your payment for <strong>{{eventName}}</strong> has been confirmed. Your official Entry Pass and gate admission QR code have been issued below.</p>
-    
+
     <div style="background-color: #f9fafb; border: 2px solid #0F4C2A; border-radius: 10px; padding: 20px; margin: 24px 0; text-align: center;">
       <div style="margin-bottom: 16px;">
         <img src="{{qrCodeDataUrl}}" width="160" height="160" alt="Official Entry Pass QR" style="display: block; margin: 0 auto; border-radius: 8px; border: 1px solid #d1d5db; background: #ffffff; padding: 6px;" />
@@ -319,7 +323,7 @@ export const processEmailQueue = onDocumentCreated({
     }
 
     logger.info(`[Queue: ${queueId}] Dispatching SMTP message to: ${data.to}`);
-    
+
     // Send email securely
     const sendInfo = await transporter.sendMail(mailOptions);
     const duration = Date.now() - startTime;
@@ -389,6 +393,7 @@ export const processEmailQueue = onDocumentCreated({
  * and enqueue a beautifully branded notification without revealing user existence.
  */
 export const requestPasswordReset = onCall({
+  cors: true
 }, async (request: any) => {
   const email = request.data?.email?.toLowerCase().trim();
   if (!email) {
@@ -489,8 +494,8 @@ async function isAuthorizedForPayment(uid: string, email: string, eventId: strin
         const uData = uDoc.data();
         const roles: string[] = Array.isArray(uData?.roles) ? uData.roles : [];
         const allowedRoles = [
-          "super_admin", "admin", 
-          "event_director", 
+          "super_admin", "admin",
+          "event_director",
           "finance", "treasurer", "finance_team", "committee_lead_finance", "finance_lead",
           `event_director_${eventId}`,
           `finance_${eventId}`, `finance_team_${eventId}`, `finance_lead_${eventId}`, `treasurer_${eventId}`
@@ -512,14 +517,14 @@ async function isAuthorizedForPayment(uid: string, email: string, eventId: strin
  * Callable HTTPS Cloud Function to securely process and record Event Registration Payments.
  * Bypasses client-side Firestore rules via Admin SDK, ensuring atomic payment updates and audit logging.
  */
-export const processEventPayment = onCall(async (request: any) => {
+export const processEventPayment = onCall({ cors: true }, async (request: any) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required to process event payments.");
   }
-  
+
   const uid = request.auth.uid;
   const callerEmail = (request.auth.token?.email || "").toLowerCase().trim();
-  
+
   const registrationId = request.data?.registrationId;
   const amountReceivedInput = request.data?.amountReceived;
   const financeRemarks = (request.data?.financeRemarks || "").toString().trim();
@@ -547,7 +552,7 @@ export const processEventPayment = onCall(async (request: any) => {
 
     const regData = regSnap.data()!;
     const selectedEventId = regData.eventId;
-    
+
     if (!selectedEventId) {
       throw new HttpsError("failed-precondition", "Registration record is missing an eventId.");
     }
@@ -573,10 +578,10 @@ export const processEventPayment = onCall(async (request: any) => {
 
     const currentTotalReceived = parseFloat(regData.amountReceived) || 0;
     const totalAlreadyRefunded = parseFloat(regData.refundedAmount) || 0;
-    
+
     const newTotalConfirmedPaid = currentTotalReceived + newPaymentAmount;
     const netPaid = newTotalConfirmedPaid - totalAlreadyRefunded;
-    
+
     const diff = netPaid - amountDue;
     let pStatus: "paid" | "partially_paid" | "overpaid" | "waived" | "pending" | "refund_due" | "refunded" = regData.paymentStatus || "pending";
 
@@ -598,7 +603,7 @@ export const processEventPayment = onCall(async (request: any) => {
     const eventShort = selectedEventId.slice(-6).toUpperCase();
     const memberShort = (regData.primaryMemberGmkId || registrationId.slice(-6)).toUpperCase();
     const receiptNumber = regData.receiptNumber || `RCP-${eventShort}-${memberShort}-${Math.floor(1000 + Math.random() * 9000)}`;
-    
+
     // Only generate an entry pass if payment is cleared or waived, and it doesn't already exist
     let entryPassNumber = regData.entryPassNumber || "";
     if ((pStatus === "paid" || pStatus === "waived" || pStatus === "overpaid") && !entryPassNumber) {
@@ -673,14 +678,14 @@ export const processEventPayment = onCall(async (request: any) => {
 /**
  * Callable HTTPS Cloud Function to securely process and record Event Registration Refunds.
  */
-export const processEventRefund = onCall(async (request: any) => {
+export const processEventRefund = onCall({ cors: true }, async (request: any) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required to process refunds.");
   }
-  
+
   const uid = request.auth.uid;
   const callerEmail = (request.auth.token?.email || "").toLowerCase().trim();
-  
+
   const registrationId = request.data?.registrationId;
   const financeRemarks = (request.data?.financeRemarks || "").toString().trim();
   const settlementMethod = (request.data?.settlementMethod || "").toString().trim();
@@ -704,7 +709,7 @@ export const processEventRefund = onCall(async (request: any) => {
 
     const regData = regSnap.data()!;
     const selectedEventId = regData.eventId;
-    
+
     if (!selectedEventId) {
       throw new HttpsError("failed-precondition", "Registration record is missing an eventId.");
     }
@@ -730,7 +735,7 @@ export const processEventRefund = onCall(async (request: any) => {
     const currentTotalReceived = parseFloat(regData.amountReceived) || 0;
     const totalAlreadyRefunded = parseFloat(regData.refundedAmount) || 0;
     const netPaid = currentTotalReceived - totalAlreadyRefunded;
-    
+
     const refundAmt = Math.max(0, netPaid - amountDue);
 
     if (refundAmt <= 0) {
@@ -795,3 +800,544 @@ export const processEventRefund = onCall(async (request: any) => {
   return resultPayload;
 });
 
+
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+
+/**
+ * Automates WhatsApp Entry Pass delivery when an Event Registration gets approved (paid/waived).
+ * Checks idempotency state on the document to ensure no duplicates.
+ */
+
+function formatPhoneForWhatsApp(phone: string | undefined | null, fallbackCode = '968'): string {
+  if (!phone) return '';
+  const trimmed = phone.trim();
+
+  // If already starts with '+', format cleanly
+  if (trimmed.startsWith('+')) {
+    const knownCodes = ['+968', '+971', '+966', '+965', '+974', '+973', '+91', '+44', '+1'];
+    for (const code of knownCodes) {
+      if (trimmed.startsWith(code)) {
+        const rest = trimmed.substring(code.length).replace(/\D/g, '');
+        return `${code.substring(1)}${rest}`;
+      }
+    }
+    // Generic '+' code: match up to 4 digits prefix
+    const match = trimmed.match(/^(\+\d{1,4})\s*(.*)$/);
+    if (match) {
+      const rest = match[2].replace(/\D/g, '');
+      return `${match[1].substring(1)}${rest}`;
+    }
+  }
+
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Check if digits already include country code prefix
+  if (digits.startsWith('968') && digits.length === 11) return digits;
+  if (digits.startsWith('91') && digits.length === 12) return digits;
+  if (digits.startsWith('971') && digits.length === 12) return digits;
+
+  // 10 digits starting with 6,7,8,9 -> India (+91)
+  if (digits.length === 10 && ['6', '7', '8', '9'].includes(digits[0])) return `91${digits}`;
+  // 8 digits -> Oman (+968)
+  if (digits.length === 8) return `968${digits}`;
+
+  return `${fallbackCode.replace('+', '')}${digits}`;
+}
+
+async function getAuthoritativeWhatsAppNumber(regData: any): Promise<string> {
+  let rawPhone = String(regData.primaryRegistrantWhatsapp || regData.whatsappNumber || regData.primaryRegistrantPhone || regData.phone || "");
+
+  if (!rawPhone && regData.familyId) {
+    try {
+      const famSnap = await db.collection("families").doc(regData.familyId).get();
+      if (famSnap.exists) {
+        const famData = famSnap.data()!;
+        rawPhone = String(famData.whatsAppNumber || famData.phone || "");
+      }
+    } catch (e) {
+      logger.error("Error fetching family for phone resolution", e);
+    }
+  }
+
+  return formatPhoneForWhatsApp(rawPhone);
+}
+
+export const processAutomaticWhatsAppEntryPass = onDocumentUpdated({
+  document: "event_registrations/{registrationId}",
+  secrets: [metaWhatsAppToken, metaPhoneNumberId]
+}, async (event) => {
+  const before = event.data?.before.data();
+  const after = event.data?.after.data();
+  if (!before || !after) return;
+
+  const pStatus = String(after.paymentStatus || "").toLowerCase().trim();
+  const wStatus = String(after.workflowStatus || "").toLowerCase().trim();
+  const status = String(after.status || "").toLowerCase().trim();
+
+  // Strict Eligibility Checks:
+  // Must be paid/waived/overpaid
+  // Must have an entry pass number generated
+  // Must NOT be cancelled or refunded across any status field
+  const isEligible = (pStatus === "paid" || pStatus === "waived" || pStatus === "overpaid")
+    && !!after.entryPassNumber
+    && status !== "cancelled"
+    && status !== "refunded"
+    && wStatus !== "cancelled"
+    && wStatus !== "refunded";
+
+  if (!isEligible) return;
+
+  const currentWhatsAppStatus = after.entryPassWhatsAppLastStatus;
+
+  // Idempotency Check: Do NOT resend if it was already attempted or if it's currently pending.
+  if (currentWhatsAppStatus === "sent" || currentWhatsAppStatus === "delivered" || currentWhatsAppStatus === "read" || currentWhatsAppStatus === "failed" || currentWhatsAppStatus === "pending" || currentWhatsAppStatus === "not_eligible") {
+    return;
+  }
+
+  const regRef = db.collection("event_registrations").doc(event.params.registrationId);
+
+  // Extract phone number - prioritizing whatsapp fields, then mobile
+  const normalizedPhone = await getAuthoritativeWhatsAppNumber(after);
+
+  if (!normalizedPhone || normalizedPhone.length < 8) {
+    logger.info(`[WhatsApp Auto] No valid phone number for registration ${event.params.registrationId}`);
+    await regRef.update({
+      entryPassWhatsAppLastStatus: "not_eligible",
+      entryPassWhatsAppLastError: "No valid WhatsApp number found."
+    });
+    return;
+  }
+
+  // Atomically claim the pending state
+  await regRef.update({ entryPassWhatsAppLastStatus: "pending" });
+
+  try {
+    const token = metaWhatsAppToken.value();
+    const phoneId = metaPhoneNumberId.value();
+
+    if (!token || !phoneId) {
+      throw new Error("Missing Meta WhatsApp configuration secrets.");
+    }
+
+    let eventName = "GMK Event";
+    let venueName = "GMK Venue";
+
+    if (after.eventId) {
+      const eventDoc = await db.collection("events").doc(after.eventId).get();
+      if (eventDoc.exists) {
+        const evData = eventDoc.data()!;
+        eventName = evData.title || evData.eventName || eventName;
+        venueName = evData.venue || evData.location || venueName;
+      }
+    }
+
+    const residentName = after.primaryRegistrantName || after.fullName || "Resident";
+    const entryPass = after.entryPassNumber;
+    const qrCodeUrl = `https://quickchart.io/qr?size=500&text=${encodeURIComponent(entryPass)}`;
+
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "template",
+      template: {
+        name: "gmk_entry_pass_ready",
+        language: { code: "en" },
+        components: [
+          {
+            type: "header",
+            parameters: [
+              {
+                type: "image",
+                image: { link: qrCodeUrl }
+              }
+            ]
+          },
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: residentName },
+              { type: "text", text: eventName },
+              { type: "text", text: venueName },
+              { type: "text", text: entryPass }
+            ]
+          }
+        ]
+      }
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      logger.info(`[WhatsApp Auto] Successfully sent entry pass to ${normalizedPhone} for reg: ${event.params.registrationId}`);
+      await regRef.update({
+        entryPassWhatsAppLastStatus: "sent",
+        entryPassWhatsAppSentAt: new Date().toISOString(),
+        entryPassWhatsAppMessageId: data.messages?.[0]?.id || "",
+        entryPassWhatsAppRecipient: normalizedPhone,
+        entryPassWhatsAppLastError: null
+      });
+    } else {
+      logger.error(`[WhatsApp Auto] Meta API error for reg: ${event.params.registrationId}`, data);
+      await regRef.update({
+        entryPassWhatsAppLastStatus: "failed",
+        entryPassWhatsAppLastError: data.error?.message || "Meta API Error"
+      });
+    }
+  } catch (err: any) {
+    logger.error(`[WhatsApp Auto] Exception sending to ${normalizedPhone}:`, err);
+    await regRef.update({
+      entryPassWhatsAppLastStatus: "failed",
+      entryPassWhatsAppLastError: err.message || "Internal Server Error"
+    });
+  }
+});
+
+
+/**
+ * Manual Callable Function to resend the WhatsApp Entry Pass.
+ * Intended for operational recovery from the Attendance Workspace.
+ */
+export const resendWhatsAppEntryPass = onCall({
+  cors: true,
+  secrets: [metaWhatsAppToken, metaPhoneNumberId]
+}, async (request: any) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+
+  const registrationId = request.data?.registrationId;
+  if (!registrationId) {
+    throw new HttpsError("invalid-argument", "registrationId is required.");
+  }
+
+  const token = metaWhatsAppToken.value();
+  const phoneId = metaPhoneNumberId.value();
+
+  if (!token || !phoneId) {
+    throw new HttpsError("failed-precondition", "WhatsApp API is not configured on the server.");
+  }
+
+  const regRef = db.collection("event_registrations").doc(registrationId);
+  const regSnap = await regRef.get();
+
+  if (!regSnap.exists) {
+    throw new HttpsError("not-found", "Registration not found.");
+  }
+
+  const regData = regSnap.data()!;
+
+  const normalizedPhone = await getAuthoritativeWhatsAppNumber(regData);
+
+  if (!normalizedPhone || normalizedPhone.length < 8) {
+    throw new HttpsError("invalid-argument", "No valid phone number exists on this registration.");
+  }
+
+  if (!regData.entryPassNumber) {
+    throw new HttpsError("failed-precondition", "Entry Pass has not been generated for this registration yet.");
+  }
+
+  let eventName = "GMK Event";
+  let venueName = "GMK Venue";
+
+  if (regData.eventId) {
+    const eventDoc = await db.collection("events").doc(regData.eventId).get();
+    if (eventDoc.exists) {
+      const evData = eventDoc.data()!;
+      eventName = evData.title || evData.eventName || eventName;
+      venueName = evData.venue || evData.location || venueName;
+    }
+  }
+
+  const residentName = regData.primaryRegistrantName || regData.fullName || "Resident";
+  const entryPass = regData.entryPassNumber;
+  const qrCodeUrl = `https://quickchart.io/qr?size=500&text=${encodeURIComponent(entryPass)}`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: normalizedPhone,
+    type: "template",
+    template: {
+      name: "gmk_entry_pass_ready",
+      language: { code: "en" },
+      components: [
+        {
+          type: "header",
+          parameters: [
+            {
+              type: "image",
+              image: { link: qrCodeUrl }
+            }
+          ]
+        },
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: residentName },
+            { type: "text", text: eventName },
+            { type: "text", text: venueName },
+            { type: "text", text: entryPass }
+          ]
+        }
+      ]
+    }
+  };
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      logger.info(`[WhatsApp Manual] Successfully resent entry pass to ${normalizedPhone}`);
+      await regRef.update({
+        entryPassWhatsAppLastStatus: "sent",
+        entryPassWhatsAppSentAt: new Date().toISOString(),
+        entryPassWhatsAppMessageId: data.messages?.[0]?.id || "",
+        entryPassWhatsAppRecipient: normalizedPhone,
+        entryPassWhatsAppLastError: null
+      });
+      return { success: true };
+    } else {
+      logger.error(`[WhatsApp Manual] Meta API error`, data);
+      await regRef.update({
+        entryPassWhatsAppLastStatus: "failed",
+        entryPassWhatsAppLastError: data.error?.message || "Meta API Error"
+      });
+      throw new HttpsError("internal", data.error?.message || "Meta API Error");
+    }
+  } catch (err: any) {
+    if (err instanceof HttpsError) throw err;
+    logger.error(`[WhatsApp Manual] Exception`, err);
+    throw new HttpsError("internal", err.message || "Failed to send WhatsApp message.");
+  }
+});
+
+/**
+ * Validates a scanner PIN securely and returns minimum necessary scanner identity.
+ * Rejects with appropriate error if PIN is invalid or inactive.
+ */
+export const resolveScannerPin = onCall({ cors: true }, async (request: any) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const pin = request.data.pin;
+  if (!pin || !/^\d{4}$/.test(pin)) {
+    throw new HttpsError("invalid-argument", "PIN must be exactly 4 digits");
+  }
+
+  const db = getDbInstance();
+
+  // Rate limiting (simple, using a dedicated collection to track attempts)
+  const uid = request.auth.uid;
+  const attemptRef = db.collection("scannerLoginAttempts").doc(uid);
+
+  await db.runTransaction(async (transaction) => {
+    const attemptDoc = await transaction.get(attemptRef);
+    const now = Date.now();
+    let attempts = 0;
+    let windowStart = now;
+
+    if (attemptDoc.exists) {
+      const data = attemptDoc.data()!;
+      if (now - data.windowStart < 5 * 60 * 1000) { // 5 minutes window
+        attempts = data.attempts;
+        windowStart = data.windowStart;
+      }
+    }
+
+    if (attempts >= 10) {
+      throw new HttpsError("resource-exhausted", "Too many failed attempts. Please try again later.");
+    }
+
+    transaction.set(attemptRef, {
+      attempts: attempts + 1,
+      windowStart
+    });
+  });
+
+  const committeesSnap = await db.collection("eventCommittees").get();
+
+  let inactiveMatchFound = false;
+
+  for (const docSnap of committeesSnap.docs) {
+    const committee = docSnap.data();
+    const scanners = committee.scanners || [];
+
+    // Check if matching PIN is in active scanner
+    const activeMatch = scanners.find((s: any) => s.pin === pin && s.isActive);
+    if (activeMatch) {
+      // Clear attempts on success
+      await attemptRef.delete();
+      return {
+        scannerId: activeMatch.id,
+        scannerName: activeMatch.name,
+        eventId: activeMatch.eventId
+      };
+    }
+
+    const inactiveMatch = scanners.find((s: any) => s.pin === pin && !s.isActive);
+    if (inactiveMatch) {
+      inactiveMatchFound = true;
+    }
+  }
+
+  if (inactiveMatchFound) {
+    throw new HttpsError("failed-precondition", "SCANNER INACTIVE");
+  }
+
+  throw new HttpsError("not-found", "INVALID SCANNER PIN");
+});
+
+/**
+ * Restored: sendWhatsAppNotification
+ * Provides a generic backend callable for sending WhatsApp notifications using the Meta Graph API.
+ */
+export const sendWhatsAppNotification = onCall({
+  cors: true,
+  secrets: [metaWhatsAppToken, metaPhoneNumberId]
+}, async (request: any) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const { to, templateName, templateData, components, dryRun } = request.data;
+
+  if (!to || !templateName) {
+    throw new HttpsError("invalid-argument", "Missing required fields: to, templateName");
+  }
+
+  const token = metaWhatsAppToken.value();
+  const phoneId = metaPhoneNumberId.value();
+
+  if (!token || !phoneId) {
+    throw new HttpsError("failed-precondition", "WhatsApp API is not configured on the server.");
+  }
+
+  const normalizedPhone = formatPhoneForWhatsApp(to);
+  if (!normalizedPhone || normalizedPhone.length < 8) {
+    throw new HttpsError("invalid-argument", "Invalid phone number format.");
+  }
+
+  if (dryRun) {
+    logger.info(`[WhatsApp DryRun] Would send ${templateName} to ${normalizedPhone}`);
+    return { success: true, messageId: "dry-run-" + Date.now() };
+  }
+
+  let finalComponents = components || [];
+
+  if (!components && templateData) {
+    if (templateName === "gmk_entry_pass_ready") {
+      finalComponents = [
+        {
+          type: "header",
+          parameters: [
+            {
+              type: "image",
+              image: { link: templateData.qrCodeUrl || templateData.passUrl || "https://placeholder.com" }
+            }
+          ]
+        },
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: String(templateData.residentName || "") },
+            { type: "text", text: String(templateData.eventName || "") },
+            { type: "text", text: String(templateData.venueName || "") },
+            { type: "text", text: String(templateData.entryPass || "") }
+          ]
+        }
+      ];
+    } else if (templateName === "gmk_external_registration_update") {
+      finalComponents = [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: String(templateData.name || templateData.residentName || "") },
+            { type: "text", text: String(templateData.eventName || "") },
+            { type: "text", text: String(templateData.status || "") }
+          ]
+        }
+      ];
+    } else if (templateName === "gmk_registration_confirmed") {
+      finalComponents = [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: String(templateData.name || templateData.residentName || "") },
+            { type: "text", text: String(templateData.eventName || "") }
+          ]
+        }
+      ];
+    } else {
+      // Generic template fallback
+      finalComponents = [
+        {
+          type: "body",
+          parameters: Object.values(templateData).map((val: any) => ({
+            type: "text",
+            text: String(val)
+          }))
+        }
+      ];
+    }
+  }
+
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: normalizedPhone,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: "en" },
+      components: finalComponents
+    }
+  };
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      logger.error(`[WhatsApp Error] Meta Graph API rejected the request for ${normalizedPhone}`, data);
+      throw new HttpsError("internal", `WhatsApp API error: ${data.error?.message || 'Unknown error'}`);
+    }
+
+    return {
+      success: true,
+      messageId: data.messages?.[0]?.id || "unknown"
+    };
+  } catch (error: any) {
+    logger.error(`[WhatsApp Error] Fetch exception for ${normalizedPhone}:`, error);
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("internal", "Failed to communicate with WhatsApp API.");
+  }
+});

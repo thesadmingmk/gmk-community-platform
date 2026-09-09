@@ -280,6 +280,12 @@ export interface EventRegistration {
   entryPassEmailSendCount?: number;
   entryPassEmailSource?: string;
   entryPassEmailLastStatus?: string;
+  entryPassWhatsAppSentAt?: string | null;
+  entryPassWhatsAppRecipient?: string | null;
+  entryPassWhatsAppLastStatus?: string;
+  entryPassWhatsAppMessageId?: string;
+  entryPassWhatsAppLastError?: string | null;
+
 
   // Family Check-In Completion Email Fields
   completionEmailQueuedAt?: string | null;
@@ -495,6 +501,7 @@ export interface EventCommittee {
   status?: 'active' | 'archived';
   createdAt: string;
   updatedAt: string;
+  scanners?: EventScanner[];
 }
 
 export interface EventProgram {
@@ -514,6 +521,16 @@ export interface EventProgram {
   createdAt: string;
   updatedAt: string;
   expenses?: EventCommitteeExpense[];
+}
+
+export interface EventScanner {
+  id: string;
+  name: string;
+  pin: string;
+  isActive: boolean;
+  eventId?: string; // Optional: bind scanner to a specific event
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface EventAttendance {

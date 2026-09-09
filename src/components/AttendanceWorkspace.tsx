@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, EventAttendance } from '../types';
-import { CheckCircle, XCircle, Search, QrCode, AlertTriangle, FileText, Download, Users, FileSpreadsheet, X, Mail, Send, RefreshCw, Check, Clock, AlertCircle, Filter, CheckSquare } from 'lucide-react';
-import { db, auth } from '../context/AuthContext';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { CheckCircle, XCircle, Search, QrCode, AlertTriangle, FileText, Download, Users, FileSpreadsheet, X, Mail, Send, RefreshCw, Check, Clock, AlertCircle, Filter, CheckSquare, MessageSquare } from 'lucide-react';
+import { db, auth, functions } from '../context/AuthContext';
+import { doc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -14,7 +15,9 @@ import { getRegistrationDisplayId, formatExternalGmkId, isExternalGmkId, resolve
 import { NotificationService } from '../services/NotificationService';
 import { SingleEntryPassEmailModal, BulkEntryPassEmailModal } from './attendance/EntryPassEmailModals';
 import { EntryPassEmailCard } from './attendance/EntryPassEmailCard';
+import { EntryPassWhatsAppCard } from './attendance/EntryPassWhatsAppCard';
 import { getRecipientEmail } from '../utils/entryPassEmailHelper';
+import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
 import { 
   processFamilyCheckInCompletion, 
   evaluateFamilyRegistrationParticipants, 
@@ -22,13 +25,15 @@ import {
   formatCheckInDate 
 } from '../services/familyCheckInService';
 
+import ScannerManager from './attendance/ScannerManager';
+
 interface Props {
   activeEvent: CommunityEvent;
   registrations: EventRegistration[];
   attendances?: EventAttendance[];
   families: Family[];
   familyMembers: FamilyMember[];
-  activeTab?: 'events' | 'attendance' | 'reports';
+  activeTab?: 'events' | 'attendance' | 'reports' | 'registration_status' | 'scanners';
   committeeName: string;
 }
 
@@ -53,10 +58,12 @@ export default function AttendanceWorkspace({
   const [selectedParticipants, setSelectedParticipants] = useState<Record<string, boolean>>({});
 
   // Entry Pass Email State
+  const [dispatchTab, setDispatchTab] = useState<'email' | 'whatsapp'>('email');
   const [confirmEmailModalReg, setConfirmEmailModalReg] = useState<EventRegistration | null>(null);
   const [bulkEmailModalOpen, setBulkEmailModalOpen] = useState(false);
   const [selectedRegIds, setSelectedRegIds] = useState<Set<string>>(new Set());
   const [sendingEmailRegId, setSendingEmailRegId] = useState<string | null>(null);
+  const [sendingWhatsAppRegId, setSendingWhatsAppRegId] = useState<string | null>(null);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, success: 0, skipped: 0, failed: 0 });
   const [emailActionSuccess, setEmailActionSuccess] = useState<string | null>(null);
@@ -323,6 +330,21 @@ export default function AttendanceWorkspace({
     setSelectedParticipants({});
   };
 
+  const handleSendWhatsAppEntryPass = async (reg: EventRegistration) => {
+    if (!reg.id) return;
+    setSendingWhatsAppRegId(reg.id);
+    try {
+      const httpsCallableFn = httpsCallable(functions, 'resendWhatsAppEntryPass');
+      await httpsCallableFn({ registrationId: reg.id });
+      setEmailActionSuccess(`WhatsApp Entry Pass sent to ${reg.primaryRegistrantName || reg.primaryMemberEmail || 'Resident'}`);
+    } catch (err: any) {
+      console.error("WhatsApp Send Error:", err);
+      setEmailActionError(err.message || 'Failed to send WhatsApp message.');
+    } finally {
+      setSendingWhatsAppRegId(null);
+    }
+  };
+
   const handleCheckIn = async (reg: EventRegistration) => {
     if (!reg || !activeEvent.id) return;
     const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id.split('_')?.[1] || reg.id;
@@ -347,42 +369,69 @@ export default function AttendanceWorkspace({
     setIsSubmitting(true);
     setErrorMsg('');
     try {
-      const nowStr = new Date().toISOString();
-      const adminEmail = auth.currentUser?.email || 'Gate Attendance Officer';
+      const attRef = doc(db, "eventAttendance", `att_${gmkId}_${activeEvent.id}`);
       
-      const existingArrivedDetails = (existing as any)?.arrivedDetails || [];
-      const newArrivedDetails = newlySelected.map(p => ({
-        name: p.name,
-        category: p.category,
-        arrivedAt: nowStr,
-        scannedBy: adminEmail
-      }));
-      
-      const combinedArrivedDetails = [...existingArrivedDetails, ...newArrivedDetails];
-      const isFullyEntered = combinedArrivedDetails.length >= (reg.totalParticipants || 1);
-      
-      await setDoc(attRef, {
-        id: `att_${gmkId}_${activeEvent.id}`,
-        eventId: activeEvent.id,
-        committeeKey: 'attendance',
-        primaryMemberGmkId: gmkId,
-        status: isFullyEntered ? 'attended' : 'checked_in',
-        attendedAt: nowStr,
-        scannedBy: adminEmail,
-        totalParticipants: reg.totalParticipants || 1,
-        totalAttended: combinedArrivedDetails.length,
-        entryPassNumber: reg.entryPassNumber || `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${gmkId}`,
-        arrivedDetails: combinedArrivedDetails
-      }, { merge: true });
+      let finalArrivedDetails: any[] = [];
+      let finalAttendanceState: any = null;
+      let newlyAddedCount = 0;
 
-      // RTCO-FamilyCheckIn: Process family-level check-in completion notification
+      await runTransaction(db, async (transaction) => {
+        const docSnap = await transaction.get(attRef);
+        const existingData = docSnap.exists() ? docSnap.data() : {};
+        const existingArrivedDetails = existingData.arrivedDetails || [];
+
+        const nowStr = new Date().toISOString();
+        const adminEmail = auth.currentUser?.email || 'Gate Attendance Officer';
+        
+        // Filter out members who are already checked in according to the latest transaction snapshot
+        const actualNewSelections = newlySelected.filter(
+          p => !existingArrivedDetails.some((e: any) => e.name === p.name)
+        );
+        
+        newlyAddedCount = actualNewSelections.length;
+        
+        if (actualNewSelections.length === 0 && existingArrivedDetails.length > 0) {
+          finalArrivedDetails = existingArrivedDetails;
+          finalAttendanceState = existingData;
+          return;
+        }
+
+        const newArrivedDetails = actualNewSelections.map(p => ({
+          name: p.name,
+          category: p.category,
+          arrivedAt: nowStr,
+          scannedBy: adminEmail
+        }));
+        
+        finalArrivedDetails = [...existingArrivedDetails, ...newArrivedDetails];
+        const isFullyEntered = finalArrivedDetails.length >= (reg.totalParticipants || 1);
+        
+        const updateData = {
+          id: `att_${gmkId}_${activeEvent.id}`,
+          eventId: activeEvent.id,
+          committeeKey: 'attendance',
+          primaryMemberGmkId: gmkId,
+          status: isFullyEntered ? 'attended' : 'checked_in',
+          attendedAt: nowStr,
+          scannedBy: adminEmail,
+          totalParticipants: reg.totalParticipants || 1,
+          totalAttended: finalArrivedDetails.length,
+          entryPassNumber: reg.entryPassNumber || `PASS-${activeEvent.id.slice(-6).toUpperCase()}-${gmkId}`,
+          arrivedDetails: finalArrivedDetails
+        };
+
+        finalAttendanceState = { ...existingData, ...updateData };
+        transaction.set(attRef, updateData, { merge: true });
+      });
+
+      // RTCO-FamilyCheckIn: Process family-level check-in completion notification using authoritative final state
       let completionResult: any = null;
       try {
         completionResult = await processFamilyCheckInCompletion({
           reg,
           activeEvent,
-          combinedArrivedDetails,
-          existingAttendance: existing,
+          combinedArrivedDetails: finalArrivedDetails,
+          existingAttendance: finalAttendanceState as EventAttendance,
           families,
           familyMembers
         });
@@ -391,11 +440,11 @@ export default function AttendanceWorkspace({
       }
       
       if (completionResult?.emailQueued) {
-        setSuccessMsg(`Gate entry recorded for ${newlySelected.length} attendees. Family check-in complete — completion confirmation email queued for ${completionResult.recipientEmail}.`);
+        setSuccessMsg(`Gate entry recorded for ${newlyAddedCount || newlySelected.length} attendees. Family check-in complete — completion confirmation email queued for ${completionResult.recipientEmail}.`);
       } else if (completionResult?.alreadyQueued) {
-        setSuccessMsg(`Gate entry recorded for ${newlySelected.length} attendees. (Family completion email was previously recorded).`);
+        setSuccessMsg(`Gate entry recorded for ${newlyAddedCount || newlySelected.length} attendees. (Family completion email was previously recorded).`);
       } else {
-        setSuccessMsg(`Gate entry recorded for ${newlySelected.length} attendees.`);
+        setSuccessMsg(`Gate entry recorded for ${newlyAddedCount || newlySelected.length} attendees.`);
       }
 
       setSelectedParticipants({});
@@ -1284,6 +1333,12 @@ export default function AttendanceWorkspace({
                       onTriggerEmail={(r) => setConfirmEmailModalReg(r)}
                       isSending={sendingEmailRegId === scannedReg.id}
                     />
+                    <EntryPassWhatsAppCard
+                      registration={scannedReg}
+                      activeEvent={activeEvent}
+                      onTriggerWhatsApp={handleSendWhatsAppEntryPass}
+                      isSending={sendingWhatsAppRegId === scannedReg.id}
+                    />
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-stone-200">
@@ -1353,11 +1408,24 @@ export default function AttendanceWorkspace({
 
         const sentEmailsCount = categoryScopedRegs.filter(r => Boolean(r.entryPassEmailSentAt)).length;
         const notSentEmailsCount = categoryScopedRegs.length - sentEmailsCount;
+        
+        const sentWhatsAppCount = categoryScopedRegs.filter(r => {
+          const status = r.entryPassWhatsAppLastStatus;
+          return status === 'sent' || status === 'delivered' || status === 'read';
+        }).length;
+        const notSentWhatsAppCount = categoryScopedRegs.length - sentWhatsAppCount;
 
         const filteredRegs = categoryScopedRegs.filter(reg => {
-          const isSent = Boolean(reg.entryPassEmailSentAt);
-          if (emailFilter === 'sent' && !isSent) return false;
-          if (emailFilter === 'not_sent' && isSent) return false;
+          if (dispatchTab === 'email') {
+            const isSent = Boolean(reg.entryPassEmailSentAt);
+            if (emailFilter === 'sent' && !isSent) return false;
+            if (emailFilter === 'not_sent' && isSent) return false;
+          } else {
+            const status = reg.entryPassWhatsAppLastStatus;
+            const isWaSent = status === 'sent' || status === 'delivered' || status === 'read';
+            if (emailFilter === 'sent' && !isWaSent) return false;
+            if (emailFilter === 'not_sent' && isWaSent) return false;
+          }
 
           if (attendanceSearchTerm.trim()) {
             const q = attendanceSearchTerm.trim().toLowerCase();
@@ -1367,8 +1435,12 @@ export default function AttendanceWorkspace({
             const passNo = (reg.entryPassNumber || '').toLowerCase();
             const unit = (reg.isExternal ? (reg.externalRegistrationTypeName || '') : (fam?.displayUnitNumber || reg.unitNumber || '')).toLowerCase();
             const email = getRecipientEmail(reg, families).toLowerCase();
+            
+            const authoritativePhone = reg.primaryRegistrantWhatsapp || reg.primaryRegistrantPhone || fam?.whatsAppNumber || fam?.phone || '';
+            const waRecipient = reg.entryPassWhatsAppRecipient || formatPhoneWithCountryCode(authoritativePhone);
+            const phoneStr = waRecipient.toLowerCase();
 
-            return name.includes(q) || gmkId.includes(q) || passNo.includes(q) || unit.includes(q) || email.includes(q);
+            return name.includes(q) || gmkId.includes(q) || passNo.includes(q) || unit.includes(q) || email.includes(q) || phoneStr.includes(q);
           }
           return true;
         });
@@ -1394,184 +1466,6 @@ export default function AttendanceWorkspace({
                 <span className="text-2xl font-black text-rose-700">{totalNotChecked}</span>
               </div>
             </div>
-
-            {/* DETAIL VIEW MODAL / EXPANDED SECTION */}
-            {selectedReg && (() => {
-              const stat = getAttendanceStatus(selectedReg);
-              const fam = families.find(f => f.id === selectedReg.familyId);
-              const { adultsCount, childrenCount } = getCounts(selectedReg);
-              
-              const { adults, children } = getParticipantDetails(selectedReg);
-              const alreadyArrived = stat.arrivedNames || [];
-              const isFullyEntered = stat.checkedIn;
-              
-              const isExtReg = selectedReg.isExternal || isExternalGmkId(selectedReg.publicReference) || isExternalGmkId(selectedReg.primaryMemberGmkId);
-              const explicitExternal = selectedReg.paymentSummary?.externalParticipantsCount || 0;
-              const expectedTotal = (selectedReg.participants || []).length + explicitExternal;
-              const isInconsistentResident = !isExtReg && expectedTotal < (selectedReg.totalParticipants || 0);
-              
-              return (
-                <div className="p-5 border-2 border-[#0f4c2a] rounded-2xl bg-white shadow-lg relative animate-fadeIn">
-                  <button 
-                    onClick={() => { setSelectedReg(null); setSelectedParticipants({}); }}
-                    className="absolute top-4 right-4 text-stone-400 hover:text-stone-800"
-                  >
-                    <XCircle className="w-5 h-5" />
-                  </button>
-                  <h5 className="font-extrabold text-sm uppercase tracking-wider mb-4 border-b border-stone-200 pb-2">
-                    Attendance Details
-                  </h5>
-                  
-                  {isInconsistentResident && (
-                    <div className="mb-4 text-xs font-bold text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200">
-                      <div className="flex items-center space-x-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-                        <span><strong>Data Inconsistency Warning:</strong> Participant information is incomplete or inconsistent with the total participant count. Family completion email cannot be triggered for this registration. Please update the registration in Admin Events.</span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Primary Registrant</span>
-                      <span className="block text-xs font-black">{fam?.fullName || selectedReg.primaryRegistrantName || selectedReg.primaryMemberEmail}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">
-                        {selectedReg.isExternal ? 'Registration Category' : 'Property Unit'}
-                      </span>
-                      <span className="block text-xs font-black">
-                        {selectedReg.isExternal 
-                          ? (selectedReg.externalRegistrationTypeName || 'External Guest') 
-                          : (fam?.displayUnitNumber || selectedReg.unitNumber || 'Resident')}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Entry Pass / GMK</span>
-                      <span className="block text-xs font-black font-mono">{selectedReg.entryPassNumber || getRegistrationDisplayId(selectedReg) || selectedReg.id.slice(-6)}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Status</span>
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${stat.color}`}>
-                        {stat.label}
-                      </span>
-                      {stat.completionEmailSent && (
-                        <div className="mt-1 flex items-center gap-1 text-[8.5px] font-black text-emerald-700 uppercase tracking-tight">
-                          <CheckCircle className="w-3 h-3 text-emerald-600" />
-                          <span>Completion Email Sent</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-stone-50 rounded-xl">
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Total Participants</span>
-                      <span className="block text-sm font-black">{selectedReg.totalParticipants}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Adults</span>
-                      <span className="block text-sm font-black">{adultsCount}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[9px] uppercase font-bold text-stone-500">Children</span>
-                      <span className="block text-sm font-black">{childrenCount}</span>
-                    </div>
-                  </div>
-
-                  {errorMsg && (
-                    <div className="mb-4 text-xs font-bold text-rose-600 bg-rose-50 p-2 rounded-lg">{errorMsg}</div>
-                  )}
-                  {successMsg && (
-                    <div className="mb-4 text-xs font-bold text-emerald-600 bg-emerald-50 p-2 rounded-lg">{successMsg}</div>
-                  )}
-
-                  {/* Official Entry Pass Email Card */}
-                  <div className="mb-4">
-                    <EntryPassEmailCard
-                      registration={selectedReg}
-                      activeEvent={activeEvent}
-                      families={families}
-                      onTriggerEmail={(r) => setConfirmEmailModalReg(r)}
-                      isSending={sendingEmailRegId === selectedReg.id}
-                    />
-                  </div>
-
-                  {!isFullyEntered && (
-                    <div className="mt-4 pt-4 border-t border-stone-200 space-y-4">
-                      <div className="flex justify-between items-center mb-4 p-3 bg-stone-50 rounded-xl border border-stone-200">
-                        <div className="text-center flex-1 border-r border-stone-200">
-                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Registered</p>
-                          <p className="text-lg font-black text-stone-900">{selectedReg.totalParticipants}</p>
-                        </div>
-                        <div className="text-center flex-1 border-r border-stone-200">
-                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Entered</p>
-                          <p className="text-lg font-black text-emerald-700">{alreadyArrived.length}</p>
-                        </div>
-                        <div className="text-center flex-1">
-                          <p className="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Remaining</p>
-                          <p className="text-lg font-black text-amber-700">{(selectedReg.totalParticipants || 0) - alreadyArrived.length}</p>
-                        </div>
-                      </div>
-
-                      <p className="text-xs font-bold text-stone-600 mb-2">Select who has arrived:</p>
-                      {adults.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Adults — {adults.length}</p>
-                          {adults.map(p => {
-                            const arrived = alreadyArrived.includes(p.name);
-                            return (
-                              <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
-                                <input 
-                                  type="checkbox" 
-                                  disabled={arrived}
-                                  checked={arrived || selectedParticipants[p.name] || false}
-                                  onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
-                                  className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
-                                />
-                                <span className="text-xs font-bold text-stone-800">{p.name}</span>
-                                {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {children.length > 0 && (
-                        <div className="space-y-2 mt-4">
-                          <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Children — {children.length}</p>
-                          {children.map(p => {
-                            const arrived = alreadyArrived.includes(p.name);
-                            return (
-                              <label key={p.name} className={`flex items-center space-x-3 p-3 rounded-xl border ${arrived ? 'bg-emerald-50/50 border-emerald-200 opacity-70' : 'bg-white border-stone-200 cursor-pointer hover:bg-stone-50 shadow-xs'}`}>
-                                <input 
-                                  type="checkbox" 
-                                  disabled={arrived}
-                                  checked={arrived || selectedParticipants[p.name] || false}
-                                  onChange={(e) => setSelectedParticipants(prev => ({ ...prev, [p.name]: e.target.checked }))}
-                                  className="w-4 h-4 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
-                                />
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-bold text-stone-800">{p.name}</span>
-                                  <span className="text-[9px] font-bold text-stone-500 uppercase">{p.category}</span>
-                                </div>
-                                {arrived && <span className="text-[9px] font-black uppercase text-emerald-700 ml-auto tracking-wider">Entered</span>}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <button 
-                        disabled={isSubmitting || !Object.values(selectedParticipants).some(v => v)}
-                        onClick={() => handleCheckIn(selectedReg)}
-                        className="w-full py-3 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
-                      >
-                        Confirm Check-In Now
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
 
             {/* ALERT BANNERS */}
             {emailActionSuccess && (
@@ -1606,38 +1500,48 @@ export default function AttendanceWorkspace({
             )}
 
             {/* ------------------------------------------------------------- */}
-            {/* ENTRY PASS EMAIL SECTION / CARD                               */}
+            {/* ENTRY PASS DISPATCH SECTION / CARD                            */}
             {/* ------------------------------------------------------------- */}
             <div className="bg-white border-2 border-stone-200 rounded-3xl p-5 shadow-sm space-y-4">
-              {/* Card Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-200 pb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#0f4c2a] shrink-0">
-                    <Mail className="w-5 h-5 text-[#0f4c2a]" />
-                  </div>
-                  <div>
-                    <h5 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading flex items-center gap-2">
-                      <span>ENTRY PASS EMAIL</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black tracking-normal">
-                        Bulk Dispatch
-                      </span>
-                    </h5>
-                    <p className="text-stone-500 text-xs font-bold mt-0.5">
-                      Batch send official entry pass QR code emails to approved resident and external attendees
-                    </p>
+              {/* Card Header & Tabs */}
+              <div className="flex flex-col border-b border-stone-200 pb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-2xl bg-[#0f4c2a] flex items-center justify-center text-white shrink-0 shadow-sm">
+                      <Send className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="font-extrabold text-[#0f4c2a] text-sm uppercase tracking-wider font-heading flex items-center gap-2">
+                        <span>ENTRY PASS DISPATCH</span>
+                      </h5>
+                      <p className="text-stone-500 text-xs font-bold mt-0.5">
+                        Manage and send official entry pass QR codes via Email or WhatsApp
+                      </p>
+                    </div>
                   </div>
                 </div>
-
-                {/* Primary Action Button: SEND ENTRY PASS EMAILS */}
-                <div className="flex items-center gap-2">
+                <div className="flex gap-2">
                   <button
-                    type="button"
-                    disabled={selectedRegIds.size === 0}
-                    onClick={() => setBulkEmailModalOpen(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+                    onClick={() => setDispatchTab('email')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                      dispatchTab === 'email' 
+                        ? 'bg-emerald-100 text-emerald-900 shadow-sm' 
+                        : 'bg-stone-50 text-stone-500 hover:bg-stone-100'
+                    }`}
                   >
-                    <Send className="w-4 h-4 text-amber-300" />
-                    <span>SEND ENTRY PASS EMAILS {selectedRegIds.size > 0 ? `(${selectedRegIds.size})` : ''}</span>
+                    <Mail className="w-4 h-4" />
+                    Email Pass
+                  </button>
+                  <button
+                    onClick={() => setDispatchTab('whatsapp')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                      dispatchTab === 'whatsapp' 
+                        ? 'bg-[#25D366]/20 text-[#075E54] shadow-sm' 
+                        : 'bg-stone-50 text-stone-500 hover:bg-stone-100'
+                    }`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    WhatsApp Pass
                   </button>
                 </div>
               </div>
@@ -1691,8 +1595,17 @@ export default function AttendanceWorkspace({
                       className="py-1.5 px-3 bg-white border border-stone-300 rounded-xl text-xs font-bold text-stone-700 focus:outline-hidden focus:ring-2 focus:ring-[#0f4c2a]"
                     >
                       <option value="all">All Statuses ({categoryScopedRegs.length})</option>
-                      <option value="sent">Pass Email Sent ({sentEmailsCount})</option>
-                      <option value="not_sent">Pass Email Not Sent ({notSentEmailsCount})</option>
+                      {dispatchTab === 'email' ? (
+                        <>
+                          <option value="sent">Pass Email Sent ({sentEmailsCount})</option>
+                          <option value="not_sent">Pass Email Not Sent ({notSentEmailsCount})</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="sent">Pass WhatsApp Sent ({sentWhatsAppCount})</option>
+                          <option value="not_sent">Pass WhatsApp Not Sent ({notSentWhatsAppCount})</option>
+                        </>
+                      )}
                     </select>
                   </div>
 
@@ -1720,32 +1633,47 @@ export default function AttendanceWorkspace({
 
                 {/* Quick Selection & Selected Count */}
                 <div className="flex items-center gap-2 shrink-0">
-                  {notSentEmailsCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const unsentIds = categoryScopedRegs.filter(r => !r.entryPassEmailSentAt).map(r => r.id);
-                        const next = new Set(selectedRegIds);
-                        unsentIds.forEach(id => next.add(id));
-                        setSelectedRegIds(next);
-                        if (emailFilter === 'sent') setEmailFilter('all');
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5 text-[#0f4c2a]" />
-                      <span>SELECT ALL UNSENT ({notSentEmailsCount})</span>
-                    </button>
+                  {dispatchTab === 'email' && (
+                    <>
+                      {notSentEmailsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const unsentIds = categoryScopedRegs.filter(r => !r.entryPassEmailSentAt).map(r => r.id);
+                            const next = new Set(selectedRegIds);
+                            unsentIds.forEach(id => next.add(id));
+                            setSelectedRegIds(next);
+                            if (emailFilter === 'sent') setEmailFilter('all');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5 text-[#0f4c2a]" />
+                          <span>SELECT ALL UNSENT ({notSentEmailsCount})</span>
+                        </button>
+                      )}
+                      
+                      <button
+                        type="button"
+                        disabled={selectedRegIds.size === 0}
+                        onClick={() => setBulkEmailModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0f4c2a] hover:bg-[#0c3e22] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm cursor-pointer ml-1"
+                      >
+                        <Send className="w-3.5 h-3.5 text-amber-300" />
+                        <span>SEND BULK EMAIL {selectedRegIds.size > 0 ? `(${selectedRegIds.size})` : ''}</span>
+                      </button>
+                    </>
                   )}
-
-                  <span className="text-xs font-black px-2.5 py-1.5 bg-stone-200 text-stone-800 rounded-xl">
-                    {selectedRegIds.size} Selected
-                  </span>
-
+                  
+                  {selectedRegIds.size > 0 && (
+                    <span className="text-xs font-black px-2.5 py-1.5 bg-stone-200 text-stone-800 rounded-xl">
+                      {selectedRegIds.size} Selected
+                    </span>
+                  )}
                   {selectedRegIds.size > 0 && (
                     <button
                       type="button"
                       onClick={() => setSelectedRegIds(new Set())}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>Clear</span>
@@ -1758,130 +1686,205 @@ export default function AttendanceWorkspace({
               <div className="overflow-x-auto border border-stone-200 rounded-2xl bg-white">
                 <table className="w-full text-left text-xs whitespace-nowrap">
                   <thead className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black tracking-wider text-stone-500">
-                    <tr>
-                      <th className="px-3 py-3 text-center w-8">
-                        <input
-                          type="checkbox"
-                          checked={filteredRegs.length > 0 && filteredRegs.every(r => selectedRegIds.has(r.id))}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              const next = new Set(selectedRegIds);
-                              filteredRegs.forEach(r => next.add(r.id));
-                              setSelectedRegIds(next);
-                            } else {
-                              const next = new Set(selectedRegIds);
-                              filteredRegs.forEach(r => next.delete(r.id));
-                              setSelectedRegIds(next);
-                            }
-                          }}
-                          className="w-3.5 h-3.5 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
-                          title="Select/Deselect visible rows"
-                        />
-                      </th>
-                      <th className="px-3 py-3 text-center w-8">#</th>
-                      <th className="px-4 py-3">Pass #</th>
-                      <th className="px-4 py-3">GMK ID</th>
-                      <th className="px-4 py-3">Name</th>
-                      <th className="px-4 py-3">Category / Unit</th>
-                      <th className="px-4 py-3">Recipient Email</th>
-                      <th className="px-4 py-3 text-center">Total</th>
-                      <th className="px-4 py-3">Attendance</th>
-                      <th className="px-4 py-3 text-center">Pass Email</th>
-                      <th className="px-4 py-3 text-right">Time</th>
-                    </tr>
+                    {dispatchTab === 'email' ? (
+                      <tr>
+                        <th className="px-3 py-3 text-center w-8">
+                          <input
+                            type="checkbox"
+                            checked={filteredRegs.length > 0 && filteredRegs.every(r => selectedRegIds.has(r.id))}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const next = new Set(selectedRegIds);
+                                filteredRegs.forEach(r => next.add(r.id));
+                                setSelectedRegIds(next);
+                              } else {
+                                const next = new Set(selectedRegIds);
+                                filteredRegs.forEach(r => next.delete(r.id));
+                                setSelectedRegIds(next);
+                              }
+                            }}
+                            className="w-3.5 h-3.5 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                            title="Select/Deselect visible rows"
+                          />
+                        </th>
+                        <th className="px-3 py-3 text-center w-8">#</th>
+                        <th className="px-4 py-3">GMK ID</th>
+                        <th className="px-4 py-3">Unit</th>
+                        <th className="px-4 py-3">Name</th>
+                        <th className="px-4 py-3">Email Pass</th>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <th className="px-3 py-3 text-center w-8">#</th>
+                        <th className="px-4 py-3">GMK ID</th>
+                        <th className="px-4 py-3">Unit</th>
+                        <th className="px-4 py-3">Name</th>
+                        <th className="px-4 py-3">WhatsApp Number</th>
+                        <th className="px-4 py-3">WhatsApp Pass</th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {filteredRegs.map((reg, index) => {
                       const stat = getAttendanceStatus(reg);
                       const fam = families.find(f => f.id === reg.familyId);
-                      const { adultsCount, childrenCount } = getCounts(reg);
                       const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
                       const categoryOrUnit = isExt
                         ? (reg.externalRegistrationTypeName || 'External Guest')
                         : (fam?.displayUnitNumber || reg.unitNumber || '-');
+                      
                       const recipientEmail = getRecipientEmail(reg, families);
-                      const isSent = Boolean(reg.entryPassEmailSentAt);
+                      const isEmailSent = Boolean(reg.entryPassEmailSentAt);
+                      
+                      const authoritativePhone = reg.primaryRegistrantWhatsapp || reg.primaryRegistrantPhone || fam?.whatsAppNumber || fam?.phone || '';
+                      const waRecipient = reg.entryPassWhatsAppRecipient || formatPhoneWithCountryCode(authoritativePhone);
+                      const waStatus = reg.entryPassWhatsAppLastStatus;
+                      const isWaSent = waStatus === 'sent' || waStatus === 'delivered' || waStatus === 'read';
+                      const isWaFailed = waStatus === 'failed';
+                      const isWaPending = waStatus === 'pending' || sendingWhatsAppRegId === reg.id;
+
                       const isSelected = selectedRegIds.has(reg.id);
 
-                      return (
-                        <tr 
-                          key={reg.id} 
-                          onClick={() => {
-                            setErrorMsg(''); setSuccessMsg(''); setSelectedReg(reg);
-                          }}
-                          className={`hover:bg-stone-50 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50/40' : ''}`}
-                        >
-                          <td 
-                            className="px-3 py-3 text-center w-8"
-                            onClick={(e) => e.stopPropagation()}
+                      if (dispatchTab === 'email') {
+                        return (
+                          <tr 
+                            key={reg.id} 
+                            className={`hover:bg-stone-50 transition-colors ${isSelected ? 'bg-emerald-50/40' : ''}`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => toggleSelectReg(reg.id, e.target.checked)}
-                              className="w-3.5 h-3.5 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
-                            />
-                          </td>
-                          <td className="px-3 py-3 font-mono font-bold text-stone-400 text-center">
-                            {index + 1}
-                          </td>
-                          <td className="px-4 py-3 font-mono font-bold text-stone-600">
-                            {reg.entryPassNumber || reg.id.slice(-6)}
-                          </td>
-                          <td className="px-4 py-3 font-bold text-stone-900">{getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || '-'}</td>
-                          <td className="px-4 py-3 font-black text-stone-900">{fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail}</td>
-                          <td className="px-4 py-3 font-bold text-stone-600">{categoryOrUnit}</td>
-                          <td className="px-4 py-3 text-stone-600 font-mono text-[11px]">
-                            {recipientEmail ? (
-                              <span className="truncate max-w-[180px] inline-block">{recipientEmail}</span>
-                            ) : (
-                              <span className="text-amber-700 font-semibold italic">Missing</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-center font-black">{reg.totalParticipants}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${stat.color}`}>
-                              {stat.label}
-                            </span>
-                          </td>
-                          <td 
-                            className="px-4 py-3 text-center"
-                            onClick={(e) => e.stopPropagation()}
+                            <td 
+                              className="px-3 py-3 text-center w-8"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+                                checked={isSelected}
+                                onChange={(e) => toggleSelectReg(reg.id, e.target.checked)}
+                                className="w-3.5 h-3.5 text-[#0f4c2a] rounded border-stone-300 focus:ring-[#0f4c2a]"
+                              />
+                            </td>
+                            <td className="px-3 py-3 font-mono font-bold text-stone-400 text-center">
+                              {index + 1}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-bold text-stone-900">{getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || '-'}</div>
+                              <div className="text-[10px] text-stone-400 font-mono font-bold">Pass: {reg.entryPassNumber || reg.id.slice(-6)}</div>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-stone-600">{categoryOrUnit}</td>
+                            <td className="px-4 py-3 font-black text-stone-900">{fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col space-y-1">
+                                {recipientEmail ? (
+                                  <>
+                                    <span className="text-stone-600 font-mono text-[11px] truncate max-w-[180px]">{recipientEmail}</span>
+                                    <div>
+                                      {isEmailSent ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setConfirmEmailModalReg(reg); }}
+                                          title={`Sent on ${new Date(reg.entryPassEmailSentAt!).toLocaleString()} - Click to resend`}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                        >
+                                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                          <span>Sent ✓</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setConfirmEmailModalReg(reg); }}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                        >
+                                          <Mail className="w-3.5 h-3.5 text-amber-300" />
+                                          <span>Send Email</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="inline-block px-2 py-1 bg-stone-100 text-stone-400 rounded-md text-[9px] font-bold uppercase tracking-wider max-w-max">
+                                    No Email
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      } else {
+                        return (
+                          <tr 
+                            key={reg.id} 
+                            className="hover:bg-stone-50 transition-colors"
                           >
-                            {isSent ? (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmEmailModalReg(reg)}
-                                title={`Sent on ${new Date(reg.entryPassEmailSentAt!).toLocaleString()} - Click to resend`}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
-                              >
-                                <Check className="w-3 h-3 text-emerald-600" />
-                                <span>Sent</span>
-                              </button>
-                            ) : recipientEmail ? (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmEmailModalReg(reg)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#0f4c2a] hover:bg-[#0c3e22] text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
-                              >
-                                <Mail className="w-3 h-3 text-amber-300" />
-                                <span>Send</span>
-                              </button>
-                            ) : (
-                              <span className="inline-block px-2 py-0.5 bg-stone-100 text-stone-400 rounded-md text-[9px] font-bold uppercase tracking-wider">
-                                No Email
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right text-stone-500 font-bold">
-                            {stat.att?.checkedInAt || (stat.att as any)?.attendedAt ? new Date(stat.att?.checkedInAt || (stat.att as any)?.attendedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
-                          </td>
-                        </tr>
-                      );
+                            <td className="px-3 py-3 font-mono font-bold text-stone-400 text-center">
+                              {index + 1}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-bold text-stone-900">{getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || '-'}</div>
+                              <div className="text-[10px] text-stone-400 font-mono font-bold">Pass: {reg.entryPassNumber || reg.id.slice(-6)}</div>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-stone-600">{categoryOrUnit}</td>
+                            <td className="px-4 py-3 font-black text-stone-900">{fam?.fullName || reg.primaryRegistrantName || reg.primaryMemberEmail}</td>
+                            <td className="px-4 py-3 font-mono font-semibold text-stone-600">
+                              {waRecipient || (
+                                <span className="inline-block px-2 py-1 bg-stone-100 text-stone-400 rounded-md text-[9px] font-bold uppercase tracking-wider">
+                                  No Number
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col space-y-1">
+                                {waRecipient ? (
+                                  <div>
+                                    {isWaSent ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleSendWhatsAppEntryPass(reg); }}
+                                        title={`Sent on ${reg.entryPassWhatsAppSentAt ? new Date(reg.entryPassWhatsAppSentAt).toLocaleString() : 'N/A'} - Click to resend`}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>Sent ✓</span>
+                                      </button>
+                                    ) : isWaFailed ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleSendWhatsAppEntryPass(reg); }}
+                                        title={`Failed: ${reg.entryPassWhatsAppLastError}`}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                      >
+                                        <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                                        <span>Failed ⚠</span>
+                                      </button>
+                                    ) : isWaPending ? (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                                        <span>Sending...</span>
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleSendWhatsAppEntryPass(reg); }}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#25D366] hover:bg-[#1DA851] text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                      >
+                                        <MessageSquare className="w-3.5 h-3.5 text-white" />
+                                        <span>Send WhatsApp</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="inline-block px-2 py-1 bg-stone-100 text-stone-400 rounded-md text-[9px] font-bold uppercase tracking-wider max-w-max">
+                                    No Mobile
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
                     })}
                     {filteredRegs.length === 0 && (
                       <tr>
-                        <td colSpan={11} className="px-4 py-8 text-center text-stone-500 font-bold">
+                        <td colSpan={6} className="px-4 py-8 text-center text-stone-500 font-bold">
                           {attendanceSearchTerm || emailFilter !== 'all' || categoryFilter !== 'all'
                             ? 'No registrations match your search or filter criteria.' 
                             : 'No eligible registrations found for this event.'}
@@ -2069,6 +2072,11 @@ export default function AttendanceWorkspace({
       {/* REGISTRATION STATUS REPORT TAB */}
       {activeTab === ('registration_status' as any) && (
         <AttendanceReport initialEventId={activeEvent.id} />
+      )}
+
+      {/* SCANNERS TAB */}
+      {activeTab === 'scanners' && (
+        <ScannerManager activeEvent={activeEvent} committeeName={committeeName} />
       )}
 
       {/* ENTRY PASS EMAIL CONFIRMATION MODAL */}
