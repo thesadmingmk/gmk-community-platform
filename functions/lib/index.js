@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendWhatsAppNotification = exports.resolveScannerPin = exports.resendWhatsAppEntryPass = exports.processAutomaticWhatsAppEntryPass = exports.processEventRefund = exports.processEventPayment = exports.requestPasswordReset = exports.processEmailQueue = void 0;
+exports.manageScannerPin = exports.sendWhatsAppNotification = exports.resolveScannerPin = exports.resendWhatsAppEntryPass = exports.processAutomaticWhatsAppEntryPass = exports.processEventRefund = exports.processEventPayment = exports.requestPasswordReset = exports.processEmailQueue = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const https_1 = require("firebase-functions/v2/https");
 const params_1 = require("firebase-functions/params");
@@ -16,7 +16,10 @@ const FIRESTORE_DATABASE_ID = "ai-studio-7d23ee96-a783-4875-9630-4390202b70b9";
 let _db = null;
 function getDbInstance() {
     if (!_db) {
-        if ((0, app_1.getApps)().length === 0) {
+        try {
+            (0, app_1.getApp)();
+        }
+        catch {
             (0, app_1.initializeApp)();
         }
         _db = (0, firestore_2.getFirestore)(FIRESTORE_DATABASE_ID);
@@ -174,7 +177,7 @@ exports.processEmailQueue = (0, firestore_1.onDocumentCreated)({
     <h2 style="color: #0F4C2A; font-size: 19px; margin-top: 0; margin-bottom: 16px; font-family: Georgia, serif; font-weight: bold;">Payment Confirmed & Official Entry Pass</h2>
     <p style="margin: 0 0 16px 0;">Dear <strong>{{recipientName}}</strong>,</p>
     <p style="margin: 0 0 20px 0;">Your payment for <strong>{{eventName}}</strong> has been confirmed. Your official Entry Pass and gate admission QR code have been issued below.</p>
-
+    
     <div style="background-color: #f9fafb; border: 2px solid #0F4C2A; border-radius: 10px; padding: 20px; margin: 24px 0; text-align: center;">
       <div style="margin-bottom: 16px;">
         <img src="{{qrCodeDataUrl}}" width="160" height="160" alt="Official Entry Pass QR" style="display: block; margin: 0 auto; border-radius: 8px; border: 1px solid #d1d5db; background: #ffffff; padding: 6px;" />
@@ -1020,17 +1023,16 @@ exports.resendWhatsAppEntryPass = (0, https_1.onCall)({
  * Rejects with appropriate error if PIN is invalid or inactive.
  */
 exports.resolveScannerPin = (0, https_1.onCall)({ cors: true }, async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError("unauthenticated", "Authentication required");
-    }
     const pin = request.data.pin;
     if (!pin || !/^\d{4}$/.test(pin)) {
         throw new https_1.HttpsError("invalid-argument", "PIN must be exactly 4 digits");
     }
     const db = getDbInstance();
-    // Rate limiting (simple, using a dedicated collection to track attempts)
-    const uid = request.auth.uid;
-    const attemptRef = db.collection("scannerLoginAttempts").doc(uid);
+    // Rate limiting for public endpoint (IP-based instead of Auth-based)
+    const rawIp = request.rawRequest?.ip || request.rawRequest?.headers?.['x-forwarded-for'] || 'unknown-ip';
+    const ipStr = Array.isArray(rawIp) ? rawIp[0] : (typeof rawIp === 'string' ? rawIp.split(',')[0] : 'unknown-ip');
+    const safeIp = ipStr.trim().replace(/[^a-zA-Z0-9]/g, '_');
+    const attemptRef = db.collection("scannerLoginAttempts").doc(`ip_${safeIp}`);
     await db.runTransaction(async (transaction) => {
         const attemptDoc = await transaction.get(attemptRef);
         const now = Date.now();
@@ -1077,66 +1079,85 @@ exports.resolveScannerPin = (0, https_1.onCall)({ cors: true }, async (request) 
     }
     throw new https_1.HttpsError("not-found", "INVALID SCANNER PIN");
 });
-/**
- * Restored: sendWhatsAppNotification
- * Provides a generic backend callable for sending WhatsApp notifications using the Meta Graph API.
- */
 exports.sendWhatsAppNotification = (0, https_1.onCall)({
     cors: true,
+    invoker: "public",
     secrets: [metaWhatsAppToken, metaPhoneNumberId]
 }, async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError("unauthenticated", "Authentication required");
     }
-    const { to, templateName, templateData, components, dryRun } = request.data;
+    const { to, templateName, templateData = {}, components, dryRun = false } = request.data;
     if (!to || !templateName) {
-        throw new https_1.HttpsError("invalid-argument", "Missing required fields: to, templateName");
+        throw new https_1.HttpsError("invalid-argument", "Missing required fields");
     }
     const token = metaWhatsAppToken.value();
-    const phoneId = metaPhoneNumberId.value();
-    if (!token || !phoneId) {
-        throw new https_1.HttpsError("failed-precondition", "WhatsApp API is not configured on the server.");
+    let phoneId = "";
+    try {
+        phoneId = metaPhoneNumberId.value();
     }
-    const normalizedPhone = formatPhoneForWhatsApp(to);
-    if (!normalizedPhone || normalizedPhone.length < 8) {
-        throw new https_1.HttpsError("invalid-argument", "Invalid phone number format.");
+    catch (e) {
+        // Ignore and fallback
     }
-    if (dryRun) {
-        firebase_functions_1.logger.info(`[WhatsApp DryRun] Would send ${templateName} to ${normalizedPhone}`);
-        return { success: true, messageId: "dry-run-" + Date.now() };
+    if (!phoneId) {
+        phoneId = "1302067342984705";
     }
-    let finalComponents = components || [];
-    if (!components && templateData) {
+    if (!token) {
+        throw new https_1.HttpsError("failed-precondition", "Missing WhatsApp token");
+    }
+    let normalizedPhone = String(to).replace(/\D/g, "");
+    if (normalizedPhone.startsWith("00")) {
+        normalizedPhone = normalizedPhone.substring(2);
+    }
+    if (normalizedPhone.length === 8) {
+        normalizedPhone = "968" + normalizedPhone;
+    }
+    else if (normalizedPhone.length === 10 && /^[6789]/.test(normalizedPhone)) {
+        normalizedPhone = "91" + normalizedPhone;
+    }
+    else if (normalizedPhone.length === 9 && normalizedPhone.startsWith("5")) {
+        normalizedPhone = "971" + normalizedPhone;
+    }
+    let finalComponents = components;
+    if (!finalComponents) {
         if (templateName === "gmk_entry_pass_ready") {
-            finalComponents = [
-                {
+            const headerParams = [];
+            if (templateData.headerMediaId) {
+                headerParams.push({
+                    type: "image",
+                    image: { id: templateData.headerMediaId }
+                });
+            }
+            else if (templateData.headerImageUrl) {
+                headerParams.push({
+                    type: "image",
+                    image: { link: templateData.headerImageUrl }
+                });
+            }
+            finalComponents = [];
+            if (headerParams.length > 0) {
+                finalComponents.push({
                     type: "header",
-                    parameters: [
-                        {
-                            type: "image",
-                            image: { link: templateData.qrCodeUrl || templateData.passUrl || "https://placeholder.com" }
-                        }
-                    ]
-                },
-                {
-                    type: "body",
-                    parameters: [
-                        { type: "text", text: String(templateData.residentName || "") },
-                        { type: "text", text: String(templateData.eventName || "") },
-                        { type: "text", text: String(templateData.venueName || "") },
-                        { type: "text", text: String(templateData.entryPass || "") }
-                    ]
-                }
-            ];
+                    parameters: headerParams
+                });
+            }
+            finalComponents.push({
+                type: "body",
+                parameters: [
+                    { type: "text", text: String(templateData.recipientName || templateData.primaryRegistrantName || "Community Member") },
+                    { type: "text", text: String(templateData.eventName || "Community Gathering") },
+                    { type: "text", text: String(templateData.entryPassNumber || "PASS-PENDING") }
+                ]
+            });
         }
         else if (templateName === "gmk_external_registration_update") {
             finalComponents = [
                 {
                     type: "body",
                     parameters: [
-                        { type: "text", text: String(templateData.name || templateData.residentName || "") },
+                        { type: "text", text: String(templateData.recipientName || templateData.primaryRegistrantName || "") },
                         { type: "text", text: String(templateData.eventName || "") },
-                        { type: "text", text: String(templateData.status || "") }
+                        { type: "text", text: String(templateData.referenceId || templateData.publicReference || templateData.registrationId || "") }
                     ]
                 }
             ];
@@ -1146,23 +1167,25 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
                 {
                     type: "body",
                     parameters: [
-                        { type: "text", text: String(templateData.name || templateData.residentName || "") },
+                        { type: "text", text: String(templateData.recipientName || templateData.primaryRegistrantName || "") },
                         { type: "text", text: String(templateData.eventName || "") }
                     ]
                 }
             ];
         }
         else {
-            // Generic template fallback
-            finalComponents = [
-                {
-                    type: "body",
-                    parameters: Object.values(templateData).map((val) => ({
-                        type: "text",
-                        text: String(val)
-                    }))
-                }
-            ];
+            const bodyParams = Object.keys(templateData).map(key => ({
+                type: "text",
+                text: String(templateData[key])
+            }));
+            if (bodyParams.length > 0) {
+                finalComponents = [
+                    {
+                        type: "body",
+                        parameters: bodyParams
+                    }
+                ];
+            }
         }
     }
     const payload = {
@@ -1176,6 +1199,14 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
             components: finalComponents
         }
     };
+    if (dryRun) {
+        return {
+            success: true,
+            dryRun: true,
+            messageId: `dry_run_msg_${Date.now()}`,
+            simulatedPayload: payload
+        };
+    }
     try {
         const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
             method: "POST",
@@ -1201,5 +1232,64 @@ exports.sendWhatsAppNotification = (0, https_1.onCall)({
             throw error;
         throw new https_1.HttpsError("internal", "Failed to communicate with WhatsApp API.");
     }
+});
+/**
+ * Transactionally enforces global PIN uniqueness across all event committees
+ */
+exports.manageScannerPin = (0, https_1.onCall)({ cors: true }, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError("unauthenticated", "Authentication required");
+    }
+    const { committeeId, scanner, action } = request.data;
+    // action: 'create' | 'edit' | 'toggle'
+    if (!committeeId || !scanner || !scanner.pin) {
+        throw new https_1.HttpsError("invalid-argument", "Missing required fields");
+    }
+    if (!/^\d{4}$/.test(scanner.pin)) {
+        throw new https_1.HttpsError("invalid-argument", "PIN must be exactly 4 digits");
+    }
+    const db = getDbInstance();
+    await db.runTransaction(async (transaction) => {
+        // 1. Get all committees to check global uniqueness
+        const committeesSnap = await transaction.get(db.collection("eventCommittees"));
+        let pinInUseBy = null;
+        let targetCommitteeDoc = null;
+        for (const doc of committeesSnap.docs) {
+            if (doc.id === committeeId)
+                targetCommitteeDoc = doc;
+            const commScanners = doc.data().scanners || [];
+            const match = commScanners.find((s) => s.pin === scanner.pin &&
+                // We check against all records, not just active ones, for strict global uniqueness as requested:
+                // "If the PIN already exists anywhere, reject it... across ALL scanner records."
+                s.id !== scanner.id // exclude self
+            );
+            if (match) {
+                pinInUseBy = match.name;
+                break;
+            }
+        }
+        if (pinInUseBy) {
+            throw new https_1.HttpsError("already-exists", `This PIN is already in use by ${pinInUseBy}. Please choose another PIN.`);
+        }
+        if (!targetCommitteeDoc) {
+            throw new https_1.HttpsError("not-found", "Committee not found");
+        }
+        const currentScanners = targetCommitteeDoc.data().scanners || [];
+        let updatedScanners = [];
+        if (action === 'create') {
+            updatedScanners = [...currentScanners, scanner];
+        }
+        else if (action === 'edit' || action === 'toggle') {
+            const exists = currentScanners.some((s) => s.id === scanner.id);
+            if (!exists)
+                throw new https_1.HttpsError("not-found", "Scanner not found in this committee");
+            updatedScanners = currentScanners.map((s) => s.id === scanner.id ? { ...s, ...scanner } : s);
+        }
+        else {
+            throw new https_1.HttpsError("invalid-argument", "Invalid action");
+        }
+        transaction.update(targetCommitteeDoc.ref, { scanners: updatedScanners });
+    });
+    return { success: true };
 });
 //# sourceMappingURL=index.js.map

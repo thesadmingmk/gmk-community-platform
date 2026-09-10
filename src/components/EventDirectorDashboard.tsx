@@ -580,7 +580,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [committeeSearchQueries, setCommitteeSearchQueries] = useState<Record<string, string>>({});
   const [foodTab, setFoodTab] = useState<'events' | 'expenses'>('events');
-  const [attendanceTab, setAttendanceTab] = useState<'events' | 'attendance' | 'expenses' | 'reports'>('events');
+  const [attendanceTab, setAttendanceTab] = useState<'events' | 'attendance' | 'expenses' | 'reports' | 'registration_status' | 'scanners'>('events');
   const [gamesTab, setGamesTab] = useState<'reports' | 'expenses'>('reports');
 
   // Workspace and unique Program configuration states
@@ -9337,6 +9337,13 @@ const handleDownloadPDF = () => {
                                 className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all ${attendanceTab === 'registration_status' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
                               >
                                 Reg Status
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setAttendanceTab('scanners')}
+                                className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all ${attendanceTab === 'scanners' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                              >
+                                Scanners
                               </button>
                             </div>
                             </div>

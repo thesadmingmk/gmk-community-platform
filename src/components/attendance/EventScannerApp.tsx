@@ -42,6 +42,25 @@ export default function EventScannerApp() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [showExitFullscreen, setShowExitFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => { if (!document.fullscreenElement) setShowExitFullscreen(false); };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const handleEmptyTap = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget && document.fullscreenElement) {
+      setShowExitFullscreen(true);
+      setTimeout(() => setShowExitFullscreen(false), 3000);
+    }
+  };
+
+  const handleExitFullscreen = () => {
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    setShowExitFullscreen(false);
+  };
 
   // 1. Initial Load: Fetch active events to verify PIN against
   useEffect(() => {
@@ -101,6 +120,7 @@ export default function EventScannerApp() {
         setActiveScanner({ id: data.scannerId, name: data.scannerName, pin: pinInput, isActive: true, eventId: data.eventId } as EventScanner);
         setActiveEvent(evt);
         setPinInput('');
+        try { if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen().catch(() => {}); } } catch (e) {}
       } else {
         setErrorMsg('EVENT NOT FOUND');
       }
@@ -137,11 +157,51 @@ export default function EventScannerApp() {
     const validRegs = registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved');
 
     return validRegs.filter(r => {
-      const dispId = getRegistrationDisplayId(r)?.toLowerCase() || '';
+      const gmkId = getRegistrationDisplayId(r) || r.primaryMemberGmkId || '';
+      
+      const fam = families.find(f => 
+        f.id === r.familyId || 
+        f.id === `fam_${gmkId}` ||
+        (gmkId && f.primaryMemberGmkId === gmkId) || 
+        (r.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === r.primaryMemberEmail.toLowerCase())
+      );
+      
+      const relevantFamilyMembers = familyMembers.filter(m => 
+        m.familyId === r.familyId || 
+        (fam && m.familyId === fam.id) || 
+        (fam && m.familyId === `fam_${fam.primaryMemberGmkId}`) ||
+        (gmkId && m.familyId === `fam_${gmkId}`)
+      );
+
+      const dispId = gmkId.toLowerCase();
       const primName = (r.primaryRegistrantName || r.primaryMemberEmail || '').toLowerCase();
-      return dispId.includes(queryLower) || primName.includes(queryLower);
+      const famName = (fam?.fullName || '').toLowerCase();
+      const spouseName = (fam?.spouseName || '').toLowerCase();
+      
+      if (dispId.includes(queryLower) || primName.includes(queryLower) || famName.includes(queryLower) || spouseName.includes(queryLower)) {
+        return true;
+      }
+      
+      // Also search all participants directly
+      const participants = r.participants || [];
+      if (participants.some(p => (p || '').toLowerCase().includes(queryLower))) {
+        return true;
+      }
+      
+      // And Participant Details
+      const participantDetails = r.participantDetails || [];
+      if (participantDetails.some(d => (d.name || '').toLowerCase().includes(queryLower))) {
+        return true;
+      }
+      
+      // And family members (Robust match)
+      if (relevantFamilyMembers.some(m => (m.name || '').toLowerCase().includes(queryLower))) {
+        return true;
+      }
+      
+      return false;
     });
-  }, [searchQuery, registrations]);
+  }, [searchQuery, registrations, families, familyMembers]);
 
   // Check-In Logic
   const handleCheckIn = async () => {
@@ -254,45 +314,60 @@ export default function EventScannerApp() {
   };
 
   const getParticipantDetails = (reg: EventRegistration) => {
-    const fam = families.find(f => f.id === reg.familyId);
-    const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
-    const currentYear = new Date().getFullYear();
+    const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || '';
+    
+    const fam = families.find(f => 
+      f.id === reg.familyId || 
+      f.id === `fam_${gmkId}` ||
+      (gmkId && f.primaryMemberGmkId === gmkId) || 
+      (reg.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === reg.primaryMemberEmail.toLowerCase())
+    );
+    
+    const relevantFamilyMembers = familyMembers.filter(m => 
+      m.familyId === reg.familyId || 
+      (fam && m.familyId === fam.id) || 
+      (fam && m.familyId === `fam_${fam.primaryMemberGmkId}`) ||
+      (gmkId && m.familyId === `fam_${gmkId}`)
+    );
+    
+    const primaryMemberName = fam?.fullName || reg.primaryRegistrantName || (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
     const participants = reg.participants || [];
     
     const adults: { name: string, category: string, age: number }[] = [];
     const children: { name: string, category: string, age: number }[] = [];
     
-    participants.forEach(name => {
-      let category = 'Adult';
-      let age = 30; // default adult
-      
-      const isPrimary = (name.trim().toLowerCase() === (fam?.fullName || reg.primaryMemberEmail || '').trim().toLowerCase());
-      if (isPrimary) {
-        category = 'Adult';
-      } else {
-        const mem = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
-        if (mem && mem.relationship === 'child') {
-          if (mem.yearOfBirth) {
-            const yob = parseInt(mem.yearOfBirth);
-            if (!isNaN(yob)) {
-              age = currentYear - yob;
-              if (age <= 3) category = 'Kids 0-3';
-              else if (age <= 9) category = 'Kids 4-9';
-              else if (age < 18) category = 'Kids 10+';
-              else category = 'Adult'; 
-            } else {
-              category = 'Kids 10+'; 
-            }
-          } else {
-            category = 'Kids 10+';
-          }
-        }
+    participants.forEach(rawName => {
+      const name = (rawName || '').trim();
+      if (!name) return;
+      const lower = name.toLowerCase();
+
+      let category = 'Other';
+      const primaryLower = primaryMemberName.trim().toLowerCase();
+      const spouseLower = (fam?.spouseName || '').trim().toLowerCase();
+
+      if (primaryLower && (lower === primaryLower || primaryLower.includes(lower) || lower.includes(primaryLower))) {
+        category = 'GMK Member';
+      } else if ((spouseLower && (lower === spouseLower || spouseLower.includes(lower) || lower.includes(spouseLower))) ||
+        relevantFamilyMembers.some(m => m.relationship === 'spouse' && m.name.trim().toLowerCase() === lower)) {
+        category = 'Spouse';
+      } else if (relevantFamilyMembers.some(m => m.relationship === 'child' && m.name.trim().toLowerCase() === lower)) {
+        category = 'Child';
+      } else if (reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower)) {
+        const detail = reg.participantDetails.find(d => d.name.trim().toLowerCase() === lower);
+        if (detail?.role === 'primary' || detail?.role === 'single') category = 'GMK Member';
+        else if (detail?.role === 'spouse') category = 'Spouse';
+        else if (detail?.role === 'child') category = 'Child';
+        else if (detail?.role === 'parent') category = 'Parent';
+        else category = 'Other';
+      } else if (relevantFamilyMembers.some(m => m.relationship === 'parent' && m.name.trim().toLowerCase() === lower) ||
+        (reg as any).paymentSummary?.parentMembers?.some((p: any) => p.trim().toLowerCase() === lower)) {
+        category = 'Parent';
       }
-      
-      if (category === 'Adult') {
-        adults.push({ name, category, age });
+
+      if (category === 'Child') {
+        children.push({ name, category, age: 10 });
       } else {
-        children.push({ name, category, age });
+        adults.push({ name, category, age: 30 });
       }
     });
 
@@ -304,30 +379,30 @@ export default function EventScannerApp() {
   // -------------------------------------------------------------
   if (!activeScanner) {
     return (
-      <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
+      <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col items-center justify-center p-6 font-sans">
         <div className="w-full max-w-sm space-y-8 animate-fadeIn">
           <div className="text-center space-y-2">
-            <Shield className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
-            <h1 className="text-3xl font-black tracking-tight text-white uppercase">GMK Event Scanner</h1>
-            <p className="text-stone-400 font-bold uppercase tracking-widest text-[10px]">Gate Check-In Mode</p>
+            <Shield className="w-12 h-12 text-emerald-600 mx-auto mb-4" />
+            <h1 className="text-3xl font-black tracking-tight text-stone-900 uppercase">GMK Event Scanner</h1>
+            <p className="text-stone-500 font-bold uppercase tracking-widest text-[10px]">Gate Check-In Mode</p>
           </div>
 
-          <form onSubmit={handlePinLogin} className="space-y-4 bg-stone-900 p-6 rounded-3xl border border-stone-800">
+          <form onSubmit={handlePinLogin} className="space-y-4 bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
             <div className="text-center">
-              <label className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-4">Enter Scanner PIN</label>
+              <label className="block text-xs font-bold text-stone-500 uppercase tracking-widest mb-4">Enter Scanner PIN</label>
               <input
                 type="password"
                 inputMode="numeric"
                 maxLength={4}
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
-                className="w-full bg-stone-950 border-2 border-stone-800 rounded-2xl text-center text-4xl font-black text-emerald-400 tracking-[0.5em] py-4 outline-none focus:border-emerald-500 transition-colors"
+                className="w-full bg-stone-50 border-2 border-stone-200 rounded-2xl text-center text-4xl font-black text-emerald-600 tracking-[0.5em] py-4 outline-none focus:border-emerald-500 transition-colors"
                 autoFocus
               />
             </div>
             
             {errorMsg && (
-              <div className="bg-red-900/30 text-red-400 text-xs font-bold text-center p-3 rounded-xl border border-red-900/50">
+              <div className="bg-red-50 text-red-600 text-xs font-bold text-center p-3 rounded-xl border border-red-200">
                 {errorMsg}
               </div>
             )}
@@ -350,12 +425,20 @@ export default function EventScannerApp() {
   // -------------------------------------------------------------
   if (successMsg) {
     return (
-      <div className="min-h-screen bg-[#0A1A10] text-emerald-50 flex flex-col items-center justify-center p-6 font-sans animate-fadeIn">
+      <div className="min-h-screen bg-emerald-50 flex flex-col items-center justify-center p-6 font-sans animate-fadeIn relative" onClick={handleEmptyTap}>
+        {showExitFullscreen && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fadeIn">
+            <button onClick={handleExitFullscreen} className="bg-stone-900/90 backdrop-blur-sm text-white px-6 py-3 rounded-full text-xs font-black uppercase tracking-widest shadow-2xl border border-stone-700 active:scale-95 transition-all">
+              Exit Full Screen
+            </button>
+          </div>
+        )}
+
         <div className="text-center space-y-6">
           <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_50px_rgba(16,185,129,0.3)]">
             <Check className="w-12 h-12 text-white stroke-[3]" />
           </div>
-          <h2 className="text-3xl font-black tracking-tight whitespace-pre-line leading-tight">
+          <h2 className="text-3xl font-black tracking-tight text-emerald-900 whitespace-pre-line leading-tight">
             {successMsg}
           </h2>
         </div>
@@ -378,14 +461,22 @@ export default function EventScannerApp() {
     const selectedCount = Object.values(selectedMembers).filter(Boolean).length;
 
     return (
-      <div className="min-h-screen bg-stone-950 text-stone-100 p-4 font-sans flex flex-col">
-        <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-800">
-          <div>
-            <h2 className="text-2xl font-black text-white">{gmkId}</h2>
-            <p className="text-xs text-stone-400 font-bold uppercase tracking-wider">Family Members ({allParticipants.length})</p>
+      <div className="min-h-screen bg-stone-50 text-stone-900 p-4 font-sans flex flex-col relative" onClick={handleEmptyTap}>
+        {showExitFullscreen && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fadeIn">
+            <button onClick={handleExitFullscreen} className="bg-stone-900/90 backdrop-blur-sm text-white px-6 py-3 rounded-full text-xs font-black uppercase tracking-widest shadow-2xl border border-stone-700 active:scale-95 transition-all">
+              Exit Full Screen
+            </button>
           </div>
-          <button onClick={() => setSelectedReg(null)} className="p-3 bg-stone-900 rounded-xl">
-            <XCircle className="w-6 h-6 text-stone-400" />
+        )}
+
+        <div className="flex items-center justify-between mb-6 pb-4 border-b border-stone-200">
+          <div>
+            <h2 className="text-2xl font-black text-stone-900">{gmkId}</h2>
+            <p className="text-xs text-stone-500 font-bold uppercase tracking-wider">Family Members ({allParticipants.length})</p>
+          </div>
+          <button onClick={() => { setSelectedReg(null); setSearchQuery(''); }} className="p-3 bg-white border border-stone-200 rounded-xl hover:bg-stone-100 transition-colors">
+            <XCircle className="w-6 h-6 text-stone-500" />
           </button>
         </div>
 
@@ -396,12 +487,12 @@ export default function EventScannerApp() {
             
             if (isArrived) {
               return (
-                <div key={idx} className="bg-emerald-950/30 border border-emerald-900/50 p-4 rounded-2xl flex items-center gap-4 opacity-75">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-900 flex items-center justify-center shrink-0">
-                    <Check className="w-5 h-5 text-emerald-400" />
+                <div key={idx} className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl flex items-center gap-4">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                    <Check className="w-5 h-5 text-emerald-600" />
                   </div>
                   <div>
-                    <div className="text-lg font-bold text-emerald-400">{p.name}</div>
+                    <div className="text-lg font-bold text-emerald-800">{p.name}</div>
                     <div className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Already checked in</div>
                   </div>
                 </div>
@@ -412,13 +503,13 @@ export default function EventScannerApp() {
               <button
                 key={idx}
                 onClick={() => setSelectedMembers(prev => ({ ...prev, [p.name]: !prev[p.name] }))}
-                className={`w-full text-left p-4 rounded-2xl border-2 transition-all flex items-center gap-4 ${isSelected ? 'bg-stone-800 border-emerald-500' : 'bg-stone-900 border-stone-800 active:bg-stone-800'}`}
+                className={`w-full text-left p-4 rounded-2xl border-2 transition-all flex items-center gap-4 ${isSelected ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-stone-200 active:bg-stone-50'}`}
               >
-                <div className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-stone-600'}`}>
+                <div className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-stone-300'}`}>
                   {isSelected && <Check className="w-5 h-5 text-white stroke-[3]" />}
                 </div>
                 <div>
-                  <div className={`text-lg font-bold ${isSelected ? 'text-white' : 'text-stone-300'}`}>{p.name}</div>
+                  <div className={`text-lg font-bold ${isSelected ? 'text-emerald-900' : 'text-stone-700'}`}>{p.name}</div>
                   <div className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">{p.category}</div>
                 </div>
               </button>
@@ -426,16 +517,16 @@ export default function EventScannerApp() {
           })}
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-stone-950/90 backdrop-blur-md border-t border-stone-800">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-stone-50/90 backdrop-blur-md border-t border-stone-200">
           {errorMsg && (
-            <div className="mb-4 text-center text-xs font-bold text-red-400 bg-red-950/30 p-2 rounded-xl">
+            <div className="mb-4 text-center text-xs font-bold text-red-600 bg-red-50 border border-red-200 p-2 rounded-xl">
               {errorMsg}
             </div>
           )}
           <button
             onClick={handleCheckIn}
             disabled={selectedCount === 0 || isSubmitting}
-            className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:bg-stone-800 text-white font-black text-lg uppercase tracking-widest rounded-2xl shadow-lg active:scale-[0.98] transition-all"
+            className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:bg-stone-300 disabled:text-stone-500 text-white font-black text-lg uppercase tracking-widest rounded-2xl shadow-lg active:scale-[0.98] transition-all"
           >
             {isSubmitting ? 'Processing...' : 'Confirm Check-In'}
           </button>
@@ -448,24 +539,35 @@ export default function EventScannerApp() {
   // RENDER: SCREEN 1 (SEARCH)
   // -------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans">
-      <div className="bg-stone-900 p-4 flex items-center justify-between border-b border-stone-800">
+    <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col font-sans relative" onClick={handleEmptyTap}>
+      {showExitFullscreen && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fadeIn">
+          <button onClick={handleExitFullscreen} className="bg-stone-900/90 backdrop-blur-sm text-white px-6 py-3 rounded-full text-xs font-black uppercase tracking-widest shadow-2xl border border-stone-700 active:scale-95 transition-all">
+            Exit Full Screen
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white p-4 flex items-center justify-between border-b border-stone-200 shadow-sm">
         <div>
-          <h1 className="text-xs font-black text-white uppercase tracking-widest">GMK Event Scanner</h1>
+          <h1 className="text-xs font-black text-stone-900 uppercase tracking-widest">GMK Event Scanner</h1>
           <div className="flex items-center gap-2 mt-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">{activeScanner.name} &bull; Gate Check-In</span>
+            <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">{activeScanner.name} &bull; Gate Check-In</span>
+            <span className="bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border border-emerald-200 flex items-center gap-1.5 ml-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              LIVE
+            </span>
           </div>
         </div>
-        <button onClick={handleLogout} className="p-2 text-stone-500 hover:text-stone-300">
+        <button onClick={handleLogout} className="p-2 text-stone-500 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors">
           <LogOut className="w-5 h-5" />
         </button>
       </div>
 
       <div className="p-4 flex-1 flex flex-col">
-        <div className="relative mb-6">
+        <div className="relative mb-6 shadow-sm rounded-3xl">
           <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-            <Search className="h-6 w-6 text-emerald-500" />
+            <Search className="h-6 w-6 text-emerald-600" />
           </div>
           <input
             id="scanner-search-input"
@@ -473,11 +575,20 @@ export default function EventScannerApp() {
             placeholder="ENTER GMK ID OR NAME..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-stone-900 border-2 border-stone-800 rounded-3xl pl-14 pr-4 py-5 text-xl font-black text-white placeholder-stone-600 outline-none focus:border-emerald-500 transition-colors uppercase"
+            className="w-full bg-white border-2 border-stone-200 rounded-3xl pl-14 pr-12 py-5 text-xl font-black text-stone-900 placeholder-stone-400 outline-none focus:border-emerald-500 transition-colors uppercase"
             autoComplete="off"
             autoCorrect="off"
             spellCheck="false"
           />
+          {searchQuery && (
+            <button 
+              onClick={() => setSearchQuery('')}
+              className="absolute inset-y-0 right-4 flex items-center justify-center p-2 text-stone-400 hover:text-stone-600 transition-colors"
+              type="button"
+            >
+              <XCircle className="w-6 h-6" />
+            </button>
+          )}
         </div>
 
         {searchQuery.length > 0 && searchQuery.length < 2 && (
@@ -487,9 +598,9 @@ export default function EventScannerApp() {
         )}
 
         {searchQuery.length >= 2 && searchResults.length === 0 && (
-          <div className="text-center p-8 border-2 border-dashed border-stone-800 rounded-3xl mt-4">
-            <AlertCircle className="w-10 h-10 text-stone-600 mx-auto mb-3" />
-            <h3 className="text-sm font-black uppercase text-stone-400 tracking-wider">No Match Found</h3>
+          <div className="text-center p-8 border-2 border-dashed border-stone-300 rounded-3xl mt-4 bg-white">
+            <AlertCircle className="w-10 h-10 text-stone-400 mx-auto mb-3" />
+            <h3 className="text-sm font-black uppercase text-stone-500 tracking-wider">No Match Found</h3>
           </div>
         )}
 
@@ -500,20 +611,26 @@ export default function EventScannerApp() {
             </div>
             
             {searchResults.map(reg => {
-              const gmkId = getRegistrationDisplayId(reg) || reg.id;
-              const name = reg.primaryRegistrantName || reg.primaryMemberEmail || 'Guest';
+              const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || reg.id;
+              const fam = families.find(f => 
+                f.id === reg.familyId || 
+                f.id === `fam_${gmkId}` ||
+                (gmkId && f.primaryMemberGmkId === gmkId) || 
+                (reg.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === reg.primaryMemberEmail.toLowerCase())
+              );
+              const name = fam ? fam.fullName : (reg.primaryRegistrantName || reg.participants?.[0] || 'GMK Member');
               
               return (
                 <button
                   key={reg.id}
                   onClick={() => setSelectedReg(reg)}
-                  className="w-full text-left bg-stone-900 border border-stone-800 p-5 rounded-2xl flex items-center justify-between active:bg-stone-800 transition-colors group"
+                  className="w-full text-left bg-white border-2 border-stone-100 hover:border-emerald-200 p-5 rounded-2xl flex items-center justify-between active:bg-stone-50 transition-colors group shadow-sm"
                 >
                   <div>
-                    <div className="text-lg font-bold text-white">{name}</div>
-                    <div className="text-xs text-emerald-500 font-black uppercase tracking-wider">{gmkId}</div>
+                    <div className="text-lg font-bold text-stone-900">{name}</div>
+                    <div className="text-xs text-emerald-600 font-black uppercase tracking-wider mt-0.5">{gmkId}</div>
                   </div>
-                  <div className="bg-stone-800 px-4 py-2 rounded-xl text-[10px] font-black text-stone-300 uppercase tracking-widest group-active:bg-stone-700">
+                  <div className="bg-stone-100 px-4 py-2 rounded-xl text-[10px] font-black text-stone-600 uppercase tracking-widest group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
                     Select
                   </div>
                 </button>

@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, updateDoc, runTransaction } from 'firebase/firestore';
 import { db, auth } from '../../context/AuthContext';
 import { EventScanner, CommunityEvent, EventCommittee } from '../../types';
-import { Shield, Plus, Trash2, Power, PowerOff, Key, RefreshCw } from 'lucide-react';
+import { Shield, Plus, Trash2, Power, PowerOff, Key, RefreshCw, Edit2, X } from 'lucide-react';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../context/AuthContext';
+
+
 
 interface Props {
   activeEvent: CommunityEvent;
@@ -17,6 +21,9 @@ export default function ScannerManager({ activeEvent, committeeName }: Props) {
   const [isCreating, setIsCreating] = useState(false);
   const [newScannerName, setNewScannerName] = useState('');
   const [newScannerPin, setNewScannerPin] = useState('');
+  const [editingScanner, setEditingScanner] = useState<EventScanner | null>(null);
+  const [editScannerName, setEditScannerName] = useState('');
+  const [editScannerPin, setEditScannerPin] = useState('');
   const [scannerToDelete, setScannerToDelete] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,34 +64,21 @@ export default function ScannerManager({ activeEvent, committeeName }: Props) {
     }
 
     try {
-      const committeeRef = doc(db, 'eventCommittees', committee.id);
+      const newScanner: EventScanner = {
+        id: `scan_${Date.now()}`,
+        name: newScannerName.trim(),
+        pin: newScannerPin,
+        isActive: true,
+        eventId: activeEvent.id,
+        createdBy: auth.currentUser?.email || 'Admin',
+        createdAt: new Date().toISOString()
+      };
       
-      await runTransaction(db, async (transaction) => {
-        const commDoc = await transaction.get(committeeRef);
-        if (!commDoc.exists()) {
-          throw new Error("Committee configuration not found.");
-        }
-        
-        const currentScanners: EventScanner[] = commDoc.data().scanners || [];
-        const pinInUse = currentScanners.find(s => s.pin === newScannerPin && s.isActive);
-        
-        if (pinInUse) {
-          throw new Error(`PIN ALREADY IN USE. This PIN is currently assigned to ${pinInUse.name}.`);
-        }
-        
-        const newScanner: EventScanner = {
-          id: `scan_${Date.now()}`,
-          name: newScannerName.trim(),
-          pin: newScannerPin,
-          isActive: true, // Always created as active
-          eventId: activeEvent.id,
-          createdBy: auth.currentUser?.email || 'Admin',
-          createdAt: new Date().toISOString()
-        };
-        
-        transaction.update(committeeRef, {
-          scanners: [...currentScanners, newScanner]
-        });
+      const manageScannerPin = httpsCallable(functions, 'manageScannerPin');
+      await manageScannerPin({
+        committeeId: committee.id,
+        scanner: newScanner,
+        action: 'create'
       });
 
       setIsCreating(false);
@@ -92,39 +86,58 @@ export default function ScannerManager({ activeEvent, committeeName }: Props) {
       setNewScannerPin('');
       setErrorMsg('');
     } catch (err: any) {
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'Failed to create scanner.');
+    }
+  };
+
+  const handleEdit = async () => {
+    if (!committee || !editingScanner) return;
+    if (!editScannerName.trim() || !editScannerPin.trim()) return;
+    
+    if (!/^\d{4}$/.test(editScannerPin)) {
+      setErrorMsg("PIN must be exactly 4 digits.");
+      return;
+    }
+
+    try {
+      const updatedScanner = {
+        ...editingScanner,
+        name: editScannerName.trim(),
+        pin: editScannerPin
+      };
+      
+      const manageScannerPin = httpsCallable(functions, 'manageScannerPin');
+      await manageScannerPin({
+        committeeId: committee.id,
+        scanner: updatedScanner,
+        action: 'edit'
+      });
+
+      setEditingScanner(null);
+      setEditScannerName('');
+      setEditScannerPin('');
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update scanner.');
     }
   };
 
   const toggleStatus = async (scanner: EventScanner) => {
     if (!committee) return;
     try {
-      const committeeRef = doc(db, 'eventCommittees', committee.id);
+      const updatedScanner = {
+        ...scanner,
+        isActive: !scanner.isActive
+      };
       
-      await runTransaction(db, async (transaction) => {
-        const commDoc = await transaction.get(committeeRef);
-        if (!commDoc.exists()) {
-          throw new Error("Committee configuration not found.");
-        }
-        
-        const currentScanners: EventScanner[] = commDoc.data().scanners || [];
-        
-        // If we are activating, check if PIN is in use by ANOTHER active scanner
-        if (!scanner.isActive) {
-          const pinInUse = currentScanners.find(s => s.pin === scanner.pin && s.isActive && s.id !== scanner.id);
-          if (pinInUse) {
-            throw new Error(`PIN ALREADY IN USE. This PIN is currently assigned to ${pinInUse.name}.`);
-          }
-        }
-        
-        const updatedScanners = currentScanners.map(s => 
-          s.id === scanner.id ? { ...s, isActive: !s.isActive } : s
-        );
-        
-        transaction.update(committeeRef, { scanners: updatedScanners });
+      const manageScannerPin = httpsCallable(functions, 'manageScannerPin');
+      await manageScannerPin({
+        committeeId: committee.id,
+        scanner: updatedScanner,
+        action: 'toggle'
       });
     } catch (err: any) {
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'Failed to toggle status.');
     }
   };
 
@@ -179,6 +192,62 @@ export default function ScannerManager({ activeEvent, committeeName }: Props) {
         </div>
       )}
 
+            {editingScanner && (
+        <div className="p-5 bg-blue-50 border border-blue-100 rounded-2xl shadow-sm space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="text-[10px] font-black uppercase text-blue-900 tracking-wider">Edit Scanner</h3>
+            <button onClick={() => setEditingScanner(null)} className="text-blue-500 hover:text-blue-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">Scanner Name</label>
+              <input
+                type="text"
+                value={editScannerName}
+                onChange={(e) => setEditScannerName(e.target.value)}
+                className="w-full p-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-stone-900"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">4-Digit PIN</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  maxLength={4}
+                  value={editScannerPin}
+                  onChange={(e) => setEditScannerPin(e.target.value.replace(/\D/g, ''))}
+                  className="w-full p-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-stone-900 tracking-[0.2em]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setEditScannerPin(generatePin())}
+                  className="px-3 bg-blue-200 hover:bg-blue-300 rounded-xl text-blue-800 transition-colors"
+                  title="Generate Random PIN"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => setEditingScanner(null)}
+              className="px-4 py-2 bg-white border border-blue-200 hover:bg-blue-100 text-blue-700 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEdit}
+              disabled={!editScannerName || editScannerPin.length !== 4}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black uppercase tracking-wider rounded-xl shadow-sm transition-all cursor-pointer"
+            >
+              Save Changes
+            </button>
+          </div>
+        </div>
+      )}
       {isCreating && (
         <div className="p-5 bg-[#FFFDF6] border border-stone-200 rounded-2xl shadow-sm space-y-4">
           <h3 className="text-[10px] font-black uppercase text-stone-900 tracking-wider">Create New Scanner</h3>
@@ -266,6 +335,19 @@ export default function ScannerManager({ activeEvent, committeeName }: Props) {
                   </td>
                   <td className="p-3 pr-4 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingScanner(s);
+                          setEditScannerName(s.name);
+                          setEditScannerPin(s.pin);
+                          setIsCreating(false);
+                          setErrorMsg('');
+                        }}
+                        className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                        title="Edit Scanner"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => toggleStatus(s)}
                         className={`p-1.5 rounded-lg transition-colors cursor-pointer ${s.isActive ? 'text-amber-600 hover:bg-amber-50' : 'text-emerald-600 hover:bg-emerald-50'}`}

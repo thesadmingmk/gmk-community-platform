@@ -12,6 +12,11 @@ import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { RefreshCw, AlertTriangle, UserCheck, Clock, Mail } from 'lucide-react';
 
 export default function App() {
+  // Dedicated Scanner Interface bypass
+  if (typeof window !== 'undefined' && window.location.pathname === '/scan') {
+    return <EventScannerApp />;
+  }
+
   const { user, profile, loading, error } = useAuth();
 
   const handleForceExit = async () => {
@@ -104,11 +109,6 @@ export default function App() {
         <PWAInstallPrompt />
       </>
     );
-  }
-
-  // Dedicated Scanner Interface bypass
-  if (typeof window !== 'undefined' && window.location.pathname === '/scan') {
-    return <EventScannerApp />;
   }
 
   // System admin override check
