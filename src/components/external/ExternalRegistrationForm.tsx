@@ -373,8 +373,8 @@ export default function ExternalRegistrationForm({
 
       // 3. Construct Registration Record
       const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const regId = `reg_ext_${event.id}_${uniqueSuffix}`;
-      const publicReference = generateExternalGmkId();
+      const regId = existingRegistration?.id || `reg_ext_${event.id}_${uniqueSuffix}`;
+      const publicReference = existingRegistration?.publicReference || generateExternalGmkId();
 
       const now = existingRegistration?.timestamp || new Date().toISOString();
       const amountDue = pricingResult.totalAmount;

@@ -4,7 +4,7 @@ import { signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { Family, FamilyMember, ResidentProfile } from '../../types';
 import { createAuditLog } from '../../utils/audit';
-import { sanitizeFirestorePayload } from '../../utils/sanitize';
+import { sanitizeFirestorePayload, normalizeWhatsAppNumber } from '../../utils/sanitize';
 import { validateAndNormalizePhoneNumber } from '../../utils/phoneValidation';
 import { normalizeName } from '../../utils/nameNormalization';
 import { Check, ClipboardList, Shield, Briefcase, Users, User, ArrowRight, ArrowLeft, Heart, RefreshCw, AlertCircle, LogOut, Edit2 } from 'lucide-react';
@@ -453,10 +453,11 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
           }
           if (famData.whatsAppNumber) {
             const raw = famData.whatsAppNumber.trim();
+            const checkRaw = raw.startsWith('+') ? raw : `+${raw}`;
             let matched = false;
             for (const c of COUNTRY_CODES) {
-              if (raw.startsWith(c.code)) {
-                setWhatsAppMain(raw.slice(c.code.length));
+              if (checkRaw.startsWith(c.code)) {
+                setWhatsAppMain(checkRaw.slice(c.code.length));
                 setWhatsAppCode(c.code);
                 matched = true;
                 break;
@@ -560,10 +561,11 @@ export default function ProfileCompletionWizard({ residentProfile, onComplete }:
               setIsSpouseNameSaved(false);
               setSpouseGender(mem.gender || '');
               const rawWa = mem.whatsAppNumber || '';
+              const checkRawWa = rawWa.startsWith('+') ? rawWa : `+${rawWa}`;
               let waCodeMatched = false;
               for (const c of COUNTRY_CODES) {
-                if (rawWa.startsWith(c.code)) {
-                  setSpouseWhatsApp(rawWa.slice(c.code.length));
+                if (checkRawWa.startsWith(c.code)) {
+                  setSpouseWhatsApp(checkRawWa.slice(c.code.length));
                   setSpouseWhatsAppCode(c.code);
                   waCodeMatched = true;
                   break;

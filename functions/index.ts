@@ -934,7 +934,23 @@ export const processAutomaticWhatsAppEntryPass = onDocumentUpdated({
       }
     }
 
-    const residentName = after.primaryRegistrantName || after.fullName || "Resident";
+    let residentName = "";
+    let gmkId = String(after.primaryMemberGmkId || after.publicReference || "").trim();
+    if (after.familyId) {
+      const famSnap = await db.collection("families").doc(after.familyId).get();
+      if (famSnap.exists) {
+        residentName = famSnap.data()?.fullName || "";
+        gmkId = gmkId || String(famSnap.data()?.primaryMemberGmkId || "").trim();
+      }
+    }
+    residentName = residentName || after.primaryRegistrantName || after.fullName || (after.primaryMemberEmail ? after.primaryMemberEmail.split('@')[0] : "") || "Resident";
+    
+    if (gmkId && /^\d+G?$/i.test(gmkId)) {
+      gmkId = `GMK-${gmkId.replace(/G$/i, '')}`;
+    } else if (gmkId && !gmkId.toUpperCase().startsWith("GMK-") && !gmkId.toUpperCase().startsWith("EXT-")) {
+      gmkId = `GMK-${gmkId}`;
+    }
+    const displayName = gmkId ? `${residentName} (${gmkId.toUpperCase()})` : residentName;
     const entryPass = after.entryPassNumber;
     const qrCodeUrl = `https://quickchart.io/qr?size=500&text=${encodeURIComponent(entryPass)}`;
 
@@ -959,7 +975,7 @@ export const processAutomaticWhatsAppEntryPass = onDocumentUpdated({
           {
             type: "body",
             parameters: [
-              { type: "text", text: residentName },
+              { type: "text", text: displayName },
               { type: "text", text: eventName }
             ]
           }
@@ -1059,7 +1075,23 @@ export const resendWhatsAppEntryPass = onCall({
     }
   }
 
-  const residentName = regData.primaryRegistrantName || regData.fullName || "Resident";
+  let residentName = "";
+  let gmkId = String(regData.primaryMemberGmkId || regData.publicReference || "").trim();
+  if (regData.familyId) {
+    const famSnap = await db.collection("families").doc(regData.familyId).get();
+    if (famSnap.exists) {
+      residentName = famSnap.data()?.fullName || "";
+      gmkId = gmkId || String(famSnap.data()?.primaryMemberGmkId || "").trim();
+    }
+  }
+  residentName = residentName || regData.primaryRegistrantName || regData.fullName || (regData.primaryMemberEmail ? regData.primaryMemberEmail.split('@')[0] : "") || "Resident";
+  
+  if (gmkId && /^\d+G?$/i.test(gmkId)) {
+    gmkId = `GMK-${gmkId.replace(/G$/i, '')}`;
+  } else if (gmkId && !gmkId.toUpperCase().startsWith("GMK-") && !gmkId.toUpperCase().startsWith("EXT-")) {
+    gmkId = `GMK-${gmkId}`;
+  }
+  const displayName = gmkId ? `${residentName} (${gmkId.toUpperCase()})` : residentName;
   const entryPass = regData.entryPassNumber;
   const qrCodeUrl = `https://quickchart.io/qr?size=500&text=${encodeURIComponent(entryPass)}`;
 
@@ -1084,7 +1116,7 @@ export const resendWhatsAppEntryPass = onCall({
         {
           type: "body",
           parameters: [
-            { type: "text", text: residentName },
+            { type: "text", text: displayName },
             { type: "text", text: eventName }
           ]
         }

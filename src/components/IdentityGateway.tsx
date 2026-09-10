@@ -32,7 +32,7 @@ import {
   Tag
 } from 'lucide-react';
 import { createAuditLog } from '../utils/audit';
-import { sanitizeFirestorePayload } from '../utils/sanitize';
+import { sanitizeFirestorePayload, normalizeWhatsAppNumber } from '../utils/sanitize';
 import { normalizeUnit } from '../utils/unitNormalization';
 import { normalizeName } from '../utils/nameNormalization';
 import ReleaseNotesModal from './ReleaseNotesModal';
@@ -628,7 +628,7 @@ export default function IdentityGateway() {
             salutation: salutation as any,
             fullName: name.trim(),
             phone: phone.trim(),
-            whatsAppNumber: phone.trim(),
+            whatsAppNumber: normalizeWhatsAppNumber(phone.trim()),
             whatsAppSameAsMobile: true,
             unitKey: normalizedUnit,
             displayUnitNumber: displayUnit,
@@ -1517,7 +1517,7 @@ export default function IdentityGateway() {
           GMK Community Platform • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.6.3 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.7.0 (Release Notes)</button>
         </div>
       </footer>
 

@@ -55,12 +55,12 @@ export function formatCheckInDate(dateInput?: string | Date | number | null): st
   }
 }
 
-export type FamilyRelationshipType = 'GMK Member' | 'Spouse' | 'Child' | 'Parent' | 'Other';
+export type FamilyRelationshipType = 'GMK Member' | 'Spouse' | 'Child' | 'Parent' | 'Guest' | 'Other';
 
 export interface ParticipantCheckInEvaluation {
   name: string;
   relationship: FamilyRelationshipType;
-  isEligible: boolean; // True for GMK Member, Spouse, Child; False for Parent, Other
+  isEligible: boolean; // True for all GMK Member, Spouse, Child, Parent, Guest, Other
   isCheckedIn: boolean;
   checkInDate: string;
   checkInTime: string; // HH:MM:SS
@@ -124,32 +124,51 @@ export function evaluateFamilyRegistrationParticipants(
     const spouseName = (fam?.spouseName || '').trim().toLowerCase();
 
     // 1. GMK Member check
-    if (primaryName && lower === primaryName) {
+    if (
+      (primaryName && lower === primaryName) ||
+      reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower && (d.role === 'primary' || d.role === 'single'))
+    ) {
       relationship = 'GMK Member';
       isEligible = true;
     } 
     // 2. Spouse check
-    else if ((spouseName && lower === spouseName) || relevantFamilyMembers.some(m => m.relationship === 'spouse' && m.name.trim().toLowerCase() === lower)) {
+    else if (
+      (spouseName && lower === spouseName) || 
+      relevantFamilyMembers.some(m => m.relationship === 'spouse' && m.name.trim().toLowerCase() === lower) ||
+      reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower && d.role === 'spouse')
+    ) {
       relationship = 'Spouse';
       isEligible = true;
     }
     // 3. Child check
-    else if (relevantFamilyMembers.some(m => m.relationship === 'child' && m.name.trim().toLowerCase() === lower)) {
+    else if (
+      relevantFamilyMembers.some(m => m.relationship === 'child' && m.name.trim().toLowerCase() === lower) ||
+      reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower && (d.role === 'child' || (d.role as string) === 'children'))
+    ) {
       relationship = 'Child';
       isEligible = true;
     }
-    // 4. Parent check (EXCLUDED)
+    // 4. Parent check (INCLUDED)
     else if (
       relevantFamilyMembers.some(m => m.relationship === 'parent' && m.name.trim().toLowerCase() === lower) ||
-      reg.paymentSummary?.parentMembers?.some(p => p.trim().toLowerCase() === lower)
+      reg.paymentSummary?.parentMembers?.some(p => p.trim().toLowerCase() === lower) ||
+      reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower && d.role === 'parent')
     ) {
       relationship = 'Parent';
-      isEligible = false;
+      isEligible = true;
     }
-    // 5. Other / Dependent (EXCLUDED)
+    // 5. Guest check (INCLUDED)
+    else if (
+      reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower && ((d.role as string) === 'guest' || (d.role as string) === 'external')) ||
+      lower.includes('guest') || lower.includes('external')
+    ) {
+      relationship = 'Guest';
+      isEligible = true;
+    }
+    // 6. Other / Dependent (INCLUDED)
     else {
       relationship = 'Other';
-      isEligible = false;
+      isEligible = true;
     }
 
     // Match arrival details
@@ -169,14 +188,58 @@ export function evaluateFamilyRegistrationParticipants(
     };
   });
 
-  // Filter ONLY eligible participants: GMK Member, Spouse, Children
+  // AUTHORITATIVE RULE:
+  // For attendance reporting, eventAttendance.arrivedDetails is the authoritative record of people who actually checked in.
+  // The Individual Attendance Report must include every actual arrivedDetails entry for a valid attendance record.
+  // If an arrivedDetails participant cannot be matched to reg.participants but is a legitimate arrival recorded in arrivedDetails,
+  // DO NOT silently discard it. Include it with the appropriate relationship/category available from arrivedDetails.
+  const mappedLowerNames = new Set(allParticipants.map(p => p.name.trim().toLowerCase()));
+  arrivedDetails.forEach(arrival => {
+    if (!arrival || !arrival.name) return;
+    const lower = arrival.name.trim().toLowerCase();
+    if (!mappedLowerNames.has(lower)) {
+      let relationship: FamilyRelationshipType = 'Guest';
+      const cat = (arrival as any).category ? String((arrival as any).category).trim().toLowerCase() : '';
+      if (cat.includes('guest') || lower.includes('guest') || lower.includes('external')) {
+        relationship = 'Guest';
+      } else if (cat === 'child') {
+        relationship = 'Child';
+      } else if (cat === 'parent') {
+        relationship = 'Parent';
+      } else if (cat === 'spouse') {
+        relationship = 'Spouse';
+      } else if (cat === 'gmk member' || cat === 'primary') {
+        relationship = 'GMK Member';
+      } else {
+        relationship = 'Other';
+      }
+
+      const arrivalTime = arrival.arrivedAt || null;
+      allParticipants.push({
+        name: arrival.name.trim(),
+        relationship,
+        isEligible: true,
+        isCheckedIn: true,
+        checkInDate: arrivalTime ? formatCheckInDate(arrivalTime) : '',
+        checkInTime: arrivalTime ? formatCheckInTimeHHMMSS(arrivalTime) : '',
+        arrivedAt: arrivalTime || undefined,
+        scannedBy: arrival.scannedBy
+      });
+      mappedLowerNames.add(lower);
+    }
+  });
+
+  // Filter ONLY eligible participants: GMK Member, Spouse, Children, Parent, Guest, Other
   const eligibleParticipants = allParticipants.filter(p => p.isEligible);
   
-  // Sort eligible participants: GMK Member first, Spouse second, Children third
+  // Sort eligible participants: GMK Member first, Spouse second, Children third, etc.
   const relationshipPriority: Record<string, number> = {
     'GMK Member': 1,
     'Spouse': 2,
-    'Child': 3
+    'Child': 3,
+    'Parent': 4,
+    'Guest': 5,
+    'Other': 6
   };
   eligibleParticipants.sort((a, b) => {
     const pA = relationshipPriority[a.relationship] || 99;
@@ -242,7 +305,7 @@ export async function processFamilyCheckInCompletion({
   if (eligibleParticipants.length === 0) {
     return { 
       completed: false, 
-      reason: 'No eligible family participants (GMK Member, Spouse, Children) registered for this event.' 
+      reason: 'No eligible family participants registered for this event.' 
     };
   }
 

@@ -23,7 +23,7 @@ import { GMKCard, GMKButton, GMKBadge, GMKPageHeader, GMKInput, GMKSelect } from
 import { useLocalGEASConfirmation, GEASConfirmationDialogUI } from './gmk/GEASConfirmationDialog';
 import { createAuditLog } from '../utils/audit';
 import { NotificationService } from '../services/NotificationService';
-import { sanitizeFirestorePayload } from '../utils/sanitize';
+import { sanitizeFirestorePayload, normalizeWhatsAppNumber } from '../utils/sanitize';
 import { normalizeUnit, normalizeGatedCommunity } from '../utils/unitNormalization';
 import { normalizeName } from '../utils/nameNormalization';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
@@ -1219,7 +1219,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         salutation: payload.salutation as any,
         fullName: payload.fullName,
         phone: payload.phone,
-        whatsAppNumber: payload.phone,
+        whatsAppNumber: normalizeWhatsAppNumber(payload.phone),
         whatsAppSameAsMobile: true,
         unitKey: payload.unitKey,
         displayUnitNumber: payload.displayUnitNumber,
@@ -1324,7 +1324,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
         salutation: pending.salutation as any,
         fullName: pending.fullName,
         phone: pending.phone,
-        whatsAppNumber: pending.phone,
+        whatsAppNumber: normalizeWhatsAppNumber(pending.phone),
         whatsAppSameAsMobile: true,
         unitKey: pending.unitKey,
         displayUnitNumber: pending.displayUnitNumber,
@@ -1928,23 +1928,27 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
     }
 
     const term = searchTerm.toLowerCase().trim();
+    const termDigits = term.replace(/\D/g, '');
     if (!term) return true;
     return (
       (r.fullName || '').toLowerCase().includes(term) ||
       (r.email || '').toLowerCase().includes(term) ||
       (r.displayUnitNumber || '').toLowerCase().includes(term) ||
-      (r.gmkId || '').toLowerCase().includes(term)
+      (r.gmkId || '').toLowerCase().includes(term) ||
+      (r.phone && termDigits && r.phone.replace(/\D/g, '').includes(termDigits))
     );
   });
 
   const filteredArchivedResidents = archivedResidents.filter(r => {
     const term = searchTerm.toLowerCase().trim();
+    const termDigits = term.replace(/\D/g, '');
     if (!term) return true;
     return (
       (r.fullName || '').toLowerCase().includes(term) ||
       (r.email || '').toLowerCase().includes(term) ||
       (r.displayUnitNumber || '').toLowerCase().includes(term) ||
-      (r.gmkId || '').toLowerCase().includes(term)
+      (r.gmkId || '').toLowerCase().includes(term) ||
+      (r.phone && termDigits && r.phone.replace(/\D/g, '').includes(termDigits))
     );
   });
 
@@ -2170,9 +2174,9 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder={
-                  activeTab === 'residents' ? "Search Active Residents database by Name, Email, Unit, GMK ID..." :
+                  activeTab === 'residents' ? "Search Active Residents database by Name, Email, Phone, Unit, GMK ID..." :
                   activeTab === 'units' ? "Filter Units by Unit Number, Unit Type, Status, or Assigned Owner Name..." :
-                  "Search Archived Residents historical register by Name, Unit, GMK ID..."
+                  "Search Archived Residents historical register by Name, Phone, Unit, GMK ID..."
                 }
                 className="w-full bg-stone-50/50 pl-10 pr-4 py-2 text-stone-900 border border-stone-250 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#0f4c2a] focus:border-[#0f4c2a] text-xs font-medium"
               />
@@ -3632,7 +3636,7 @@ export default function AdminDashboard({ activeEmail, isEmergency = false, hideH
           Resident Administration Portal • Developed by Elite IT
         </div>
         <div>
-          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.6.3 (Release Notes)</button>
+          Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.7.0 (Release Notes)</button>
         </div>
       </footer>
 

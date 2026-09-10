@@ -3,6 +3,9 @@ import RegistrationReportingWorkspace from "./RegistrationReportingWorkspace";
 import AttendanceWorkspace from "./AttendanceWorkspace";
 import ReportExportButton from "./shared/ReportExportButton";
 import AgeBracketFamilyReport from "./shared/AgeBracketFamilyReport";
+import { classifyParticipantAge } from '../utils/attendanceAgeClassification';
+import TeamManagementWorkspace from './games/TeamManagementWorkspace';
+import TeamReportWorkspace from './games/TeamReportWorkspace';
 import { formatExternalGmkId, resolveEventDetails } from '../utils/gmkIdHelper';
 import { NotificationService } from '../services/NotificationService';
 import { processFamilyCheckInCompletion } from '../services/familyCheckInService';
@@ -581,7 +584,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
   const [committeeSearchQueries, setCommitteeSearchQueries] = useState<Record<string, string>>({});
   const [foodTab, setFoodTab] = useState<'events' | 'expenses'>('events');
   const [attendanceTab, setAttendanceTab] = useState<'events' | 'attendance' | 'expenses' | 'reports' | 'registration_status' | 'scanners'>('events');
-  const [gamesTab, setGamesTab] = useState<'reports' | 'expenses'>('reports');
+  const [gamesTab, setGamesTab] = useState<'teams' | 'reports' | 'expenses'>('teams');
 
   // Workspace and unique Program configuration states
   const [progTitle, setProgTitle] = useState('');
@@ -845,7 +848,7 @@ export default function EventDirectorDashboard({ onBackToResidentPortal, initial
     const qAtts = query(collection(db, "eventAttendance"), where("eventId", "==", selectedEventId));
     const unsubAtts = onSnapshot(qAtts, (snap) => {
       const list: EventAttendance[] = [];
-      snap.forEach(d => list.push(d.data() as EventAttendance));
+      snap.forEach(d => list.push({ id: d.id, ...d.data() } as EventAttendance));
       setActiveAttendances(list);
     }, (err) => {
       console.warn("[EventDirectorDashboard] EventAttendance snapshot permission-denied or blocked:", err);
@@ -9166,42 +9169,25 @@ const handleDownloadPDF = () => {
                               {foodTab === 'events' && (() => {
                                 const preEventCounts = { adults: 0, k0_3: 0, k4_9: 0, k10: 0 };
                                 const eventCounts = { adults: 0, k0_3: 0, k4_9: 0, k10: 0 };
-                                
                                 const currentYear = new Date().getFullYear();
+
+                                const getFoodCategoryForPerson = (name: string, reg: any, arrivedRole?: string) => {
+                                  const ageInfo = classifyParticipantAge({
+                                    name,
+                                    reg,
+                                    familyMembers,
+                                    families,
+                                    currentYear
+                                  });
+                                  return ageInfo.category;
+                                };
 
                                 // Pre-Event calculation based on approvedRegs
                                 approvedRegs.forEach(reg => {
-                                  const fam = families.find(f => f.id === reg.familyId);
-                                  const famMembers = familyMembers.filter(m => m.familyId === reg.familyId);
                                   const participants = reg.participants || [];
                                   
-                                  participants.forEach(name => {
-                                    let category = 'Adult';
-                                    let age = 30; // default adult
-                                    
-                                    const isPrimary = (name.trim().toLowerCase() === (fam?.fullName || reg.primaryMemberEmail).trim().toLowerCase());
-                                    if (isPrimary) {
-                                      category = 'Adult';
-                                    } else {
-                                      const mem = famMembers.find(m => m.name.toLowerCase().trim() === name.toLowerCase().trim());
-                                      if (mem && mem.relationship === 'child') {
-                                        if (mem.yearOfBirth) {
-                                          const yob = parseInt(mem.yearOfBirth);
-                                          if (!isNaN(yob)) {
-                                            age = currentYear - yob;
-                                            if (age <= 3) category = 'Kids 0-3';
-                                            else if (age <= 9) category = 'Kids 4-9';
-                                            else if (age < 18) category = 'Kids 10+';
-                                            else category = 'Adult'; 
-                                          } else {
-                                            category = 'Kids 10+'; 
-                                          }
-                                        } else {
-                                          category = 'Kids 10+';
-                                        }
-                                      }
-                                    }
-                                    
+                                  participants.forEach((name: string) => {
+                                    const category = getFoodCategoryForPerson(name, reg);
                                     if (category === 'Adult') preEventCounts.adults++;
                                     else if (category === 'Kids 0-3') preEventCounts.k0_3++;
                                     else if (category === 'Kids 4-9') preEventCounts.k4_9++;
@@ -9216,18 +9202,33 @@ const handleDownloadPDF = () => {
 
                                 // Event calculation based on actual gate entries
                                 activeAttendances.forEach(att => {
+                                  // Map attendance record back to registration
+                                  // att.id is formatted as 'att_{gmkId}_{eventId}'
+                                  const attGmkId = (att as any).primaryMemberGmkId || att.id.split('_')[1];
+                                  const eventId = att.eventId || activeEvent?.id;
+
+                                  const reg = approvedRegs.find(r => {
+                                    const rGmkId = r.primaryMemberGmkId || r.publicReference || r.id.split('_')?.[1] || r.id;
+                                    return rGmkId === attGmkId || r.id === attGmkId || `att_${rGmkId}_${eventId}` === att.id;
+                                  }) || registrations.find(r => {
+                                    const rGmkId = r.primaryMemberGmkId || r.publicReference || r.id.split('_')?.[1] || r.id;
+                                    return rGmkId === attGmkId || r.id === attGmkId || `att_${rGmkId}_${eventId}` === att.id;
+                                  }) || { familyId: attGmkId, participantDetails: [] }; // Safe fallback
+
                                   const details = (att as any).arrivedDetails || [];
                                   details.forEach((p: any) => {
-                                    if (p.category === 'Adult') eventCounts.adults++;
-                                    else if (p.category === 'Kids 0-3') eventCounts.k0_3++;
-                                    else if (p.category === 'Kids 4-9') eventCounts.k4_9++;
-                                    else if (p.category === 'Kids 10+') eventCounts.k10++;
-                                    else eventCounts.adults++; // fallback
+                                    const category = getFoodCategoryForPerson(p.name, reg, p.category);
+                                    if (category === 'Adult') eventCounts.adults++;
+                                    else if (category === 'Kids 0-3') eventCounts.k0_3++;
+                                    else if (category === 'Kids 4-9') eventCounts.k4_9++;
+                                    else if (category === 'Kids 10+') eventCounts.k10++;
                                   });
                                 });
 
-                                const preTotal = preEventCounts.adults + preEventCounts.k0_3 + preEventCounts.k4_9 + preEventCounts.k10;
-                                const eventTotal = eventCounts.adults + eventCounts.k0_3 + eventCounts.k4_9 + eventCounts.k10;
+                                const preTotalKids = preEventCounts.k0_3 + preEventCounts.k4_9 + preEventCounts.k10;
+                                const eventTotalKids = eventCounts.k0_3 + eventCounts.k4_9 + eventCounts.k10;
+                                const preTotal = preEventCounts.adults + preTotalKids;
+                                const eventTotal = eventCounts.adults + eventTotalKids;
 
                                 return (
                                   <div className="space-y-6 animate-fadeIn text-left">
@@ -9253,39 +9254,45 @@ const handleDownloadPDF = () => {
                                         <span className="block text-lg font-black text-amber-900">{Math.max(0, preTotal - eventTotal)}</span>
                                       </div>
                                     </div>
-
                                     <div className="overflow-x-auto border border-stone-200 rounded-xl bg-white shadow-xs max-w-lg">
                                       <table className="w-full text-left border-collapse">
                                         <thead>
                                           <tr className="bg-stone-50 border-b border-stone-200 text-[10px] uppercase font-black text-stone-500 tracking-wider">
                                             <th className="p-3">Category</th>
-                                            <th className="p-3 text-center">Pre-Event</th>
-                                            <th className="p-3 text-center">Event</th>
+                                            <th className="p-3 text-center">Expected</th>
+                                            <th className="p-3 text-center">Entered</th>
                                           </tr>
                                         </thead>
                                         <tbody className="divide-y divide-stone-150 text-stone-800 font-bold text-xs">
                                           <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Adults</td>
+                                            <td className="p-3">ADULTS</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.adults}</td>
                                             <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.adults}</td>
                                           </tr>
-                                          <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 0-3</td>
+                                          <tr className="hover:bg-stone-50 bg-stone-50/30">
+                                            <td className="p-3">
+                                              KIDS <span className="text-[10px] text-stone-400 font-normal ml-2">(Total)</span>
+                                            </td>
+                                            <td className="p-3 text-center font-mono">{preTotalKids}</td>
+                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventTotalKids}</td>
+                                          </tr>
+                                          <tr className="text-[10px] text-stone-500">
+                                            <td className="p-3 pl-8 flex items-center before:content-[''] before:w-2 before:h-px before:bg-stone-300 before:mr-2">Kids 0-3</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k0_3}</td>
-                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k0_3}</td>
+                                            <td className="p-3 text-center font-mono">{eventCounts.k0_3}</td>
                                           </tr>
-                                          <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 4-9</td>
+                                          <tr className="text-[10px] text-stone-500">
+                                            <td className="p-3 pl-8 flex items-center before:content-[''] before:w-2 before:h-px before:bg-stone-300 before:mr-2">Kids 4-9</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k4_9}</td>
-                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k4_9}</td>
+                                            <td className="p-3 text-center font-mono">{eventCounts.k4_9}</td>
                                           </tr>
-                                          <tr className="hover:bg-stone-50">
-                                            <td className="p-3">Kids 10+</td>
+                                          <tr className="text-[10px] text-stone-500">
+                                            <td className="p-3 pl-8 flex items-center before:content-[''] before:w-2 before:h-px before:bg-stone-300 before:mr-2">Kids 10+</td>
                                             <td className="p-3 text-center font-mono">{preEventCounts.k10}</td>
-                                            <td className="p-3 text-center font-mono text-[#0f4c2a]">{eventCounts.k10}</td>
+                                            <td className="p-3 text-center font-mono">{eventCounts.k10}</td>
                                           </tr>
                                           <tr className="bg-stone-100 border-t-2 border-stone-200">
-                                            <td className="p-3 font-black uppercase tracking-wider">Total</td>
+                                            <td className="p-3 font-black uppercase tracking-wider">Total Headcount</td>
                                             <td className="p-3 text-center font-mono font-black">{preTotal}</td>
                                             <td className="p-3 text-center font-mono font-black text-[#0f4c2a]">{eventTotal}</td>
                                           </tr>
@@ -9523,10 +9530,17 @@ const handleDownloadPDF = () => {
                               <div className="flex items-center space-x-1 min-w-max pb-px">
                                 <button
                                   type="button"
+                                  onClick={() => setGamesTab('teams')}
+                                  className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all cursor-pointer ${gamesTab === 'teams' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                                >
+                                  Team Management
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setGamesTab('reports')}
                                   className={`px-4 py-2 text-[10px] font-black uppercase tracking-wider rounded-t-xl transition-all cursor-pointer ${gamesTab === 'reports' ? 'bg-[#0f4c2a] text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
                                 >
-                                  Age-Bracket Reports
+                                  Report
                                 </button>
                                 <button
                                   type="button"
@@ -9538,13 +9552,21 @@ const handleDownloadPDF = () => {
                               </div>
                             </div>
 
+                            {gamesTab === 'teams' && (
+                              <TeamManagementWorkspace
+                                activeEvent={activeEvent}
+                                registrations={registrations}
+                                families={families}
+                                familyMembers={familyMembers}
+                              />
+                            )}
+
                             {gamesTab === 'reports' && (
-                              <AgeBracketFamilyReport
+                              <TeamReportWorkspace
                                 activeEvent={activeEvent}
                                 registrations={registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved')}
                                 families={families}
                                 familyMembers={familyMembers}
-                                sourceContext="games"
                               />
                             )}
                           </div>

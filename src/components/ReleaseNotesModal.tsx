@@ -19,6 +19,19 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.7.0",
+    title: "FINAL MYGMK RELEASE: Kids Reporting, Phone Search & Event Scanner Enhancements",
+    releaseDate: new Date().toISOString().split('T')[0],
+    author: "Core Platform Team",
+    notes: [
+      "Games/Sports KIDS Report — ALL AGES option added. Displays all kids instantly without requiring age range inputs, while preserving existing configured custom bracket groupings.",
+      "Admin Residents — Phone-number search capability introduced. Search and filter residents seamlessly using their stored phone numbers, handling varied formatting patterns automatically.",
+      "Event Scanner — Improved SELECT button UI styling in the search results to use a strong green primary-action visual treatment matching the CHECK IN button.",
+      "Admin duplicate footer correction — Removed the duplicate 'GMK Governance Console' version string to strictly show the 'Resident Administration Portal' footprint when viewing the resident administration dashboard.",
+      "Games/Sports event-scoped team stability — Validated event-scoped team isolation and comprehensive family-lock mechanisms preventing cross-team duplication."
+    ]
+  },
+  {
     version: "v1.6.4",
     title: "Event Scanner, Family Search, External Guests & WhatsApp Dispatch Hotfixes",
     releaseDate: new Date().toISOString().split('T')[0],
@@ -401,7 +414,7 @@ export default function ReleaseNotesModal({ isOpen, onClose }: ReleaseNotesModal
             const idx = list.findIndex(item => item.version === dn.version);
             if (idx === -1) {
               list.push(dn);
-            } else if (dn.version === "v1.6.4" || dn.version === "v1.6.3" || dn.version === "v1.6.2" || dn.version === "v1.6.1") {
+            } else if (dn.version === "v1.7.0" || dn.version === "v1.6.4" || dn.version === "v1.6.3" || dn.version === "v1.6.2" || dn.version === "v1.6.1") {
               list[idx] = dn;
             }
             const docId = dn.version.replace(/\./g, '_');

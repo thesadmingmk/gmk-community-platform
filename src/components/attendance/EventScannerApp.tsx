@@ -655,7 +655,7 @@ export default function EventScannerApp() {
                     <div className="text-xs text-stone-500 font-bold uppercase tracking-wider mt-0.5 mb-0.5">{displayCategory}</div>
                     <div className="text-xs text-emerald-600 font-black uppercase tracking-wider">{gmkId}</div>
                   </div>
-                  <div className="bg-stone-100 px-4 py-2 rounded-xl text-[10px] font-black text-stone-600 uppercase tracking-widest group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
+                  <div className="bg-[#0f4c2a] px-5 py-2.5 rounded-xl text-[11px] font-black text-white uppercase tracking-widest group-active:bg-[#0c3e22] transition-colors shadow-sm">
                     Select
                   </div>
                 </button>

@@ -2813,14 +2813,16 @@ export default function SuperAdminDashboard({ activeEmail }: { activeEmail: stri
         )}
         
         {/* Unified Platform Version Footer */}
-        <div className="pt-8 border-t border-stone-200 text-center text-xs font-sans text-stone-500 mt-8 space-y-1">
-          <div>
-            GMK Governance Console • Developed by Elite IT
+        {activeTab !== 'administration' && (
+          <div className="pt-8 border-t border-stone-200 text-center text-xs font-sans text-stone-500 mt-8 space-y-1">
+            <div>
+              GMK Governance Console • Developed by Elite IT
+            </div>
+            <div>
+              Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.7.0 (Release Notes)</button>
+            </div>
           </div>
-          <div>
-            Platform Version: <button type="button" onClick={() => setIsReleaseModalOpen(true)} className="font-extrabold text-[#0f4c2a] hover:text-[#125831] underline cursor-pointer">v1.6.3 (Release Notes)</button>
-          </div>
-        </div>
+        )}
       </div>
 
       <ReleaseNotesModal isOpen={isReleaseModalOpen} onClose={() => setIsReleaseModalOpen(false)} />

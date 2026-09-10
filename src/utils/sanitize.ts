@@ -1,4 +1,16 @@
 /**
+ * Normalizes a WhatsApp phone number to the canonical format:
+ * - Digits only
+ * - International country code included (e.g. 968...)
+ * - NO leading "+"
+ * - NO spaces, hyphens, brackets
+ */
+export function normalizeWhatsAppNumber(phone: string | undefined | null): string {
+  if (!phone) return "";
+  return phone.trim().replace(/\D/g, "");
+}
+
+/**
  * Global Firestore payload sanitizer to prevent "WriteBatch.set() called with invalid data. Unsupported field value: undefined" errors.
  * 
  * Rules:
@@ -98,7 +110,11 @@ export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T):
     } else if (typeof value === 'object') {
       result[key] = sanitizeFirestorePayload(value);
     } else {
-      result[key] = value;
+      if (key === 'whatsAppNumber' && typeof value === 'string') {
+        result[key] = normalizeWhatsAppNumber(value);
+      } else {
+        result[key] = value;
+      }
     }
   }
 

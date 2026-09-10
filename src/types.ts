@@ -523,6 +523,25 @@ export interface EventProgram {
   expenses?: EventCommitteeExpense[];
 }
 
+export interface EventTeam {
+  id: string; // team_uuid
+  eventId: string;
+  teamName: string;
+  captain: {
+    name: string;
+    gmkId: string; // The display GMK ID / public Reference
+    registrationId: string; // the actual registration doc id
+  };
+  members: Array<{
+    name: string;
+    relationship: string;
+    gmkId: string;
+    registrationId: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface EventScanner {
   id: string;
   name: string;

@@ -84,8 +84,9 @@ export default function RegistrationManagementWorkspace({ eventId, activeEvent, 
       if (st === 'refunded' || isArchived) return false;
       
       // Status filter
-      if (filterStatus === 'active' && (st === 'cancelled')) return false;
-      if (filterStatus === 'cancelled' && st !== 'cancelled') return false;
+      const isActuallyCancelled = reg.paymentStatus === 'cancelled' || reg.adminReviewStatus === 'rejected';
+      if (filterStatus === 'active' && isActuallyCancelled) return false;
+      if (filterStatus === 'cancelled' && !isActuallyCancelled) return false;
       
       // Finance
       const hasFin = hasGenuineFinancialHistory(reg);
@@ -475,9 +476,10 @@ export default function RegistrationManagementWorkspace({ eventId, activeEvent, 
                       <span className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${
                         reg.isOperationalCleanedUp ? 'bg-stone-100 text-stone-500 border-stone-300' :
                         (reg.workflowStatus === 'cancelled' || reg.paymentStatus === 'cancelled') ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                        (reg.isExternal && reg.adminReviewStatus === 'pending') ? 'bg-amber-50 text-amber-700 border-amber-200' :
                         'bg-stone-800 text-white border-stone-800'
                       }`}>
-                        {reg.isOperationalCleanedUp ? 'Archived' : (reg.workflowStatus === 'cancelled' || reg.paymentStatus === 'cancelled') ? 'Cancelled' : 'Active'}
+                        {reg.isOperationalCleanedUp ? 'Archived' : (reg.workflowStatus === 'cancelled' || reg.paymentStatus === 'cancelled') ? 'Cancelled' : (reg.isExternal && reg.adminReviewStatus === 'pending') ? 'Pending' : 'Active'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">

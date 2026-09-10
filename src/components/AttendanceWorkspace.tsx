@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { CommunityEvent, EventRegistration, Family, FamilyMember, EventAttendance } from '../types';
 import { CheckCircle, XCircle, Search, QrCode, AlertTriangle, FileText, Download, Users, FileSpreadsheet, X, Mail, Send, RefreshCw, Check, Clock, AlertCircle, Filter, CheckSquare, MessageSquare } from 'lucide-react';
 import { db, auth, functions } from '../context/AuthContext';
-import { doc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, runTransaction, query, collection, where, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,6 +18,7 @@ import { EntryPassEmailCard } from './attendance/EntryPassEmailCard';
 import { EntryPassWhatsAppCard } from './attendance/EntryPassWhatsAppCard';
 import { getRecipientEmail } from '../utils/entryPassEmailHelper';
 import { formatPhoneWithCountryCode } from '../utils/phoneValidation';
+import { classifyParticipantAge } from '../utils/attendanceAgeClassification';
 import { 
   processFamilyCheckInCompletion, 
   evaluateFamilyRegistrationParticipants, 
@@ -96,6 +97,19 @@ export default function AttendanceWorkspace({
     unitNumber: string;
   }>>([]);
   const [hasSearchedName, setHasSearchedName] = useState(false);
+
+  // Team tracking for attendance reports
+  const [teams, setTeams] = useState<any[]>([]);
+  useEffect(() => {
+    if (!activeEvent?.id) return;
+    const q = query(collection(db, 'eventTeams'), where('eventId', '==', activeEvent.id));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      setTeams(list);
+    });
+    return () => unsub();
+  }, [activeEvent?.id]);
 
   const handleScan = (detectedCodes: any[]) => {
     if (detectedCodes && detectedCodes.length > 0) {
@@ -540,6 +554,7 @@ export default function AttendanceWorkspace({
   });
 
   const getAttendanceStatus = (reg: EventRegistration) => {
+    const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
     const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || formatExternalGmkId(reg.publicReference) || reg.publicReference || reg.id.split('_')?.[1] || reg.id;
     const att = attendances.find(a => (a as any).primaryMemberGmkId === gmkId || a.id === `att_${gmkId}_${activeEvent.id}`);
     
@@ -547,7 +562,14 @@ export default function AttendanceWorkspace({
     
     const arrivedDetails = (att as any).arrivedDetails || [];
     const arrivedNames = arrivedDetails.map((d: any) => d.name);
-    let attTotal = arrivedNames.length > 0 ? arrivedNames.length : ((att as any).totalAttended || (att as any).totalParticipants || 0);
+    const activeCheckedInCount = arrivedDetails.length;
+    
+    let eligibleCount = reg.totalParticipants || 0;
+    if (!isExt) {
+      const evalResult = evaluateFamilyRegistrationParticipants(reg, arrivedDetails, families, familyMembers);
+      eligibleCount = evalResult.eligibleParticipants.length;
+    }
+
     const completionEmailSent = !!(
       att.completionEmailSentAt || 
       att.familyCompletionEmailSent || 
@@ -557,13 +579,15 @@ export default function AttendanceWorkspace({
       reg.familyCompletionEmailSent
     );
     
-    if (att.status === 'attended' || att.status === 'checked_in' || attTotal > 0) {
-      if (attTotal > 0 && attTotal < (reg.totalParticipants || 0)) {
-         return { label: `${attTotal} / ${reg.totalParticipants} CHECKED IN`, color: 'bg-amber-100 text-amber-800', checkedIn: false, partially: true, att, arrivedNames, completionEmailSent };
-      }
-      return { label: 'FULLY ENTERED', color: 'bg-emerald-100 text-emerald-800', checkedIn: true, partially: false, att, arrivedNames, completionEmailSent };
+    if (activeCheckedInCount === 0) {
+      return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att, arrivedNames: [], completionEmailSent };
     }
-    return { label: 'NOT CHECKED IN', color: 'bg-stone-100 text-stone-600', checkedIn: false, partially: false, att, arrivedNames: [], completionEmailSent };
+    
+    if (activeCheckedInCount < eligibleCount) {
+       return { label: `${activeCheckedInCount} / ${eligibleCount} CHECKED IN`, color: 'bg-amber-100 text-amber-800', checkedIn: false, partially: true, att, arrivedNames, completionEmailSent };
+    }
+    
+    return { label: 'FULLY CHECKED IN', color: 'bg-emerald-100 text-emerald-800', checkedIn: true, partially: false, att, arrivedNames, completionEmailSent };
   };
 
   const getIndividualAttendanceData = () => {
@@ -571,6 +595,7 @@ export default function AttendanceWorkspace({
       gmkId: string;
       name: string;
       relationship: string;
+      teamName: string;
       checkInDate: string;
       checkInTime: string;
       status: 'Checked In' | 'Not Checked In';
@@ -582,8 +607,18 @@ export default function AttendanceWorkspace({
       const stat = getAttendanceStatus(reg);
       const arrivedDetails: Array<{ name: string; arrivedAt?: string; scannedBy?: string; category?: string }> = (stat.att as any)?.arrivedDetails || [];
 
+      // Find team for this registration
+      let assignedTeamName = '-';
+      const teamMatch = teams.find(t => 
+        (t.captain?.registrationId === reg.id) || 
+        (t.members || []).some((m: any) => m.registrationId === reg.id)
+      );
+      if (teamMatch) {
+        assignedTeamName = teamMatch.teamName;
+      }
+
       if (!isExt) {
-        // Resident registration: strictly include GMK Member, Spouse, Children. Explicitly exclude Parents, Relatives, Others.
+        // Resident registration: include GMK Member, Spouse, Children, Parents, Others.
         const evalResult = evaluateFamilyRegistrationParticipants(reg, arrivedDetails, families, familyMembers);
 
         evalResult.allParticipants.forEach(p => {
@@ -606,14 +641,14 @@ export default function AttendanceWorkspace({
             }
           }
 
-          // EXPLICITLY EXCLUDE Parents, Relatives, Others
+          // Explicit exclusion removed. Now includes Parents and Others.
           if (!isEligible) {
             return;
           }
 
           const arrival = arrivedDetails.find(a => a.name && a.name.trim().toLowerCase() === p.name.trim().toLowerCase());
-          const isCheckedIn = !!arrival;
-          const arrivalTimestamp = arrival?.arrivedAt;
+          const isCheckedIn = !!arrival || p.isCheckedIn;
+          const arrivalTimestamp = arrival?.arrivedAt || p.arrivedAt;
 
           let checkInDate = '-';
           let checkInTime = '-';
@@ -628,6 +663,7 @@ export default function AttendanceWorkspace({
             gmkId: displayGmk,
             name: p.name,
             relationship,
+            teamName: assignedTeamName,
             checkInDate,
             checkInTime,
             status: isCheckedIn ? 'Checked In' : 'Not Checked In'
@@ -639,6 +675,7 @@ export default function AttendanceWorkspace({
         const { adults, children } = getParticipantDetails(reg);
         const allExt = [...adults, ...children];
         const extCategory = reg.externalRegistrationTypeName || reg.category || 'External Guest';
+        const recordedExtNames = new Set<string>();
 
         allExt.forEach(p => {
           const arrival = arrivedDetails.find(a => a.name && a.name.trim().toLowerCase() === p.name.trim().toLowerCase());
@@ -663,10 +700,38 @@ export default function AttendanceWorkspace({
             gmkId: displayGmk,
             name: p.name,
             relationship: extRelationship,
+            teamName: assignedTeamName,
             checkInDate,
             checkInTime,
             status: isCheckedIn ? 'Checked In' : 'Not Checked In'
           });
+          recordedExtNames.add(p.name.trim().toLowerCase());
+        });
+
+        // Also check any arrivals in arrivedDetails not listed in allExt
+        arrivedDetails.forEach(arrival => {
+          if (!arrival || !arrival.name) return;
+          const aLower = arrival.name.trim().toLowerCase();
+          if (!recordedExtNames.has(aLower)) {
+            const arrivalTimestamp = arrival.arrivedAt;
+            let checkInDate = '-';
+            let checkInTime = '-';
+            if (arrivalTimestamp) {
+              const rawDate = formatCheckInDate(arrivalTimestamp);
+              checkInDate = rawDate ? rawDate.replace(/ /g, '-') : '-';
+              checkInTime = formatCheckInTimeHHMMSS(arrivalTimestamp);
+            }
+            records.push({
+              gmkId: displayGmk,
+              name: arrival.name,
+              relationship: extCategory,
+              teamName: assignedTeamName,
+              checkInDate,
+              checkInTime,
+              status: 'Checked In'
+            });
+            recordedExtNames.add(aLower);
+          }
         });
       }
     });
@@ -868,6 +933,7 @@ export default function AttendanceWorkspace({
       r.gmkId,
       r.name,
       r.relationship,
+      r.teamName,
       r.checkInDate,
       r.checkInTime,
       r.status
@@ -875,7 +941,7 @@ export default function AttendanceWorkspace({
 
     autoTable(doc, {
       startY: 48,
-      head: [['#', 'GMK ID', 'Participant Name', 'Relationship', 'Check-in Date', 'Check-in Time', 'Status']],
+      head: [['#', 'GMK ID', 'Participant Name', 'Relationship', 'Team', 'Check-in Date', 'Check-in Time', 'Status']],
       body: tableData,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [15, 76, 42] }
@@ -896,6 +962,7 @@ export default function AttendanceWorkspace({
       'GMK ID': r.gmkId,
       'Participant Name': r.name,
       'Relationship': r.relationship,
+      'Team Name': r.teamName,
       'Check-in Date': r.checkInDate === '-' ? '' : r.checkInDate,
       'Check-in Time': r.checkInTime === '-' ? '' : r.checkInTime,
       'Attendance Status': r.status
@@ -1379,12 +1446,33 @@ export default function AttendanceWorkspace({
         let totalAttendees = 0;
         let totalAdults = 0;
         let totalChildren = 0;
+        
+        let totalAdultsCheckedIn = 0;
+        let totalChildrenCheckedIn = 0;
+        let totalPeopleCheckedIn = 0;
 
         validRegs.forEach(reg => {
           const stat = getAttendanceStatus(reg);
           if (stat.checkedIn) totalCheckedIn++;
           else if (stat.partially) totalPartially++;
           else totalNotChecked++;
+
+          const arrivedDetails: any[] = (stat.att as any)?.arrivedDetails || [];
+          arrivedDetails.forEach(d => {
+            if (!d || !d.name) return;
+            const ageInfo = classifyParticipantAge({
+              name: d.name,
+              reg,
+              familyMembers,
+              families
+            });
+            if (ageInfo.isChild) {
+              totalChildrenCheckedIn++;
+            } else {
+              totalAdultsCheckedIn++;
+            }
+            totalPeopleCheckedIn++;
+          });
 
           const { adultsCount, childrenCount } = getCounts(reg);
           totalAttendees += reg.totalParticipants || 0;
@@ -1452,18 +1540,39 @@ export default function AttendanceWorkspace({
               <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl flex flex-col justify-center items-center text-center">
                 <span className="text-[10px] text-stone-500 font-black uppercase tracking-wider mb-1 block">Total Eligible</span>
                 <span className="text-2xl font-black text-stone-900">{validRegs.length}</span>
+                <span className="text-[9px] text-stone-400 font-bold uppercase tracking-wider mt-1 block">Registrations</span>
               </div>
               <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col justify-center items-center text-center">
                 <span className="text-[10px] text-emerald-700 font-black uppercase tracking-wider mb-1 block">Checked In</span>
                 <span className="text-2xl font-black text-emerald-700">{totalCheckedIn}</span>
+                <span className="text-[9px] text-emerald-600/70 font-bold uppercase tracking-wider mt-1 block">Registrations</span>
               </div>
               <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col justify-center items-center text-center">
                 <span className="text-[10px] text-amber-700 font-black uppercase tracking-wider mb-1 block">Partially</span>
                 <span className="text-2xl font-black text-amber-700">{totalPartially}</span>
+                <span className="text-[9px] text-amber-600/70 font-bold uppercase tracking-wider mt-1 block">Registrations</span>
               </div>
               <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col justify-center items-center text-center">
                 <span className="text-[10px] text-rose-700 font-black uppercase tracking-wider mb-1 block">Not Checked In</span>
                 <span className="text-2xl font-black text-rose-700">{totalNotChecked}</span>
+                <span className="text-[9px] text-rose-600/70 font-bold uppercase tracking-wider mt-1 block">Registrations</span>
+              </div>
+            </div>
+
+            {/* PEOPLE ATTENDANCE SUMMARY CARDS */}
+            <h3 className="text-[11px] font-black text-stone-500 uppercase tracking-wider mt-8 mb-4 border-b border-stone-100 pb-2">People Attendance Summary</h3>
+            <div className="grid grid-cols-3 md:grid-cols-3 gap-3">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col justify-center items-center text-center">
+                <span className="text-[10px] text-emerald-700 font-black uppercase tracking-wider mb-1 block">Adults Checked In</span>
+                <span className="text-2xl font-black text-emerald-700">{totalAdultsCheckedIn}</span>
+              </div>
+              <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl flex flex-col justify-center items-center text-center">
+                <span className="text-[10px] text-sky-700 font-black uppercase tracking-wider mb-1 block">Children Checked In</span>
+                <span className="text-2xl font-black text-sky-700">{totalChildrenCheckedIn}</span>
+              </div>
+              <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl flex flex-col justify-center items-center text-center">
+                <span className="text-[10px] text-indigo-700 font-black uppercase tracking-wider mb-1 block">Total People Checked In</span>
+                <span className="text-2xl font-black text-indigo-700">{totalPeopleCheckedIn}</span>
               </div>
             </div>
 
