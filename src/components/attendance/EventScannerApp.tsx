@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, query, where, onSnapshot, doc, getDocs, runTransaction } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../../context/AuthContext';
@@ -147,6 +147,83 @@ export default function EventScannerApp() {
     setErrorMsg('');
   };
 
+  // Participant Details extraction
+  const getParticipantDetails = useCallback((reg: EventRegistration) => {
+    const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || '';
+    
+    const fam = families.find(f => 
+      f.id === reg.familyId || 
+      f.id === `fam_${gmkId}` ||
+      (gmkId && f.primaryMemberGmkId === gmkId) || 
+      (reg.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === reg.primaryMemberEmail.toLowerCase())
+    );
+    
+    const relevantFamilyMembers = familyMembers.filter(m => 
+      m.familyId === reg.familyId || 
+      (fam && m.familyId === fam.id) || 
+      (fam && m.familyId === `fam_${fam.primaryMemberGmkId}`) ||
+      (gmkId && m.familyId === `fam_${gmkId}`)
+    );
+    
+    const primaryMemberName = fam?.fullName || reg.primaryRegistrantName || (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
+    const participants = reg.participants || [];
+    
+    const adults: { name: string, category: string, age: number }[] = [];
+    const children: { name: string, category: string, age: number }[] = [];
+    
+    participants.forEach(rawName => {
+      const name = (rawName || '').trim();
+      if (!name) return;
+      const lower = name.toLowerCase();
+
+      let category = 'Other';
+      const primaryLower = primaryMemberName.trim().toLowerCase();
+      const spouseLower = (fam?.spouseName || '').trim().toLowerCase();
+
+      if (primaryLower && (lower === primaryLower || primaryLower.includes(lower) || lower.includes(primaryLower))) {
+        category = 'GMK Member';
+      } else if ((spouseLower && (lower === spouseLower || spouseLower.includes(lower) || lower.includes(spouseLower))) ||
+        relevantFamilyMembers.some(m => m.relationship === 'spouse' && m.name.trim().toLowerCase() === lower)) {
+        category = 'Spouse';
+      } else if (relevantFamilyMembers.some(m => m.relationship === 'child' && m.name.trim().toLowerCase() === lower)) {
+        category = 'Child';
+      } else if (reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower)) {
+        const detail = reg.participantDetails.find(d => d.name.trim().toLowerCase() === lower);
+        if (detail?.role === 'primary' || detail?.role === 'single') category = 'GMK Member';
+        else if (detail?.role === 'spouse') category = 'Spouse';
+        else if (detail?.role === 'child') category = 'Child';
+        else if (detail?.role === 'parent') category = 'Parent';
+        else category = 'Other';
+      } else if (relevantFamilyMembers.some(m => m.relationship === 'parent' && m.name.trim().toLowerCase() === lower) ||
+        (reg as any).paymentSummary?.parentMembers?.some((p: any) => p.trim().toLowerCase() === lower)) {
+        category = 'Parent';
+      }
+
+      if (category === 'Child') {
+        children.push({ name, category, age: 10 });
+      } else {
+        adults.push({ name, category, age: 30 });
+      }
+    });
+
+    const isExternalGmkId = (id?: string | null) => id ? id.toLowerCase().startsWith('ext-') : false;
+    const isExt = reg.isExternal || isExternalGmkId(reg.publicReference) || isExternalGmkId(reg.primaryMemberGmkId);
+
+    if (isExt) {
+      const externalCount = (reg.totalParticipants || 0) - participants.length;
+      for (let i = 0; i < externalCount; i++) {
+        adults.push({ name: `Guest/External ${i+1}`, category: 'Other', age: 30 });
+      }
+    } else {
+      const explicitExternalCount = (reg as any).paymentSummary?.externalParticipantsCount || 0;
+      for (let i = 0; i < explicitExternalCount; i++) {
+        adults.push({ name: `External Guest ${i+1}`, category: 'Other', age: 30 });
+      }
+    }
+
+    return { adults, children };
+  }, [families, familyMembers]);
+
   // Search Logic
   const searchResults = useMemo(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
@@ -156,52 +233,64 @@ export default function EventScannerApp() {
     // Only search approved non-external, or external if they have GMK ID
     const validRegs = registrations.filter(r => !r.isExternal || r.adminReviewStatus === 'approved');
 
-    return validRegs.filter(r => {
-      const gmkId = getRegistrationDisplayId(r) || r.primaryMemberGmkId || '';
-      
-      const fam = families.find(f => 
-        f.id === r.familyId || 
-        f.id === `fam_${gmkId}` ||
-        (gmkId && f.primaryMemberGmkId === gmkId) || 
-        (r.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === r.primaryMemberEmail.toLowerCase())
-      );
-      
-      const relevantFamilyMembers = familyMembers.filter(m => 
-        m.familyId === r.familyId || 
-        (fam && m.familyId === fam.id) || 
-        (fam && m.familyId === `fam_${fam.primaryMemberGmkId}`) ||
-        (gmkId && m.familyId === `fam_${gmkId}`)
-      );
+    const results: { reg: EventRegistration; displayNames: string; displayCategory: string }[] = [];
 
-      const dispId = gmkId.toLowerCase();
-      const primName = (r.primaryRegistrantName || r.primaryMemberEmail || '').toLowerCase();
-      const famName = (fam?.fullName || '').toLowerCase();
-      const spouseName = (fam?.spouseName || '').toLowerCase();
+    validRegs.forEach(r => {
+      const gmkId = getRegistrationDisplayId(r) || r.primaryMemberGmkId || '';
+      const dispIdLower = gmkId.toLowerCase();
       
-      if (dispId.includes(queryLower) || primName.includes(queryLower) || famName.includes(queryLower) || spouseName.includes(queryLower)) {
-        return true;
+      const { adults, children } = getParticipantDetails(r);
+      const allParticipants = [...adults, ...children];
+      
+      // Match individual names
+      const matchedParticipants = allParticipants.filter(p => p.name.toLowerCase().includes(queryLower));
+      
+      const isGmkIdMatch = dispIdLower.includes(queryLower);
+      
+      if (matchedParticipants.length > 0) {
+        // If names matched, display the exact matched names and their categories
+        const displayNames = matchedParticipants.map(p => p.name).join(', ');
+        const categories = Array.from(new Set(matchedParticipants.map(p => p.category))).join(' / ');
+        
+        results.push({
+          reg: r,
+          displayNames,
+          displayCategory: categories
+        });
+      } else if (isGmkIdMatch) {
+        // If GMK ID matched, fallback to primary member
+        const primaryParticipant = allParticipants.find(p => p.category === 'GMK Member') || allParticipants[0];
+        const fam = families.find(f => f.id === r.familyId || f.id === `fam_${gmkId}`);
+        const fallbackName = primaryParticipant?.name || fam?.fullName || r.primaryRegistrantName || r.primaryMemberEmail || 'GMK Member';
+        const fallbackCategory = primaryParticipant?.category || 'GMK Member';
+
+        results.push({
+          reg: r,
+          displayNames: fallbackName,
+          displayCategory: fallbackCategory
+        });
+      } else {
+        // Last fallback: Family name or email matches
+        const fam = families.find(f => f.id === r.familyId || f.id === `fam_${gmkId}`);
+        const famName = (fam?.fullName || '').toLowerCase();
+        const primEmail = (r.primaryMemberEmail || '').toLowerCase();
+        
+        if (famName.includes(queryLower) || primEmail.includes(queryLower)) {
+          const primaryParticipant = allParticipants.find(p => p.category === 'GMK Member') || allParticipants[0];
+          const fallbackName = primaryParticipant?.name || fam?.fullName || r.primaryRegistrantName || 'GMK Member';
+          const fallbackCategory = primaryParticipant?.category || 'GMK Member';
+          
+          results.push({
+            reg: r,
+            displayNames: fallbackName,
+            displayCategory: fallbackCategory
+          });
+        }
       }
-      
-      // Also search all participants directly
-      const participants = r.participants || [];
-      if (participants.some(p => (p || '').toLowerCase().includes(queryLower))) {
-        return true;
-      }
-      
-      // And Participant Details
-      const participantDetails = r.participantDetails || [];
-      if (participantDetails.some(d => (d.name || '').toLowerCase().includes(queryLower))) {
-        return true;
-      }
-      
-      // And family members (Robust match)
-      if (relevantFamilyMembers.some(m => (m.name || '').toLowerCase().includes(queryLower))) {
-        return true;
-      }
-      
-      return false;
     });
-  }, [searchQuery, registrations, families, familyMembers]);
+
+    return results;
+  }, [searchQuery, registrations, families, getParticipantDetails]);
 
   // Check-In Logic
   const handleCheckIn = async () => {
@@ -313,66 +402,7 @@ export default function EventScannerApp() {
     }
   };
 
-  const getParticipantDetails = (reg: EventRegistration) => {
-    const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || '';
-    
-    const fam = families.find(f => 
-      f.id === reg.familyId || 
-      f.id === `fam_${gmkId}` ||
-      (gmkId && f.primaryMemberGmkId === gmkId) || 
-      (reg.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === reg.primaryMemberEmail.toLowerCase())
-    );
-    
-    const relevantFamilyMembers = familyMembers.filter(m => 
-      m.familyId === reg.familyId || 
-      (fam && m.familyId === fam.id) || 
-      (fam && m.familyId === `fam_${fam.primaryMemberGmkId}`) ||
-      (gmkId && m.familyId === `fam_${gmkId}`)
-    );
-    
-    const primaryMemberName = fam?.fullName || reg.primaryRegistrantName || (reg.primaryMemberEmail ? reg.primaryMemberEmail.split('@')[0] : 'Unknown');
-    const participants = reg.participants || [];
-    
-    const adults: { name: string, category: string, age: number }[] = [];
-    const children: { name: string, category: string, age: number }[] = [];
-    
-    participants.forEach(rawName => {
-      const name = (rawName || '').trim();
-      if (!name) return;
-      const lower = name.toLowerCase();
 
-      let category = 'Other';
-      const primaryLower = primaryMemberName.trim().toLowerCase();
-      const spouseLower = (fam?.spouseName || '').trim().toLowerCase();
-
-      if (primaryLower && (lower === primaryLower || primaryLower.includes(lower) || lower.includes(primaryLower))) {
-        category = 'GMK Member';
-      } else if ((spouseLower && (lower === spouseLower || spouseLower.includes(lower) || lower.includes(spouseLower))) ||
-        relevantFamilyMembers.some(m => m.relationship === 'spouse' && m.name.trim().toLowerCase() === lower)) {
-        category = 'Spouse';
-      } else if (relevantFamilyMembers.some(m => m.relationship === 'child' && m.name.trim().toLowerCase() === lower)) {
-        category = 'Child';
-      } else if (reg.participantDetails?.some(d => d.name.trim().toLowerCase() === lower)) {
-        const detail = reg.participantDetails.find(d => d.name.trim().toLowerCase() === lower);
-        if (detail?.role === 'primary' || detail?.role === 'single') category = 'GMK Member';
-        else if (detail?.role === 'spouse') category = 'Spouse';
-        else if (detail?.role === 'child') category = 'Child';
-        else if (detail?.role === 'parent') category = 'Parent';
-        else category = 'Other';
-      } else if (relevantFamilyMembers.some(m => m.relationship === 'parent' && m.name.trim().toLowerCase() === lower) ||
-        (reg as any).paymentSummary?.parentMembers?.some((p: any) => p.trim().toLowerCase() === lower)) {
-        category = 'Parent';
-      }
-
-      if (category === 'Child') {
-        children.push({ name, category, age: 10 });
-      } else {
-        adults.push({ name, category, age: 30 });
-      }
-    });
-
-    return { adults, children };
-  };
 
   // -------------------------------------------------------------
   // RENDER: LOGIN SCREEN
@@ -610,25 +640,20 @@ export default function EventScannerApp() {
               {searchResults.length} matching residents
             </div>
             
-            {searchResults.map(reg => {
+            {searchResults.map((result, idx) => {
+              const { reg, displayNames, displayCategory } = result;
               const gmkId = getRegistrationDisplayId(reg) || reg.primaryMemberGmkId || reg.id;
-              const fam = families.find(f => 
-                f.id === reg.familyId || 
-                f.id === `fam_${gmkId}` ||
-                (gmkId && f.primaryMemberGmkId === gmkId) || 
-                (reg.primaryMemberEmail && f.primaryMemberEmail?.toLowerCase() === reg.primaryMemberEmail.toLowerCase())
-              );
-              const name = fam ? fam.fullName : (reg.primaryRegistrantName || reg.participants?.[0] || 'GMK Member');
               
               return (
                 <button
-                  key={reg.id}
+                  key={`${reg.id}-${idx}`}
                   onClick={() => setSelectedReg(reg)}
                   className="w-full text-left bg-white border-2 border-stone-100 hover:border-emerald-200 p-5 rounded-2xl flex items-center justify-between active:bg-stone-50 transition-colors group shadow-sm"
                 >
                   <div>
-                    <div className="text-lg font-bold text-stone-900">{name}</div>
-                    <div className="text-xs text-emerald-600 font-black uppercase tracking-wider mt-0.5">{gmkId}</div>
+                    <div className="text-lg font-bold text-stone-900">{displayNames}</div>
+                    <div className="text-xs text-stone-500 font-bold uppercase tracking-wider mt-0.5 mb-0.5">{displayCategory}</div>
+                    <div className="text-xs text-emerald-600 font-black uppercase tracking-wider">{gmkId}</div>
                   </div>
                   <div className="bg-stone-100 px-4 py-2 rounded-xl text-[10px] font-black text-stone-600 uppercase tracking-widest group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
                     Select

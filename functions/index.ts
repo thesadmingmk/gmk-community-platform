@@ -960,9 +960,7 @@ export const processAutomaticWhatsAppEntryPass = onDocumentUpdated({
             type: "body",
             parameters: [
               { type: "text", text: residentName },
-              { type: "text", text: eventName },
-              { type: "text", text: venueName },
-              { type: "text", text: entryPass }
+              { type: "text", text: eventName }
             ]
           }
         ]
@@ -1087,9 +1085,7 @@ export const resendWhatsAppEntryPass = onCall({
           type: "body",
           parameters: [
             { type: "text", text: residentName },
-            { type: "text", text: eventName },
-            { type: "text", text: venueName },
-            { type: "text", text: entryPass }
+            { type: "text", text: eventName }
           ]
         }
       ]

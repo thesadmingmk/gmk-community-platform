@@ -862,9 +862,7 @@ exports.processAutomaticWhatsAppEntryPass = (0, firestore_3.onDocumentUpdated)({
                         type: "body",
                         parameters: [
                             { type: "text", text: residentName },
-                            { type: "text", text: eventName },
-                            { type: "text", text: venueName },
-                            { type: "text", text: entryPass }
+                            { type: "text", text: eventName }
                         ]
                     }
                 ]
@@ -973,9 +971,7 @@ exports.resendWhatsAppEntryPass = (0, https_1.onCall)({
                     type: "body",
                     parameters: [
                         { type: "text", text: residentName },
-                        { type: "text", text: eventName },
-                        { type: "text", text: venueName },
-                        { type: "text", text: entryPass }
+                        { type: "text", text: eventName }
                     ]
                 }
             ]

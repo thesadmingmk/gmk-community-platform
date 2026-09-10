@@ -19,6 +19,18 @@ interface ReleaseNotesModalProps {
 
 const DEFAULT_NOTES: ReleaseNoteItem[] = [
   {
+    version: "v1.6.4",
+    title: "Event Scanner, Family Search, External Guests & WhatsApp Dispatch Hotfixes",
+    releaseDate: new Date().toISOString().split('T')[0],
+    author: "Core Platform Team",
+    notes: [
+      "Event Scanner PIN Flow: Deployed fully-featured unauthenticated /scan PIN workflow. Managed securely by the server, rejecting invalid PINs or inactive scanners, while protecting active endpoints via IP-based rate limiting.",
+      "Family Member Search Precision: Upgraded scanner search to identify specific matching members (spouses, children, or parents) and correctly display the individually matched resident on the result card before transitioning to the complete family-member check-in sheet.",
+      "External Guest Scanner Resolution: Fixed missing external guest resolutions. The Event Scanner now fully resolves explicitly numbered external guests exactly as configured by the registration payment summary, syncing check-ins instantly.",
+      "WhatsApp Entry Pass Parameter Alignment: Synchronized entry-pass Meta WhatsApp API dispatch with the approved 'gmk_entry_pass_ready' template schema (Name, Event, Entry Pass) to immediately resolve #132000 argument mismatch errors across both automated Finance endpoints and manual resend channels."
+    ]
+  },
+  {
     version: "v1.6.3",
     title: "Unified Registration Management, Gate Attendance Search, Entry Pass Dispatch & Reporting Hub",
     releaseDate: "2026-09-08",
@@ -384,12 +396,12 @@ export default function ReleaseNotesModal({ isOpen, onClose }: ReleaseNotesModal
             });
           });
           
-          // Merge with DEFAULT_NOTES to make sure all versions (including updated v1.6.3, v1.6.2, and v1.6.1) are always current
+          // Merge with DEFAULT_NOTES to make sure all versions (including updated v1.6.4, v1.6.3, v1.6.2, and v1.6.1) are always current
           DEFAULT_NOTES.forEach(dn => {
             const idx = list.findIndex(item => item.version === dn.version);
             if (idx === -1) {
               list.push(dn);
-            } else if (dn.version === "v1.6.3" || dn.version === "v1.6.2" || dn.version === "v1.6.1") {
+            } else if (dn.version === "v1.6.4" || dn.version === "v1.6.3" || dn.version === "v1.6.2" || dn.version === "v1.6.1") {
               list[idx] = dn;
             }
             const docId = dn.version.replace(/\./g, '_');

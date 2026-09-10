@@ -1846,15 +1846,20 @@ export default function AttendanceWorkspace({
                                         <span>Sent ✓</span>
                                       </button>
                                     ) : isWaFailed ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => { e.stopPropagation(); handleSendWhatsAppEntryPass(reg); }}
-                                        title={`Failed: ${reg.entryPassWhatsAppLastError}`}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
-                                      >
-                                        <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                                        <span>Failed ⚠</span>
-                                      </button>
+                                      <div className="flex flex-col gap-1 items-start">
+                                        <span title={`Failed: ${reg.entryPassWhatsAppLastError}`} className="inline-flex items-center gap-1 px-2 py-1 bg-rose-50 text-rose-800 border border-rose-200 rounded-lg text-[9px] font-black uppercase tracking-wider">
+                                          <AlertCircle className="w-3 h-3 text-rose-600" />
+                                          Failed ⚠
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); handleSendWhatsAppEntryPass(reg); }}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#25D366] hover:bg-[#1DA851] text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-2xs cursor-pointer"
+                                        >
+                                          <MessageSquare className="w-3.5 h-3.5 text-white" />
+                                          <span>Resend WhatsApp</span>
+                                        </button>
+                                      </div>
                                     ) : isWaPending ? (
                                       <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
                                         <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
